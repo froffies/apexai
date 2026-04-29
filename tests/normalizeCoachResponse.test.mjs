@@ -57,3 +57,19 @@ test("normalizeCoachResponse supports meal and workout updates", () => {
   assert.equal(workoutPayload.actions[0].type, "update_workout_log")
   assert.match(workoutPayload.reply, /updated that workout log/i)
 })
+
+test("normalizeCoachResponse fills an estimated meal source when macros are present", () => {
+  const payload = normalizeCoachResponse({
+    type: "log_meal",
+    food_name: "Eggs fried in butter",
+    calories: 2230,
+    protein_g: 164,
+    carbs_g: 47,
+    fat_g: 236,
+  })
+
+  assert.equal(payload.actions.length, 1)
+  assert.equal(payload.actions[0].type, "log_meal")
+  assert.equal(payload.actions[0].estimated, true)
+  assert.match(payload.actions[0].nutrition_source, /Coach estimate/i)
+})

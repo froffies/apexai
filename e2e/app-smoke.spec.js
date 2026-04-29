@@ -277,6 +277,46 @@ test("logged meals can be edited in place from Nutrition", async ({ page }) => {
   await expect(todayMealsSection.getByText(/520 kcal - 40g protein/i).first()).toBeVisible()
 })
 
+test("coach can save an estimated mixed meal without showing the old skipped warning", async ({ page }) => {
+  await seedOnboardedProfile(page)
+  await page.route("**/api/coach", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        reply: "That meal comes out to roughly 2,517 calories, 210g protein, 35g carbs, and 136g fat. I'll save it as an estimate now.",
+        actions: [
+          {
+            type: "log_meal",
+            food_name: "Eggs fried in butter with rye toast and Vegemite",
+            calories: 2517,
+            protein_g: 210,
+            carbs_g: 35,
+            fat_g: 136,
+            quantity: "1 meal",
+            estimated: true,
+          },
+        ],
+        warnings: [],
+      }),
+    })
+  })
+
+  await page.goto("/Coach")
+  await page.getByPlaceholder(/log bench 80kg for 4 sets of 6/i).fill("yes calculate")
+  await page.getByRole("button", { name: /^Send$/i }).click()
+
+  await expect(page.getByText(/roughly 2,517 calories/i)).toBeVisible()
+  await expect(page.getByText(/skipped one meal log/i)).toHaveCount(0)
+  await expect(page.getByText(/couldn't save that meal yet/i)).toHaveCount(0)
+
+  await page.goto("/Nutrition")
+  const todayMealsSection = page.locator("section").filter({ has: page.getByRole("heading", { name: /today's meals/i }) })
+  await expect(todayMealsSection.getByText("Eggs fried in butter with rye toast and Vegemite")).toBeVisible()
+  await expect(todayMealsSection.getByText(/2517 kcal - 210g protein/i)).toBeVisible()
+  await expect(todayMealsSection.getByText(/Coach estimate from user-described ingredients and amounts/i)).toBeVisible()
+})
+
 test("logged workouts can be edited in place from Workouts and update volume", async ({ page }) => {
   const today = new Date().toISOString().slice(0, 10)
   await seedState(page, {

@@ -45,6 +45,51 @@ function normalizeAction(action) {
   return action && typeof action === "object" && typeof action.type === "string" ? action : null
 }
 
+function hasMealMacros(action) {
+  return ["calories", "protein_g", "carbs_g", "fat_g"].every((key) => Number.isFinite(Number(action?.[key])))
+}
+
+function defaultMealNutritionSource(action) {
+  const explicit = typeof action?.nutrition_source === "string" ? action.nutrition_source.trim() : ""
+  if (explicit) return explicit
+  if (!hasMealMacros(action)) return ""
+  return "Coach estimate from user-described ingredients and amounts"
+}
+
+function defaultMealFoodName(action) {
+  const explicit = typeof action?.food_name === "string" ? action.food_name.trim() : ""
+  if (explicit) return explicit
+  if (!hasMealMacros(action)) return ""
+  return "Estimated mixed meal"
+}
+
+function defaultMealQuantity(action) {
+  if (typeof action?.quantity === "string" && action.quantity.trim()) return action.quantity.trim()
+  if (typeof action?.quantity === "number" && Number.isFinite(action.quantity)) return String(action.quantity)
+  if (!hasMealMacros(action)) return ""
+  return "1 meal"
+}
+
+function normalizeMealAction(action) {
+  if (!action || typeof action !== "object") return action
+
+  if (action.type === "log_meal" || action.type === "update_meal_log") {
+    const nutritionSource = defaultMealNutritionSource(action)
+    const foodName = defaultMealFoodName(action)
+    const quantity = defaultMealQuantity(action)
+    if (!nutritionSource && !foodName && !quantity) return action
+    return {
+      ...action,
+      estimated: action.estimated ?? true,
+      ...(foodName ? { food_name: foodName } : {}),
+      ...(quantity ? { quantity } : {}),
+      ...(nutritionSource ? { nutrition_source: nutritionSource } : {}),
+    }
+  }
+
+  return action
+}
+
 function extractImplicitActions(value) {
   const directAction = normalizeAction(value?.action)
   if (directAction) return [directAction]
@@ -64,7 +109,7 @@ export function normalizeCoachResponse(value) {
   const actions = [
     ...safeArray(value.actions, 8).map(normalizeAction).filter(Boolean),
     ...extractImplicitActions(value),
-  ].slice(0, 8)
+  ].map(normalizeMealAction).slice(0, 8)
 
   const reply = typeof value.reply === "string" && value.reply.trim()
     ? value.reply.trim()

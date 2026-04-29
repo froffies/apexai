@@ -33,6 +33,14 @@ function rankFoodsForTargets(foods, remaining) {
     .sort((left, right) => right.score - left.score)
 }
 
+function nutritionSourceTone(meal) {
+  return meal?.estimated ? "text-amber-700" : "text-emerald-700"
+}
+
+function nutritionSourceLabel(meal) {
+  return meal?.estimated ? "Estimated" : "Verified"
+}
+
 export default function Nutrition() {
   const [profile, setProfile] = useLocalStorage(storageKeys.profile, defaultProfile)
   const [meals, setMeals] = useLocalStorage(storageKeys.meals, starterMeals)
@@ -227,6 +235,7 @@ export default function Nutrition() {
                 <div>
                   <p className="font-semibold text-slate-900">{meal.food_name}</p>
                   <p className="text-sm text-slate-500">{meal.meal_type} - {meal.calories} kcal - {meal.protein_g}g protein</p>
+                  {meal.nutrition_source && <p className={`mt-1 text-sm ${nutritionSourceTone(meal)}`}>{nutritionSourceLabel(meal)}: {meal.nutrition_source}</p>}
                 </div>
                 <div className="flex items-center gap-1">
                   <button type="button" aria-label={`Edit ${meal.food_name}`} onClick={() => setEditingMeal(meal)} className="rounded-xl p-2 text-slate-400 hover:bg-white hover:text-indigo-600">
@@ -261,7 +270,7 @@ export default function Nutrition() {
                 <div>
                   <p className="font-semibold text-slate-900">{meal.food_name}</p>
                   <p className="text-sm text-slate-500">{meal.meal_type} - {meal.calories} kcal - {meal.protein_g}g protein</p>
-                  {meal.nutrition_source && <p className="mt-1 text-sm text-emerald-700">Verified: {meal.nutrition_source}</p>}
+                  {meal.nutrition_source && <p className={`mt-1 text-sm ${nutritionSourceTone(meal)}`}>{nutritionSourceLabel(meal)}: {meal.nutrition_source}</p>}
                 </div>
                 <div className="flex items-center gap-1">
                   <button type="button" aria-label={`Edit ${meal.food_name}`} onClick={() => setEditingMeal(meal)} className="rounded-lg p-2 text-slate-400 hover:bg-white hover:text-indigo-600">

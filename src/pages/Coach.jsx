@@ -135,6 +135,13 @@ function upsertMealEntry(current, nextMeal) {
   return [nextMeal, ...current.filter((meal) => meal.id !== nextMeal.id)]
 }
 
+function resolveMealNutritionSource(action, fallback = "") {
+  const explicit = typeof action?.nutrition_source === "string" ? action.nutrition_source.trim() : ""
+  if (explicit) return explicit
+  if (fallback) return fallback
+  return "Coach estimate from user-described ingredients and amounts"
+}
+
 function replaceWorkoutSessionSets(current, sessionId, nextSets) {
   return [...nextSets, ...current.filter((set) => set.session_id !== sessionId)]
 }
@@ -604,24 +611,24 @@ export default function Coach() {
 
       if (action.type === "log_meal") {
         const hasMacros = [action.calories, action.protein_g, action.carbs_g, action.fat_g].every((value) => Number.isFinite(Number(value)))
-        const hasSource = Boolean(action.nutrition_source)
-        if (!hasMacros || !hasSource) {
-          rejectedActions.push("I skipped one meal log because it did not include verified nutrition data.")
+        if (!hasMacros) {
+          continue
         } else {
+          const nutritionSource = resolveMealNutritionSource(action)
           const mealId = uid("meal")
           setMeals((current) => [
             {
               id: mealId,
               date: action.date || todayISO(),
               meal_type: action.meal_type || "snack",
-              food_name: action.food_name || "Logged meal",
-              quantity: action.quantity || "1 serve",
+              food_name: action.food_name || "Estimated mixed meal",
+              quantity: String(action.quantity || "1 serve"),
               calories: numberOrZero(action.calories),
               protein_g: numberOrZero(action.protein_g),
               carbs_g: numberOrZero(action.carbs_g),
               fat_g: numberOrZero(action.fat_g),
-              estimated: Boolean(action.estimated),
-              nutrition_source: action.nutrition_source,
+              estimated: action.estimated ?? true,
+              nutrition_source: nutritionSource,
               notes: action.message || "Logged by OpenAI coach",
             },
             ...current,
@@ -634,28 +641,28 @@ export default function Coach() {
         const mealId = String(action.meal_id || "").trim()
         const existingMeal = meals.find((meal) => meal.id === mealId)
         const hasMacros = [action.calories, action.protein_g, action.carbs_g, action.fat_g].every((value) => Number.isFinite(Number(value)))
-        const hasSource = Boolean(action.nutrition_source)
         if (!mealId || !existingMeal) {
           rejectedActions.push("I couldn't match that meal correction to a saved log, so I left your nutrition log alone.")
           continue
         }
-        if (!hasMacros || !hasSource) {
+        if (!hasMacros) {
           rejectedActions.push("I need the corrected calories and macros before I can update that meal cleanly.")
           continue
         }
+        const nutritionSource = resolveMealNutritionSource(action, existingMeal.nutrition_source)
 
         const nextMeal = {
           ...existingMeal,
           date: action.date || existingMeal.date,
           meal_type: action.meal_type || existingMeal.meal_type,
           food_name: action.food_name || existingMeal.food_name,
-          quantity: action.quantity || existingMeal.quantity,
+          quantity: String(action.quantity || existingMeal.quantity),
           calories: numberOrZero(action.calories),
           protein_g: numberOrZero(action.protein_g),
           carbs_g: numberOrZero(action.carbs_g),
           fat_g: numberOrZero(action.fat_g),
           estimated: action.estimated ?? existingMeal.estimated,
-          nutrition_source: action.nutrition_source,
+          nutrition_source: nutritionSource,
           notes: action.message || existingMeal.notes,
         }
         setMeals((current) => upsertMealEntry(current, nextMeal))
