@@ -39,6 +39,10 @@ const rateLimitMaxRequests = Number(process.env.RATE_LIMIT_MAX_REQUESTS || (node
 const rateLimitBuckets = new Map()
 const telemetryLogFile = process.env.TELEMETRY_LOG_FILE || path.join(process.cwd(), "server-data", "telemetry.ndjson")
 const telemetryRateLimitMaxRequests = Number(process.env.TELEMETRY_RATE_LIMIT_MAX_REQUESTS || (nodeEnv === "production" ? 300 : 2000))
+const openFoodFactsTimeoutMs = Number(process.env.OPENFOODFACTS_TIMEOUT_MS || 1000)
+const foodLookupCacheTtlMs = Number(process.env.FOOD_LOOKUP_CACHE_TTL_MS || 15 * 60_000)
+const foodLookupCacheMaxEntries = Number(process.env.FOOD_LOOKUP_CACHE_MAX_ENTRIES || 200)
+const foodLookupCache = new Map()
 
 const coachResponseSchema = {
   type: "object",
@@ -459,6 +463,41 @@ function roundMacro(value) {
   return Math.round(safeNumber(value) * 10) / 10
 }
 
+function readFoodLookupCache(cacheKey) {
+  const cached = foodLookupCache.get(cacheKey)
+  if (!cached) return null
+  if (Date.now() - cached.timestamp > foodLookupCacheTtlMs) {
+    foodLookupCache.delete(cacheKey)
+    return null
+  }
+  return cached.value
+}
+
+function writeFoodLookupCache(cacheKey, value) {
+  foodLookupCache.set(cacheKey, { value, timestamp: Date.now() })
+  if (foodLookupCache.size <= foodLookupCacheMaxEntries) return
+  const oldestKey = foodLookupCache.keys().next().value
+  if (oldestKey) foodLookupCache.delete(oldestKey)
+}
+
+async function fetchJsonWithTimeout(url, headers = {}) {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), openFoodFactsTimeoutMs)
+
+  try {
+    const response = await fetch(url, {
+      headers,
+      signal: controller.signal,
+    })
+    if (!response.ok) return null
+    return await response.json()
+  } catch {
+    return null
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
 function buildOpenFoodFactsUrl(query, australiaOnly = true) {
   const url = new URL("https://world.openfoodfacts.org/cgi/search.pl")
   url.searchParams.set("search_terms", query)
@@ -498,6 +537,40 @@ function extractCoachFoodSearchTerms(message) {
     .map((term) => term.trim())
     .filter((term) => term.length >= 2)
     .slice(0, 4)
+}
+
+function isLikelyCoachFoodTurn(message, recentMessages = []) {
+  const text = cleanLookupText(message)
+  if (!text) return false
+  if (extractCoachFoodSearchTerms(message).length) return true
+  if (!/\b(yes|yeah|yep|correct|used|with|without|fried|baked|boiled|grilled|toasted|calculate|macro|macros|log it|save it|that|it was|the meal)\b/.test(text)) {
+    return false
+  }
+  return safeArray(recentMessages, 6).some((entry) => entry?.role === "user" && extractCoachFoodSearchTerms(entry.content).length)
+}
+
+function isDetailedMixedMeal(message) {
+  const text = cleanLookupText(message)
+  const terms = extractCoachFoodSearchTerms(message)
+  return terms.length >= 2 && /\b\d/.test(text) && /\b(and|with|plus|also)\b/.test(text)
+}
+
+function shouldHydrateCoachFoodMatches(message, recentMessages = []) {
+  if (!isLikelyCoachFoodTurn(message, recentMessages)) return false
+  if (looksLikeBarcode(message)) return true
+  return !isDetailedMixedMeal(message)
+}
+
+function buildCoachCandidateFoodTerms(message, recentMessages = []) {
+  const currentTerms = extractCoachFoodSearchTerms(message)
+  const recentTerms = currentTerms.length >= 2
+    ? []
+    : safeArray(recentMessages, 6)
+      .filter((entry) => entry?.role === "user")
+      .slice(-2)
+      .flatMap((entry) => extractCoachFoodSearchTerms(entry.content))
+
+  return [...new Set([...currentTerms, ...recentTerms])].slice(0, 2)
 }
 
 function normalizeOpenFoodFactsProducts(products) {
@@ -546,30 +619,26 @@ async function handleCoach(request, response) {
     return
   }
 
-  const candidateFoodTerms = [...new Set([
-    ...extractCoachFoodSearchTerms(body.message),
-    ...safeArray(body.recentMessages, 10)
-      .filter((message) => message?.role === "user")
-      .slice(-3)
-      .flatMap((message) => extractCoachFoodSearchTerms(message.content)),
-  ])].slice(0, 8)
-
   const candidateFoodMatches = {}
-  for (const term of candidateFoodTerms) {
-    candidateFoodMatches[term] = (await lookupFoodsBroad(term)).slice(0, 6)
+  if (shouldHydrateCoachFoodMatches(body.message, body.recentMessages)) {
+    const candidateFoodTerms = buildCoachCandidateFoodTerms(body.message, body.recentMessages)
+    const foodLookups = await Promise.all(candidateFoodTerms.map(async (term) => [term, (await lookupFoodsBroad(term)).slice(0, 6)]))
+    for (const [term, matches] of foodLookups) {
+      candidateFoodMatches[term] = matches
+    }
   }
 
   const payload = {
     current_date: new Date().toISOString().slice(0, 10),
     user_message: String(body.message || ""),
     profile: body.profile || {},
-    recent_messages: safeArray(body.recentMessages, 10),
-    recent_meals: safeArray(body.meals, 20),
-    recent_workouts: safeArray(body.workouts, 20),
-    recent_workout_sets: safeArray(body.workoutSets, 40),
-    workout_plans: safeArray(body.workoutPlans, 10),
-    meal_plans: safeArray(body.mealPlans, 10),
-    recovery_logs: safeArray(body.recoveryLogs, 10),
+    recent_messages: safeArray(body.recentMessages, 6),
+    recent_meals: safeArray(body.meals, 12),
+    recent_workouts: safeArray(body.workouts, 12),
+    recent_workout_sets: safeArray(body.workoutSets, 24),
+    workout_plans: safeArray(body.workoutPlans, 6),
+    meal_plans: safeArray(body.mealPlans, 6),
+    recovery_logs: safeArray(body.recoveryLogs, 6),
     active_workout: body.activeWorkout || null,
     verified_food_catalogue: verifiedFoods,
     candidate_food_matches: candidateFoodMatches,
@@ -578,6 +647,7 @@ async function handleCoach(request, response) {
 
   const completion = await client.chat.completions.create({
     model,
+    max_completion_tokens: 500,
     response_format: { type: "json_object" },
     messages: [
       { role: "system", content: coachInstructions },
@@ -609,38 +679,47 @@ async function searchOpenFoodFacts(query, { australiaOnly = true } = {}) {
   if (process.env.OPENFOODFACTS_ENABLED === "false" || !query.trim()) return []
 
   const url = buildOpenFoodFactsUrl(query, australiaOnly)
-
-  const apiResponse = await fetch(url, { headers: { "User-Agent": "ApexAI/1.0 nutrition lookup" } })
-  if (!apiResponse.ok) return []
-  const data = await apiResponse.json()
+  const data = await fetchJsonWithTimeout(url, { "User-Agent": "ApexAI/1.0 nutrition lookup" })
+  if (!data) return []
   return normalizeOpenFoodFactsProducts(data.products)
 }
 
 async function searchOpenFoodFactsByBarcode(code) {
   if (process.env.OPENFOODFACTS_ENABLED === "false" || !looksLikeBarcode(code)) return []
-  const response = await fetch(`https://world.openfoodfacts.org/api/v2/product/${String(code).trim()}.json`, {
-    headers: { "User-Agent": "ApexAI/1.0 nutrition lookup" },
+  const data = await fetchJsonWithTimeout(`https://world.openfoodfacts.org/api/v2/product/${String(code).trim()}.json`, {
+    "User-Agent": "ApexAI/1.0 nutrition lookup",
   })
-  if (!response.ok) return []
-  const data = await response.json()
+  if (!data) return []
   if (!data?.product) return []
   const product = normalizeSingleOpenFoodFactsProduct(data.product, "barcode_label")
   return product ? [product] : []
 }
 
 async function lookupFoodsBroad(query) {
-  const barcodeResults = await searchOpenFoodFactsByBarcode(query)
+  const normalizedQuery = String(query || "").trim()
+  if (!normalizedQuery) return []
+
+  const cacheKey = `broad:${cleanLookupText(normalizedQuery)}`
+  const cached = readFoodLookupCache(cacheKey)
+  if (cached) return cached
+
   const localResults = searchVerifiedFoods(query).map(verifiedNutritionResult)
-  const auResults = await searchOpenFoodFacts(query, { australiaOnly: true })
-  const globalResults = auResults.length ? [] : await searchOpenFoodFacts(query, { australiaOnly: false })
+  const barcodeResults = looksLikeBarcode(normalizedQuery) ? await searchOpenFoodFactsByBarcode(normalizedQuery) : []
+  const shouldSkipExternal = localResults.length >= 4
+  const auResults = shouldSkipExternal ? [] : await searchOpenFoodFacts(query, { australiaOnly: true })
+  const globalResults = shouldSkipExternal || auResults.length || localResults.length >= 2
+    ? []
+    : await searchOpenFoodFacts(query, { australiaOnly: false })
 
   const seen = new Set()
-  return [...barcodeResults, ...localResults, ...auResults, ...globalResults].filter((food) => {
+  const results = [...barcodeResults, ...localResults, ...auResults, ...globalResults].filter((food) => {
     const key = food.id || food.name
     if (seen.has(key)) return false
     seen.add(key)
     return true
   })
+  writeFoodLookupCache(cacheKey, results)
+  return results
 }
 
 function extractIngredientTerms(text) {
@@ -720,8 +799,9 @@ async function handleNutritionChef(request, response) {
   const pantry = String(body.pantry || "")
   const ingredientTerms = extractIngredientTerms(pantry)
   const candidateFoodsByTerm = {}
-  for (const term of ingredientTerms) {
-    candidateFoodsByTerm[term] = (await lookupFoodsBroad(term)).slice(0, 6)
+  const foodLookups = await Promise.all(ingredientTerms.map(async (term) => [term, (await lookupFoodsBroad(term)).slice(0, 6)]))
+  for (const [term, matches] of foodLookups) {
+    candidateFoodsByTerm[term] = matches
   }
 
   const payload = {

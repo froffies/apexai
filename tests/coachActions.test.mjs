@@ -3,6 +3,7 @@ import test from "node:test"
 import {
   applyWorkoutPlanEdit,
   buildMealPlan,
+  isProgressionQuestion,
   isMealPlanRequest,
   isShowMealPlanRequest,
   isShowWorkoutRequest,
@@ -81,4 +82,7 @@ test("only app-state-specific coach prompts stay local", () => {
   assert.equal(shouldUseLocalCoach("Meal plan"), false)
   assert.equal(shouldUseLocalCoach("I had vegemite"), false)
   assert.equal(shouldUseLocalCoach("What are three breakfast ideas for me?"), false)
+  assert.equal(shouldUseLocalCoach("5 tins of heinz baked beans and an entire block of chocolate"), false)
+  assert.equal(isProgressionQuestion("What build block am I in?"), true)
+  assert.equal(isProgressionQuestion("I ate a whole block of chocolate"), false)
 })

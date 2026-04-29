@@ -317,6 +317,31 @@ test("coach can save an estimated mixed meal without showing the old skipped war
   await expect(todayMealsSection.getByText(/Coach estimate from user-described ingredients and amounts/i)).toBeVisible()
 })
 
+test("coach sends arbitrary food detail messages to the live coach instead of tripping the local build-block fallback", async ({ page }) => {
+  await seedOnboardedProfile(page)
+  let requestCount = 0
+  await page.route("**/api/coach", async (route) => {
+    requestCount += 1
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        reply: "That whole meal lands at roughly 4,980 calories. I can break it down ingredient by ingredient or save it as one estimate.",
+        actions: [],
+        warnings: [],
+      }),
+    })
+  })
+
+  await page.goto("/Coach")
+  await page.getByPlaceholder(/log bench 80kg for 4 sets of 6/i).fill("5 tins of heinz baked beans, and an entire block of old gold 70% chocolate, also had 2L of fresh squeezed apple juice and ate an entire bunch of celery")
+  await page.getByRole("button", { name: /^Send$/i }).click()
+
+  await expect(page.getByText(/roughly 4,980 calories/i)).toBeVisible()
+  await expect(page.getByText(/^Build block:/i)).toHaveCount(0)
+  expect(requestCount).toBe(1)
+})
+
 test("logged workouts can be edited in place from Workouts and update volume", async ({ page }) => {
   const today = new Date().toISOString().slice(0, 10)
   await seedState(page, {

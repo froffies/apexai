@@ -364,6 +364,15 @@ export function shouldBuildWeeklySchedule(message) {
   return /\b(this week|weekly plan|weekly schedule|schedule my week|reshuffle my week|reshuffle week|plan my week)\b/.test(text)
 }
 
+export function isProgressionQuestion(message) {
+  const text = clean(message)
+  return Boolean(
+    /\b(deload|plateau|plateaued|stalled|stagnant|progression|mesocycle|microcycle)\b/.test(text)
+    || /\b(build block|training block|current block|current phase|what block|which block|what phase|which phase)\b/.test(text)
+    || (/\b(block|phase)\b/.test(text) && /\b(train|training|program|progress|goal|workout|cycle)\b/.test(text))
+  )
+}
+
 export function isWorkoutPlanRequest(message) {
   const text = clean(message)
   return /(?:\b(build|create|make|plan)\b.*\b(workout|session|program|training)\b|\bworkout plan\b|\bcoach workout\b|\bwhat should i train\b|\bi'?m at the gym\b)/.test(text)
@@ -391,7 +400,7 @@ export function shouldUseLocalCoach(message, { activeWorkout = null, todaysPlan 
     || parseRecoveryCheckIn(message)
     || parseActiveWorkoutUpdate(message, activeWorkout)
     || shouldBuildWeeklySchedule(message)
-    || /\b(deload|plateau|plateaued|phase|block|stalled|stagnant|progression)\b/.test(text)
+    || isProgressionQuestion(message)
     || (todaysPlan && parseWorkoutPlanEdit(message, todaysPlan))
     || (activeWorkout?.id && /\b(what'?s next|next set|next exercise|where am i up to)\b/.test(text))
     || isShowWorkoutRequest(message)

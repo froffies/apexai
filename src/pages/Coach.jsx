@@ -11,6 +11,7 @@ import {
   buildRecoveryAdjustedWorkoutPlan,
   buildWeeklyTrainingPlan,
   isMealPlanRequest,
+  isProgressionQuestion,
   isShowMealPlanRequest,
   isShowWorkoutRequest,
   isWorkoutPlanRequest,
@@ -389,7 +390,7 @@ export default function Coach() {
       return appendAssistant(`I rebuilt your next 7 days of training.${weeklyPlan.missedCount ? ` Reshuffled ${weeklyPlan.missedCount} missed session${weeklyPlan.missedCount === 1 ? "" : "s"}.` : ""}\n\n${summary}`, { plan: weeklyPlan.plans[0] || null })
     }
 
-    if (/\b(deload|plateau|plateaued|phase|block|stalled|stagnant|progression)\b/.test(lower)) {
+    if (isProgressionQuestion(content)) {
       const plateauSummary = progressionBlock.plateaus.length
         ? ` Plateau watch: ${progressionBlock.plateaus.map((item) => item.exerciseName).join(", ")}.`
         : ""
@@ -707,14 +708,14 @@ export default function Coach() {
       const coachResponse = await requestOpenAICoach({
         message: content,
         profile,
-        meals: meals.slice(0, 20),
-        workouts: workouts.slice(0, 20),
-        workoutSets: workoutSets.slice(0, 40),
-        workoutPlans: workoutPlans.slice(0, 10),
-        mealPlans: mealPlans.slice(0, 10),
-        recoveryLogs: recoveryLogs.slice(0, 10),
+        meals: meals.slice(0, 12),
+        workouts: workouts.slice(0, 12),
+        workoutSets: workoutSets.slice(0, 24),
+        workoutPlans: workoutPlans.slice(0, 6),
+        mealPlans: mealPlans.slice(0, 6),
+        recoveryLogs: recoveryLogs.slice(0, 6),
         activeWorkout,
-        recentMessages: [...messages, userMessage].slice(-10),
+        recentMessages: [...messages, userMessage].slice(-6),
       })
       if (!coachResponse) {
         const assistantMessage = appendAssistant("I couldn't get a valid response from the live coach, so I didn't log or change anything. Please try again.")

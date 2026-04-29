@@ -23,7 +23,7 @@ export default function NutritionLog() {
         </button>
         <h1 className="text-lg font-semibold text-gray-900">Log Food</h1>
       </div>
-      <MealLogModal defaultMealType={defaultMealType} onClose={handleClose} standalone />
+      <MealLogModal defaultMealType={defaultMealType} onSaved={handleClose} onClose={handleClose} standalone />
     </div>
   );
 }
