@@ -205,6 +205,7 @@ Core rules:
 - A workout plan must include 3-8 exercises. Never return an empty workout plan.
 - A meal plan must include 3-6 meals. Never return an empty meal plan.
 - If the user describes one eating event, default to treating it as one meal. Do not keep asking how many servings unless they explicitly say they cooked a batch, want portions split, or ask for per-serving macros.
+- If the user explicitly provides ingredient amounts and asks you to log, track, save, or add the meal, treat those amounts as final unless there is a real contradiction. Do not ask redundant confirmation questions about one vs two slices, one vs two servings, or similar when the prompt already states the amount.
 - If the user is greeting you or making small talk, reply naturally and return no plan actions.
 - If the user asks to plan the week, map the training week. Do not substitute a blank single workout card.
 - Nutrition must not be guessed. Use foods from verified_food_catalogue or exact macros from the user.
@@ -213,6 +214,7 @@ Core rules:
 - Only emit log_meal when you have enough detail and a credible nutrition source. Otherwise, reply with a clarifying question and no log action yet.
 - If the user gives ingredient amounts for a whole meal and asks for calories or macros, calculate the best estimate from the provided foods and amounts instead of asking about servings again.
 - If the user wants that calculated meal saved, emit log_meal with estimated=true and set nutrition_source to "Coach estimate from user-described ingredients and amounts" when an exact verified source is not possible.
+- If the user explicitly asks to log/save/track an estimated mixed meal and provides enough quantities to estimate it, emit log_meal in the same turn instead of asking another confirmation question.
 - When you estimate a described mixed meal from user-provided amounts, make it clear in the reply that it is an estimate, but still log it if the user asked you to save it.
 - For a mixed meal, set food_name to a concise combined label such as "Eggs fried in butter with rye toast and Vegemite" rather than leaving it blank.
 - If the user corrects the amount, serving size, or description of the last meal you logged, treat that as a correction and use update_meal_log instead of logging a duplicate.
@@ -555,6 +557,15 @@ function isDetailedMixedMeal(message) {
   return terms.length >= 2 && /\b\d/.test(text) && /\b(and|with|plus|also)\b/.test(text)
 }
 
+function needsRecentChatContext(message) {
+  const text = cleanLookupText(message)
+  if (!text) return false
+  if (text.length <= 24) return true
+  if (/\b(yes|yeah|yep|no|nah|correct|actually|instead|also|too|same|that|it|them|those|this|there|here|afterward|afterwards|before|used to|save it|log it|update it|fix that)\b/.test(text)) return true
+  if (/\b(where did you log|where was that logged|what's next|whats next|show me that|do that|go ahead)\b/.test(text)) return true
+  return false
+}
+
 function shouldHydrateCoachFoodMatches(message, recentMessages = []) {
   if (!isLikelyCoachFoodTurn(message, recentMessages)) return false
   if (looksLikeBarcode(message)) return true
@@ -628,11 +639,15 @@ async function handleCoach(request, response) {
     }
   }
 
+  const contextualRecentMessages = needsRecentChatContext(body.message)
+    ? safeArray(body.recentMessages, 4)
+    : []
+
   const payload = {
     current_date: new Date().toISOString().slice(0, 10),
     user_message: String(body.message || ""),
     profile: body.profile || {},
-    recent_messages: safeArray(body.recentMessages, 6),
+    recent_messages: contextualRecentMessages,
     recent_meals: safeArray(body.meals, 12),
     recent_workouts: safeArray(body.workouts, 12),
     recent_workout_sets: safeArray(body.workoutSets, 24),
@@ -656,7 +671,7 @@ async function handleCoach(request, response) {
   })
 
   const parsed = JSON.parse(completion.choices[0]?.message?.content || "{}")
-  sendJson(response, 200, normalizeCoachResponse(parsed))
+  sendJson(response, 200, normalizeCoachResponse(parsed, { prompt: body.message, recentMessages: contextualRecentMessages }))
 }
 
 function verifiedNutritionResult(food) {

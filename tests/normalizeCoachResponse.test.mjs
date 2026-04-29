@@ -73,3 +73,101 @@ test("normalizeCoachResponse fills an estimated meal source when macros are pres
   assert.equal(payload.actions[0].estimated, true)
   assert.match(payload.actions[0].nutrition_source, /Coach estimate/i)
 })
+
+test("normalizeCoachResponse repairs a bare meal action from the reply and prompt context", () => {
+  const payload = normalizeCoachResponse({
+    reply: "Your meal of 2 eggs and rye toast comes to about 270 calories, 20g protein, 18g carbs, and 13g fat.",
+    actions: [{ type: "log_meal" }],
+  }, {
+    prompt: "I had 2 eggs and rye toast",
+  })
+
+  assert.equal(payload.actions.length, 1)
+  assert.equal(payload.actions[0].type, "log_meal")
+  assert.equal(payload.actions[0].food_name, "2 eggs and rye toast")
+  assert.equal(payload.actions[0].calories, 270)
+  assert.equal(payload.actions[0].protein_g, 20)
+  assert.equal(payload.actions[0].carbs_g, 18)
+  assert.equal(payload.actions[0].fat_g, 13)
+})
+
+test("normalizeCoachResponse repairs a bare workout plan action from reply text", () => {
+  const payload = normalizeCoachResponse({
+    reply: "Here's a workout plan for today: 1) Barbell squat, 3 sets of 8 reps, 2) Bench press, 3 sets of 8 reps, 3) Bent-over row, 3 sets of 8 reps.",
+    actions: [{ type: "create_workout_plan" }],
+  })
+
+  assert.equal(payload.actions.length, 1)
+  assert.equal(payload.actions[0].type, "create_workout_plan")
+  assert.equal(payload.actions[0].exercises.length, 3)
+  assert.equal(payload.actions[0].exercises[0].name, "Barbell Squat")
+  assert.equal(payload.actions[0].exercises[0].setsReps, "3x8")
+})
+
+test("normalizeCoachResponse infers a workout plan action from a conversational reply", () => {
+  const payload = normalizeCoachResponse({
+    reply: "Let's build you an upper body workout! How about including exercises like bench press, rows, and shoulder presses? Let me know if you want to add or change anything!",
+    actions: [],
+  }, {
+    prompt: "build me a workout for today",
+  })
+
+  assert.equal(payload.actions[0].type, "create_workout_plan")
+  assert.equal(payload.actions[0].exercises.length, 3)
+  assert.equal(payload.actions[0].exercises[0].name, "Bench Press")
+})
+
+test("normalizeCoachResponse parses numbered workout lists from a conversational reply", () => {
+  const payload = normalizeCoachResponse({
+    reply: "Here's a focused workout plan for today: 1. Squats - 3 sets of 8 reps 2. Bench press - 3 sets of 8 reps 3. Bent-over rows - 3 sets of 8 reps 4. Deadlifts - 3 sets of 6 reps.",
+    actions: [],
+  }, {
+    prompt: "build me a workout for today",
+  })
+
+  assert.equal(payload.actions[0].type, "create_workout_plan")
+  assert.equal(payload.actions[0].exercises.length, 4)
+  assert.equal(payload.actions[0].exercises[0].name, "Squats")
+  assert.equal(payload.actions[0].exercises[1].name, "Bench Press")
+})
+
+test("normalizeCoachResponse parses numbered workout lines with parentheses", () => {
+  const payload = normalizeCoachResponse({
+    reply: "Here's a workout for today focusing on muscle gain:\n1. Bench Press (4 sets of 8 reps)\n2. Bent Over Row (4 sets of 8 reps)\n3. Dumbbell Shoulder Press (3 sets of 10 reps)",
+    actions: [],
+  }, {
+    prompt: "build me a workout for today",
+  })
+
+  assert.equal(payload.actions[0].type, "create_workout_plan")
+  assert.equal(payload.actions[0].exercises.length, 3)
+  assert.equal(payload.actions[0].exercises[0].name, "Bench Press")
+  assert.equal(payload.actions[0].exercises[0].setsReps, "4x8")
+})
+
+test("normalizeCoachResponse repairs a bare workout log action from the prompt context", () => {
+  const payload = normalizeCoachResponse({
+    reply: "Nice work on the bench press! I've logged 80kg for 4 sets of 6 reps.",
+    actions: [{ type: "log_workout" }],
+  }, {
+    prompt: "I did bench press 80kg for 4 sets of 6",
+  })
+
+  assert.equal(payload.actions[0].type, "log_workout")
+  assert.equal(payload.actions[0].exercise_name, "Bench Press")
+  assert.equal(payload.actions[0].sets, 4)
+  assert.equal(payload.actions[0].reps, 6)
+  assert.equal(payload.actions[0].weight_kg, 80)
+})
+
+test("normalizeCoachResponse downgrades broken meal logs to a clarifying reply", () => {
+  const payload = normalizeCoachResponse({
+    reply: "It sounds delicious! I'll log your burrito bowl now.",
+    actions: [{ type: "log_meal" }],
+  }, {
+    prompt: "For lunch I ate a burrito bowl with beef rice beans cheese and salsa",
+  })
+
+  assert.equal(payload.actions[0].type, "clarify")
+  assert.match(payload.reply, /need a bit more detail/i)
+})
