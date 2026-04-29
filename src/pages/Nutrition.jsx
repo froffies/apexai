@@ -1,8 +1,9 @@
 import { Suspense, lazy, useMemo, useState } from "react"
 import { Link } from "react-router-dom"
-import { BookOpen, Plus, ShoppingBasket, SlidersHorizontal, Trash2, Utensils } from "lucide-react"
+import { BookOpen, Pencil, Plus, ShoppingBasket, SlidersHorizontal, Trash2, Utensils } from "lucide-react"
 import MacroTargetEditor from "@/components/MacroTargetEditor"
 import MacroRing from "@/components/MacroRing"
+import MealLogModal from "@/components/MealLogModal"
 import PageHeader from "@/components/PageHeader"
 import SectionCard from "@/components/SectionCard"
 import SegmentedControl from "@/components/SegmentedControl"
@@ -40,6 +41,7 @@ export default function Nutrition() {
   const [favoriteFoods] = useLocalStorage(storageKeys.favoriteFoods, [])
   const [recentFoods] = useLocalStorage(storageKeys.recentFoods, [])
   const [editingTargets, setEditingTargets] = useState(false)
+  const [editingMeal, setEditingMeal] = useState(null)
   const [view, setView] = useState("overview")
   const totals = macroTotals(meals, todayISO())
   const todaysMeals = meals.filter((meal) => meal.date === todayISO())
@@ -226,9 +228,14 @@ export default function Nutrition() {
                   <p className="font-semibold text-slate-900">{meal.food_name}</p>
                   <p className="text-sm text-slate-500">{meal.meal_type} - {meal.calories} kcal - {meal.protein_g}g protein</p>
                 </div>
-                <button type="button" aria-label={`Remove ${meal.food_name}`} onClick={() => removeMeal(meal)} className="rounded-xl p-2 text-slate-400 hover:bg-white hover:text-rose-600">
-                  <Trash2 size={16} />
-                </button>
+                <div className="flex items-center gap-1">
+                  <button type="button" aria-label={`Edit ${meal.food_name}`} onClick={() => setEditingMeal(meal)} className="rounded-xl p-2 text-slate-400 hover:bg-white hover:text-indigo-600">
+                    <Pencil size={16} />
+                  </button>
+                  <button type="button" aria-label={`Remove ${meal.food_name}`} onClick={() => removeMeal(meal)} className="rounded-xl p-2 text-slate-400 hover:bg-white hover:text-rose-600">
+                    <Trash2 size={16} />
+                  </button>
+                </div>
               </div>
             ))}
             {!todaysMeals.length && <p className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-500">No meals logged for today.</p>}
@@ -256,9 +263,14 @@ export default function Nutrition() {
                   <p className="text-sm text-slate-500">{meal.meal_type} - {meal.calories} kcal - {meal.protein_g}g protein</p>
                   {meal.nutrition_source && <p className="mt-1 text-sm text-emerald-700">Verified: {meal.nutrition_source}</p>}
                 </div>
-                <button type="button" aria-label={`Remove ${meal.food_name}`} onClick={() => removeMeal(meal)} className="rounded-lg p-2 text-slate-400 hover:bg-white hover:text-rose-600">
-                  <Trash2 size={16} />
-                </button>
+                <div className="flex items-center gap-1">
+                  <button type="button" aria-label={`Edit ${meal.food_name}`} onClick={() => setEditingMeal(meal)} className="rounded-lg p-2 text-slate-400 hover:bg-white hover:text-indigo-600">
+                    <Pencil size={16} />
+                  </button>
+                  <button type="button" aria-label={`Remove ${meal.food_name}`} onClick={() => removeMeal(meal)} className="rounded-lg p-2 text-slate-400 hover:bg-white hover:text-rose-600">
+                    <Trash2 size={16} />
+                  </button>
+                </div>
               </div>
             ))}
             {!todaysMeals.length && <p className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-500">No meals logged for today.</p>}
@@ -315,6 +327,21 @@ export default function Nutrition() {
       )}
 
       {editingTargets && <MacroTargetEditor profile={profile} onSave={(targets) => setProfile((current) => ({ ...current, ...targets }))} onClose={() => setEditingTargets(false)} />}
+      {editingMeal && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-black/40 p-4">
+          <div className="mx-auto max-w-3xl">
+            <MealLogModal
+              existingMeal={editingMeal}
+              onSaved={(nextMeal) => {
+                setMeals((current) => current.some((meal) => meal.id === nextMeal.id)
+                  ? current.map((meal) => meal.id === nextMeal.id ? nextMeal : meal)
+                  : [nextMeal, ...current])
+              }}
+              onClose={() => setEditingMeal(null)}
+            />
+          </div>
+        </div>
+      )}
     </div>
   )
 }

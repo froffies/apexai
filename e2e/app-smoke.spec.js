@@ -43,6 +43,12 @@ function primaryNav(page) {
   return page.locator("nav[aria-label='Primary sidebar links']:visible, nav[aria-label='Primary tabs']:visible").first()
 }
 
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    window.localStorage.setItem("apexai.localMode", "true")
+  })
+})
+
 test("onboarding text and numeric fields accept edits", async ({ page }) => {
   await page.goto("/onboarding")
 
@@ -81,6 +87,48 @@ test("finishing onboarding exits cleanly to the home dashboard", async ({ page }
   await expect(page.getByRole("heading", { name: /today's overview/i })).toBeVisible()
 })
 
+test("onboarding review explains the target method and offers optional starter plan choices", async ({ page }) => {
+  await page.goto("/onboarding")
+
+  await page.getByLabel("Name").fill("Casey")
+  await page.getByLabel("Age").fill("31")
+  await page.getByLabel("Weight kg").fill("84")
+  await page.getByLabel("Height cm").fill("179")
+  await page.getByRole("button", { name: /continue/i }).click()
+
+  await page.getByLabel("Training days").fill("4")
+  await page.getByRole("radio", { name: /muscle gain/i }).click()
+  await page.getByRole("button", { name: /review plan/i }).click()
+
+  await expect(page.getByRole("heading", { name: /your starting plan/i })).toBeVisible()
+  await expect(page.getByRole("heading", { name: /mifflin-st jeor starting estimate/i })).toBeVisible()
+  await expect(page.getByText(/bmi is shown for context only/i)).toBeVisible()
+  await expect(page.getByRole("heading", { name: /choose how you want week one to start/i })).toBeVisible()
+  await expect(page.getByRole("heading", { name: /choose the first food structure you want to follow/i })).toBeVisible()
+  await expect(page.getByRole("button", { name: /decide later/i })).toHaveCount(2)
+})
+
+test("onboarding can skip starter workout and nutrition plans while still saving the profile", async ({ page }) => {
+  await page.goto("/onboarding")
+
+  await page.getByLabel("Name").fill("Casey")
+  await page.getByLabel("Age").fill("31")
+  await page.getByLabel("Weight kg").fill("84")
+  await page.getByLabel("Height cm").fill("179")
+  await page.getByRole("button", { name: /continue/i }).click()
+
+  await page.getByLabel("Training days").fill("4")
+  await page.getByLabel("Target weight kg").fill("78")
+  await page.getByRole("button", { name: /review plan/i }).click()
+
+  await page.getByRole("button", { name: /decide later/i }).first().click()
+  await page.getByRole("button", { name: /decide later/i }).last().click()
+  await page.getByRole("button", { name: /save profile and enter dashboard/i }).click()
+
+  await expect(page).toHaveURL(/\/$/)
+  await expect(page.getByRole("heading", { name: /today's overview/i })).toBeVisible()
+})
+
 test("tab navigation restores last route and resets active tab to root", async ({ page }) => {
   await seedOnboardedProfile(page)
   await page.goto("/Recipes")
@@ -115,7 +163,7 @@ test("core screens render without horizontal overflow and expose key UX surfaces
 
   await page.goto("/Coach")
   await page.getByRole("button", { name: /^Schedule$/ }).click()
-  await expect(page.locator("input[placeholder*='Log bench']")).toHaveValue("Plan my week")
+  await expect(page.getByText(/plan this training week/i)).toBeVisible()
   await expectNoHorizontalOverflow(page)
 })
 
@@ -196,6 +244,113 @@ test("manual meal logging returns to Nutrition and shows the saved entry", async
   const todayMealsSection = page.locator("section").filter({ has: page.getByRole("heading", { name: /today's meals/i }) })
   await expect(todayMealsSection.getByText("E2E Chicken Bowl").first()).toBeVisible()
   await expect(todayMealsSection.getByText(/620 kcal - 48g protein/i).first()).toBeVisible()
+})
+
+test("logged meals can be edited in place from Nutrition", async ({ page }) => {
+  await seedState(page, {
+    "apexai.profile": onboardedProfile,
+    "apexai.meals": [
+      {
+        id: "meal_edit_1",
+        date: new Date().toISOString().slice(0, 10),
+        meal_type: "breakfast",
+        food_name: "Greek yoghurt bowl",
+        quantity: "1 bowl",
+        calories: 430,
+        protein_g: 32,
+        carbs_g: 44,
+        fat_g: 10,
+        nutrition_source: "Test seed",
+      },
+    ],
+  })
+
+  await page.goto("/Nutrition")
+  const todayMealsSection = page.locator("section").filter({ has: page.getByRole("heading", { name: /today's meals/i }) })
+  await todayMealsSection.getByRole("button", { name: /edit greek yoghurt bowl/i }).click()
+  await expect(page.getByRole("heading", { name: /edit food log/i })).toBeVisible()
+  await page.getByPlaceholder("Calories").fill("520")
+  await page.getByPlaceholder("Protein g").fill("40")
+  await page.getByRole("button", { name: /save changes/i }).click()
+
+  await expect(page.getByRole("heading", { name: /edit food log/i })).toHaveCount(0)
+  await expect(todayMealsSection.getByText(/520 kcal - 40g protein/i).first()).toBeVisible()
+})
+
+test("logged workouts can be edited in place from Workouts and update volume", async ({ page }) => {
+  const today = new Date().toISOString().slice(0, 10)
+  await seedState(page, {
+    "apexai.profile": onboardedProfile,
+    "apexai.workouts": [
+      {
+        id: "workout_edit_1",
+        date: today,
+        workout_type: "Seed workout",
+        duration_minutes: 35,
+        notes: "",
+        completed: true,
+      },
+    ],
+    "apexai.workoutSets": [
+      {
+        id: "set_edit_1",
+        session_id: "workout_edit_1",
+        exercise_name: "Bench Press",
+        muscle_group: "chest",
+        set_number: 1,
+        reps: 8,
+        weight_kg: 60,
+        duration_seconds: 0,
+        distance_km: 0,
+        notes: "",
+        date: today,
+      },
+    ],
+  })
+
+  await page.goto("/Workouts")
+  await page.getByRole("button", { name: /edit seed workout/i }).click()
+  await expect(page.getByRole("heading", { name: /edit workout log/i })).toBeVisible()
+  await page.getByPlaceholder("Workout name").fill("Updated workout")
+  await page.getByPlaceholder("kg").first().fill("70")
+  await page.getByRole("button", { name: /save changes/i }).click()
+
+  await expect(page.getByRole("heading", { name: /edit workout log/i })).toHaveCount(0)
+  await expect(page.getByText("Updated workout").first()).toBeVisible()
+  await expect(page.getByText("560kg").first()).toBeVisible()
+})
+
+test("coach chat can be cleared back to the single starter message", async ({ page }) => {
+  await seedState(page, {
+    "apexai.profile": onboardedProfile,
+    "apexai.chat": [
+      {
+        id: "chat_welcome",
+        role: "assistant",
+        content: "Tell me what you did or what you need. I can log completed meals and workouts, build or edit today's plan, guide an active session, update targets, and answer coaching questions.",
+        timestamp: new Date().toISOString(),
+      },
+      {
+        id: "chat_user_1",
+        role: "user",
+        content: "Build me a workout for today",
+        timestamp: new Date().toISOString(),
+      },
+      {
+        id: "chat_assistant_1",
+        role: "assistant",
+        content: "Here is a saved response to clear.",
+        timestamp: new Date().toISOString(),
+      },
+    ],
+  })
+
+  await page.goto("/Coach")
+  await expect(page.getByRole("button", { name: /clear chat/i })).toBeVisible()
+  await page.getByRole("button", { name: /clear chat/i }).click()
+
+  await expect(page.getByText(/here is a saved response to clear/i)).toHaveCount(0)
+  await expect(page.getByText(/tell me what you did or what you need/i)).toHaveCount(1)
 })
 
 test("recipes can be edited in place and persist the new title", async ({ page }) => {

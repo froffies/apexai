@@ -11,12 +11,20 @@ export default defineConfig({
     trace: "on-first-retry",
     screenshot: "only-on-failure",
   },
-  webServer: {
-    command: "npm run dev -- --host 127.0.0.1 --port 4173",
-    url: "http://127.0.0.1:4173",
-    reuseExistingServer: true,
-    timeout: 120000,
-  },
+  webServer: [
+    {
+      command: "npm run dev -- --host 127.0.0.1 --port 4173",
+      url: "http://127.0.0.1:4173",
+      reuseExistingServer: true,
+      timeout: 120000,
+    },
+    {
+      command: "OPENAI_COACH_HOST=127.0.0.1 OPENAI_COACH_PORT=8787 OPENAI_COACH_REQUIRE_AUTH=false OPENAI_COACH_CORS_ORIGIN=http://127.0.0.1:4173,http://localhost:4173 npm run ai:server",
+      url: "http://127.0.0.1:8787/health",
+      reuseExistingServer: true,
+      timeout: 120000,
+    },
+  ],
   projects: [
     {
       name: "iphone",

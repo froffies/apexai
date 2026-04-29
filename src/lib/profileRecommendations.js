@@ -124,54 +124,69 @@ function totalsForFoods(entries) {
   )
 }
 
-function remainingBoosters(entries, boosterIds) {
-  const counts = entries.reduce((map, entry) => {
-    map.set(entry.food.id, (map.get(entry.food.id) || 0) + 1)
-    return map
-  }, new Map())
+function buildMacroFitScore(totals, profile) {
+  const targetCalories = numberValue(profile.daily_calories)
+  const targetProtein = numberValue(profile.protein_g)
+  const targetCarbs = numberValue(profile.carbs_g)
+  const targetFat = numberValue(profile.fat_g)
+  const calorieDiff = Math.abs(targetCalories - totals.calories)
+  const proteinDiff = Math.abs(targetProtein - totals.protein_g)
+  const carbsDiff = Math.abs(targetCarbs - totals.carbs_g)
+  const fatDiff = Math.abs(targetFat - totals.fat_g)
+  const proteinDeficitPenalty = Math.max(0, targetProtein - totals.protein_g) * 2.4
+  const calorieDeficitPenalty = Math.max(0, targetCalories - totals.calories) * 0.55
 
-  return boosterIds
-    .map((id) => foodIndex.get(id))
-    .filter(Boolean)
-    .filter((food) => (counts.get(food.id) || 0) < 2)
-}
-
-function boosterScore(food, { remainingCalories, remainingProtein, goal }) {
-  const calorieFit = 260 - Math.abs(remainingCalories - numberValue(food.calories))
-  const proteinBias = numberValue(food.protein_g) * (goal === "fat_loss" ? 3 : goal === "muscle_gain" ? 2 : 1.75)
-  const carbBias = (goal === "strength" || goal === "athletic_performance") ? numberValue(food.carbs_g) * 0.8 : 0
-  return calorieFit + proteinBias + carbBias
+  return (
+    calorieDiff
+    + (proteinDiff * 8)
+    + (carbsDiff * 2)
+    + (fatDiff * 3)
+    + proteinDeficitPenalty
+    + calorieDeficitPenalty
+  )
 }
 
 function topUpMealEntries(baseEntries, profile, boosterIds = []) {
-  const entries = [...baseEntries]
-  let totals = totalsForFoods(entries)
-  const targetCalories = numberValue(profile.daily_calories)
-  const targetProtein = numberValue(profile.protein_g)
-  let safety = 0
+  const boosters = boosterIds
+    .map((id) => foodIndex.get(id))
+    .filter(Boolean)
 
-  while ((totals.calories < targetCalories * 0.92 || totals.protein_g < targetProtein * 0.88) && safety < 6) {
-    const candidates = remainingBoosters(entries, boosterIds)
-    if (!candidates.length) break
+  const maxAdditions = profile.goal === "fat_loss" ? 3 : 4
+  let bestEntries = [...baseEntries]
+  let bestTotals = totalsForFoods(bestEntries)
+  let bestScore = buildMacroFitScore(bestTotals, profile)
 
-    const selected = [...candidates].sort((left, right) => (
-      boosterScore(right, {
-        remainingCalories: targetCalories - totals.calories,
-        remainingProtein: targetProtein - totals.protein_g,
-        goal: profile.goal,
-      }) - boosterScore(left, {
-        remainingCalories: targetCalories - totals.calories,
-        remainingProtein: targetProtein - totals.protein_g,
-        goal: profile.goal,
-      })
-    ))[0]
-
-    entries.push({ food: selected, mealType: "snack" })
-    totals = totalsForFoods(entries)
-    safety += 1
+  function evaluate(entries) {
+    const totals = totalsForFoods(entries)
+    const score = buildMacroFitScore(totals, profile)
+    if (score < bestScore) {
+      bestScore = score
+      bestEntries = [...entries]
+      bestTotals = totals
+    }
   }
 
-  return { entries, totals }
+  function search(entries, startIndex, depth, counts = new Map()) {
+    evaluate(entries)
+    if (depth >= maxAdditions) return
+
+    for (let index = startIndex; index < boosters.length; index += 1) {
+      const food = boosters[index]
+      const currentCount = counts.get(food.id) || 0
+      if (currentCount >= 2) continue
+
+      counts.set(food.id, currentCount + 1)
+      entries.push({ food, mealType: "snack" })
+      search(entries, index, depth + 1, counts)
+      entries.pop()
+      if (currentCount === 0) counts.delete(food.id)
+      else counts.set(food.id, currentCount)
+    }
+  }
+
+  search([...baseEntries], 0, 0, new Map())
+
+  return { entries: bestEntries, totals: bestTotals }
 }
 
 function buildMealPlanOption(profile, definition) {
@@ -187,7 +202,7 @@ function buildMealPlanOption(profile, definition) {
     badge: definition.badge,
     description: definition.description,
     reason: `${definition.label} is matched against your ${goalLabel(profile.goal).toLowerCase()} goal and current ${numberValue(profile.daily_calories)} kcal target.`,
-    summary: `${roundMacro(totals.calories)} kcal | ${roundMacro(totals.protein_g)}g protein`,
+    summary: `${roundMacro(totals.calories)} kcal | ${roundMacro(totals.protein_g)}g protein | ${roundMacro(totals.carbs_g)}c / ${roundMacro(totals.fat_g)}f`,
     calorieCoverage: roundMacro((totals.calories / Math.max(1, numberValue(profile.daily_calories))) * 100),
     proteinCoverage: roundMacro((totals.protein_g / Math.max(1, numberValue(profile.protein_g))) * 100),
     plan: {

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { Bot, Dumbbell, Mic, MicOff, Salad, Send, UserRound } from "lucide-react"
+import { Bot, Dumbbell, Mic, MicOff, RotateCcw, Salad, Send, UserRound } from "lucide-react"
 import PageHeader from "@/components/PageHeader"
 import SectionCard from "@/components/SectionCard"
 import WorkoutPlanCard from "@/components/WorkoutPlanCard"
@@ -43,11 +43,13 @@ import { recommendProgressionBlock } from "@/lib/progressionEngine"
 import { advanceActiveWorkout, getCurrentActiveExercise, logSetToActiveWorkout, summarizeActiveWorkout, summarizeRecovery } from "@/lib/workoutIntelligence"
 import { todayISO, uid, useLocalStorage } from "@/lib/useLocalStorage"
 
-const starterMessage = {
-  id: "chat_welcome",
-  role: "assistant",
-  content: "Tell me what you did or what you need. I can log completed meals and workouts, build or edit today's plan, guide an active session, update targets, and answer coaching questions.",
-  timestamp: new Date().toISOString(),
+function createStarterMessage() {
+  return {
+    id: "chat_welcome",
+    role: "assistant",
+    content: "Tell me what you did or what you need. I can log completed meals and workouts, build or edit today's plan, guide an active session, update targets, and answer coaching questions.",
+    timestamp: new Date().toISOString(),
+  }
 }
 
 const promptCards = [
@@ -129,6 +131,71 @@ function updateWorkoutSession(workouts, sessionId, patch) {
   return workouts.map((workout) => workout.id === sessionId ? { ...workout, ...patch } : workout)
 }
 
+function upsertMealEntry(current, nextMeal) {
+  return [nextMeal, ...current.filter((meal) => meal.id !== nextMeal.id)]
+}
+
+function replaceWorkoutSessionSets(current, sessionId, nextSets) {
+  return [...nextSets, ...current.filter((set) => set.session_id !== sessionId)]
+}
+
+function buildWorkoutSetsFromAction(action, sessionId, workoutDate) {
+  const sets = Math.max(1, Math.round(Number(action.sets) || 1))
+  return Array.from({ length: sets }, (_, index) => ({
+    id: uid("set"),
+    session_id: sessionId,
+    exercise_name: action.exercise_name || action.workout_type || "Workout",
+    muscle_group: action.muscle_group || "full_body",
+    set_number: index + 1,
+    reps: Number(action.reps) || 0,
+    weight_kg: Number(action.weight_kg) || 0,
+    duration_seconds: Number(action.duration_seconds) || 0,
+    distance_km: Number(action.distance_km) || 0,
+    notes: action.message || "Logged by OpenAI coach",
+    date: workoutDate,
+  }))
+}
+
+function isStructuredWorkoutAction(action) {
+  const sets = Math.max(1, Math.round(Number(action?.sets) || 1))
+  const reps = Number(action?.reps) || 0
+  const durationSeconds = Number(action?.duration_seconds) || 0
+  return durationSeconds > 0 || (sets > 0 && reps > 0)
+}
+
+function incompleteWorkoutPrompt(message, activeWorkout) {
+  if (!activeWorkout?.id) return ""
+
+  const text = String(message || "").toLowerCase()
+  const mentionsExercise = /\b(bench|squat|deadlift|row|press|curl|pulldown|pull up|push up|lunge|dumbbell|barbell|bicep|tricep|preacher|leg|hamstring|calf|shoulder|cardio|run|bike|walk)\b/.test(text)
+  const hasWeight = /\b\d+(?:\.\d+)?\s*kg\b/.test(text)
+  const hasSets = /\b\d+\s*sets?\b|\bx\s*\d+\b/.test(text)
+  const hasReps = /\b\d+\s*reps?\b|\b\d+\s*x\s*\d+\s*x\s*\d+\b|\b\d+\s*sets?\s*(?:of|x)\s*\d+\b/.test(text)
+  const hasDuration = /\b\d+\s*(?:min|mins|minutes|km|kilometres|kilometers)\b/.test(text)
+  if (!mentionsExercise || (!hasWeight && !hasSets) || hasReps || hasDuration) return ""
+
+  const currentExercise = getCurrentActiveExercise(activeWorkout)
+  const setsMatch = text.match(/\b(\d+)\s*sets?\b/)
+  const setCount = setsMatch?.[1] ? `${setsMatch[1]} sets` : "that"
+  return `I need the reps before I save ${setCount}. How many reps did you do${currentExercise?.name ? ` for ${currentExercise.name}` : ""}?`
+}
+
+function isLogLocationQuestion(message) {
+  return /\b(where|which screen|what screen).*\b(log|save|record)\b|\bwhere did you log\b|\bwhere was that logged\b/.test(String(message || "").toLowerCase())
+}
+
+function findLatestCoachRecordReference(messages) {
+  return [...messages].reverse().find((message) =>
+    message?.role === "assistant"
+    && (
+      (Array.isArray(message.loggedMealIds) && message.loggedMealIds.length)
+      || (Array.isArray(message.updatedMealIds) && message.updatedMealIds.length)
+      || (Array.isArray(message.loggedWorkoutIds) && message.loggedWorkoutIds.length)
+      || (Array.isArray(message.updatedWorkoutIds) && message.updatedWorkoutIds.length)
+    )
+  ) || null
+}
+
 export default function Coach() {
   const [profile, setProfile] = useLocalStorage(storageKeys.profile, defaultProfile)
   const [meals, setMeals] = useLocalStorage(storageKeys.meals, starterMeals)
@@ -140,7 +207,7 @@ export default function Coach() {
   const [recoveryLogs, setRecoveryLogs] = useLocalStorage(storageKeys.recoveryLogs, starterRecoveryLogs)
   const [activeWorkout, setActiveWorkout] = useLocalStorage(storageKeys.activeWorkout, emptyActiveWorkout)
   const [exercises] = useLocalStorage(storageKeys.exercises, starterExercises)
-  const [messages, setMessages] = useLocalStorage(storageKeys.chat, [starterMessage])
+  const [messages, setMessages] = useLocalStorage(storageKeys.chat, [createStarterMessage()])
   const [input, setInput] = useState("")
   const [listening, setListening] = useState(false)
   const [thinking, setThinking] = useState(false)
@@ -188,6 +255,13 @@ export default function Coach() {
     ...extras,
   })
 
+  const clearConversation = () => {
+    setMessages([createStarterMessage()])
+    setInput("")
+    setQuickAction(null)
+    setAiError("")
+  }
+
   const startPlannedWorkout = (sourcePlan, editedExercises = null) => {
     const plan = {
       ...sourcePlan,
@@ -224,6 +298,25 @@ export default function Coach() {
 
   const runLocalCoachAction = (content) => {
     const lower = content.toLowerCase()
+
+    if (isLogLocationQuestion(content)) {
+      const reference = findLatestCoachRecordReference(messages)
+      if (!reference) {
+        return appendAssistant("I haven't saved anything recent enough to point to yet.")
+      }
+
+      const destinations = []
+      if ((reference.loggedMealIds?.length || reference.updatedMealIds?.length) && !destinations.includes("Nutrition > Log")) {
+        destinations.push("Nutrition > Log")
+      }
+      if ((reference.loggedWorkoutIds?.length || reference.updatedWorkoutIds?.length) && !destinations.includes("Workouts > Recent sessions")) {
+        destinations.push("Workouts > Recent sessions")
+      }
+
+      return appendAssistant(destinations.length
+        ? `I saved that in ${destinations.join(" and ")}.`
+        : "I couldn't map that save to a coach-controlled record.")
+    }
 
     const targetUpdate = parseTargetUpdate(content)
     if (targetUpdate) {
@@ -356,14 +449,20 @@ export default function Coach() {
       ])
       const sets = makeWorkoutSetsFromLog(workoutLog, sessionId)
       setWorkoutSets((current) => [...sets, ...current])
-      return appendAssistant(`Logged ${workoutLog.exercise_name}: ${workoutLog.sets} set(s) x ${workoutLog.reps || "time"} at ${workoutLog.weight_kg || 0}kg. Workouts and analytics updated.`)
+      return appendAssistant(`Logged ${workoutLog.exercise_name}: ${workoutLog.sets} set(s) x ${workoutLog.reps || "time"} at ${workoutLog.weight_kg || 0}kg. Workouts and analytics updated.`, {
+        loggedWorkoutIds: [sessionId],
+      })
     }
 
     const mealLog = parseMealLog(content)
     if (mealLog) {
       if ("needsVerification" in mealLog) return appendAssistant(mealLog.reply)
-      setMeals((current) => [mealLog, ...current])
-      return appendAssistant(`Logged ${mealLog.food_name} with verified Australian nutrition: ${mealLog.calories} kcal, ${mealLog.protein_g}g protein, ${mealLog.carbs_g}g carbs, ${mealLog.fat_g}g fat.`)
+      const loggedMealId = "id" in mealLog && mealLog.id ? mealLog.id : uid("meal")
+      const loggedMeal = { id: loggedMealId, ...mealLog }
+      setMeals((current) => [loggedMeal, ...current])
+      return appendAssistant(`Logged ${loggedMeal.food_name} with verified Australian nutrition: ${loggedMeal.calories} kcal, ${loggedMeal.protein_g}g protein, ${loggedMeal.carbs_g}g carbs, ${loggedMeal.fat_g}g fat.`, {
+        loggedMealIds: [loggedMeal.id],
+      })
     }
 
     return appendAssistant(coachReply(content, { profile, totals, todaysWorkouts }))
@@ -377,6 +476,10 @@ export default function Coach() {
   const applyOpenAICoachResponse = (coachResponse) => {
     let attachedPlan = null
     const rejectedActions = []
+    const loggedMealIds = []
+    const updatedMealIds = []
+    const loggedWorkoutIds = []
+    const updatedWorkoutIds = []
 
     for (const action of coachResponse.actions || []) {
       if (action.type === "update_targets") {
@@ -443,31 +546,60 @@ export default function Coach() {
       }
 
       if (action.type === "log_workout") {
+        if (!isStructuredWorkoutAction(action)) {
+          rejectedActions.push("I need the full workout details before I can log that cleanly. Tell me the sets, reps, and load, or the duration for cardio.")
+          continue
+        }
+
+        const workoutLabel = String(action.workout_type || action.exercise_name || "").trim()
+        if (!workoutLabel || /^workout$/i.test(workoutLabel)) {
+          rejectedActions.push("I need the actual exercise or workout name before I can save that session cleanly.")
+          continue
+        }
+
         const sessionId = uid("workout")
-        const sets = Math.max(1, Math.round(numberOrZero(action.sets) || 1))
         const workoutLog = {
           id: sessionId,
           date: action.date || todayISO(),
-          workout_type: action.workout_type || action.exercise_name || "Workout",
+          workout_type: workoutLabel,
           duration_minutes: Math.round(numberOrZero(action.duration_seconds) / 60),
           notes: action.message || "Logged by OpenAI coach",
           completed: true,
         }
-        const loggedSets = Array.from({ length: sets }, (_, index) => ({
-          id: uid("set"),
-          session_id: sessionId,
-          exercise_name: action.exercise_name || workoutLog.workout_type,
-          muscle_group: action.muscle_group || "full_body",
-          set_number: index + 1,
-          reps: numberOrZero(action.reps),
-          weight_kg: numberOrZero(action.weight_kg),
-          duration_seconds: numberOrZero(action.duration_seconds),
-          distance_km: numberOrZero(action.distance_km),
-          notes: action.message || "Logged by OpenAI coach",
-          date: workoutLog.date,
-        }))
+        const loggedSets = Number(action.reps) > 0 ? buildWorkoutSetsFromAction(action, sessionId, workoutLog.date) : []
         setWorkouts((current) => [workoutLog, ...current])
-        setWorkoutSets((current) => [...loggedSets, ...current])
+        if (loggedSets.length) setWorkoutSets((current) => [...loggedSets, ...current])
+        loggedWorkoutIds.push(sessionId)
+      }
+
+      if (action.type === "update_workout_log") {
+        const workoutId = String(action.workout_id || "").trim()
+        const existingWorkout = workouts.find((workout) => workout.id === workoutId)
+        if (!workoutId || !existingWorkout) {
+          rejectedActions.push("I couldn't match that workout correction to a saved session, so I left your history alone.")
+          continue
+        }
+        if (!isStructuredWorkoutAction(action)) {
+          rejectedActions.push("I need the corrected workout details before I can update that session cleanly.")
+          continue
+        }
+
+        const workoutDate = action.date || existingWorkout.date || todayISO()
+        const workoutLabel = String(action.workout_type || action.exercise_name || existingWorkout.workout_type || "").trim()
+        const nextWorkout = {
+          ...existingWorkout,
+          date: workoutDate,
+          workout_type: workoutLabel && !/^workout$/i.test(workoutLabel) ? workoutLabel : existingWorkout.workout_type,
+          duration_minutes: Number(action.duration_seconds) > 0
+            ? Math.round(numberOrZero(action.duration_seconds) / 60)
+            : existingWorkout.duration_minutes,
+          notes: action.message || existingWorkout.notes,
+          completed: true,
+        }
+        const nextSets = Number(action.reps) > 0 ? buildWorkoutSetsFromAction(action, workoutId, workoutDate) : []
+        setWorkouts((current) => current.map((workout) => workout.id === workoutId ? nextWorkout : workout))
+        setWorkoutSets((current) => replaceWorkoutSessionSets(current, workoutId, nextSets))
+        updatedWorkoutIds.push(workoutId)
       }
 
       if (action.type === "log_meal") {
@@ -476,9 +608,10 @@ export default function Coach() {
         if (!hasMacros || !hasSource) {
           rejectedActions.push("I skipped one meal log because it did not include verified nutrition data.")
         } else {
+          const mealId = uid("meal")
           setMeals((current) => [
             {
-              id: uid("meal"),
+              id: mealId,
               date: action.date || todayISO(),
               meal_type: action.meal_type || "snack",
               food_name: action.food_name || "Logged meal",
@@ -493,13 +626,52 @@ export default function Coach() {
             },
             ...current,
           ])
+          loggedMealIds.push(mealId)
         }
+      }
+
+      if (action.type === "update_meal_log") {
+        const mealId = String(action.meal_id || "").trim()
+        const existingMeal = meals.find((meal) => meal.id === mealId)
+        const hasMacros = [action.calories, action.protein_g, action.carbs_g, action.fat_g].every((value) => Number.isFinite(Number(value)))
+        const hasSource = Boolean(action.nutrition_source)
+        if (!mealId || !existingMeal) {
+          rejectedActions.push("I couldn't match that meal correction to a saved log, so I left your nutrition log alone.")
+          continue
+        }
+        if (!hasMacros || !hasSource) {
+          rejectedActions.push("I need the corrected calories and macros before I can update that meal cleanly.")
+          continue
+        }
+
+        const nextMeal = {
+          ...existingMeal,
+          date: action.date || existingMeal.date,
+          meal_type: action.meal_type || existingMeal.meal_type,
+          food_name: action.food_name || existingMeal.food_name,
+          quantity: action.quantity || existingMeal.quantity,
+          calories: numberOrZero(action.calories),
+          protein_g: numberOrZero(action.protein_g),
+          carbs_g: numberOrZero(action.carbs_g),
+          fat_g: numberOrZero(action.fat_g),
+          estimated: action.estimated ?? existingMeal.estimated,
+          nutrition_source: action.nutrition_source,
+          notes: action.message || existingMeal.notes,
+        }
+        setMeals((current) => upsertMealEntry(current, nextMeal))
+        updatedMealIds.push(mealId)
       }
     }
 
     const warnings = [...(coachResponse.warnings || []), ...rejectedActions].filter(Boolean)
     const suffix = warnings.length ? `\n\n${warnings.join(" ")}` : ""
-    return appendAssistant(`${coachResponse.reply}${suffix}`, attachedPlan ? { plan: attachedPlan } : {})
+    return appendAssistant(`${coachResponse.reply}${suffix}`, {
+      ...(attachedPlan ? { plan: attachedPlan } : {}),
+      ...(loggedMealIds.length ? { loggedMealIds } : {}),
+      ...(updatedMealIds.length ? { updatedMealIds } : {}),
+      ...(loggedWorkoutIds.length ? { loggedWorkoutIds } : {}),
+      ...(updatedWorkoutIds.length ? { updatedWorkoutIds } : {}),
+    })
   }
 
   const submitCoachPrompt = async (rawContent) => {
@@ -511,7 +683,13 @@ export default function Coach() {
     setAiError("")
     setMessages((current) => [...current, userMessage])
 
-    if (shouldUseLocalCoach(content, { activeWorkout, todaysPlan })) {
+    const workoutFollowUp = incompleteWorkoutPrompt(content, activeWorkout)
+    if (workoutFollowUp) {
+      setMessages((current) => [...current, appendAssistant(workoutFollowUp)])
+      return
+    }
+
+    if (isLogLocationQuestion(content) || shouldUseLocalCoach(content, { activeWorkout, todaysPlan })) {
       const assistantMessage = runLocalCoachAction(content)
       setMessages((current) => [...current, assistantMessage])
       return
@@ -531,17 +709,19 @@ export default function Coach() {
         activeWorkout,
         recentMessages: [...messages, userMessage].slice(-10),
       })
-      const assistantMessage = coachResponse ? applyOpenAICoachResponse(coachResponse) : runLocalCoachAction(content)
+      if (!coachResponse) {
+        const assistantMessage = appendAssistant("I couldn't get a valid response from the live coach, so I didn't log or change anything. Please try again.")
+        setAiError("Live coach returned an invalid response.")
+        setMessages((current) => [...current, assistantMessage])
+        return
+      }
+      const assistantMessage = applyOpenAICoachResponse(coachResponse)
       setMessages((current) => [...current, assistantMessage])
     } catch (error) {
-      const assistantMessage = runLocalCoachAction(content)
-      setAiError(error instanceof Error ? error.message : "OpenAI coach unavailable; local fallback used.")
+      setAiError(error instanceof Error ? error.message : "Live coach unavailable.")
       setMessages((current) => [
         ...current,
-        {
-          ...assistantMessage,
-          content: `${assistantMessage.content}\n\nOpenAI coach is unavailable right now, so I used the local fallback.`,
-        },
+        appendAssistant("I couldn't reach the live coach just now, so I didn't log or change anything. Please retry in a moment."),
       ])
     } finally {
       setThinking(false)
@@ -624,7 +804,16 @@ export default function Coach() {
 
   return (
     <div className="mx-auto flex min-h-screen max-w-5xl flex-col gap-6 p-4 sm:p-6 lg:p-8">
-      <PageHeader eyebrow="Coach" title="Your training coach" subtitle="Plan training, log completed work, adjust nutrition, and guide sessions from one conversation." />
+      <PageHeader
+        eyebrow="Coach"
+        title="Your training coach"
+        subtitle="Plan training, log completed work, adjust nutrition, and guide sessions from one conversation."
+        action={messages.length > 1 ? (
+          <button type="button" onClick={clearConversation} className="flex min-h-11 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700">
+            <RotateCcw size={16} /> Clear chat
+          </button>
+        ) : null}
+      />
 
       <SectionCard
         tone="subtle"

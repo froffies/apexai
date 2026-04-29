@@ -1,10 +1,11 @@
 import { useState } from "react"
 import { Link } from "react-router-dom"
-import { ArrowRight, Dumbbell, Library, Play, Plus, TimerReset, Trash2 } from "lucide-react"
+import { ArrowRight, Dumbbell, Library, Pencil, Play, Plus, TimerReset, Trash2 } from "lucide-react"
 import PageHeader from "@/components/PageHeader"
 import SectionCard from "@/components/SectionCard"
 import SegmentedControl from "@/components/SegmentedControl"
 import { toast } from "@/components/ui/use-toast"
+import WorkoutLogModal from "@/components/WorkoutLogModal"
 import WorkoutCalendar from "@/components/WorkoutCalendar"
 import WorkoutPlanCard from "@/components/WorkoutPlanCard"
 import { createPageUrl } from "@/utils"
@@ -20,15 +21,35 @@ const workoutViews = [
   { value: "library", label: "Library" },
 ]
 
+function workoutSetsForSession(workoutSets, sessionId) {
+  return workoutSets.filter((set) => set.session_id === sessionId)
+}
+
+function displayWorkoutName(workout, workoutSets) {
+  const title = String(workout?.workout_type || "").trim()
+  if (title && !/^workout$/i.test(title)) return title
+
+  const exerciseNames = [...new Set(
+    workoutSetsForSession(workoutSets, workout?.id)
+      .map((set) => String(set.exercise_name || "").trim())
+      .filter(Boolean)
+  )]
+
+  if (!exerciseNames.length) return title || "Logged workout"
+  if (exerciseNames.length === 1) return exerciseNames[0]
+  return `${exerciseNames[0]} + ${exerciseNames.length - 1} more`
+}
+
 export default function Workouts() {
   const [profile] = useLocalStorage(storageKeys.profile, defaultProfile)
   const [workouts, setWorkouts] = useLocalStorage(storageKeys.workouts, starterWorkouts)
-  const [workoutSets] = useLocalStorage(storageKeys.workoutSets, starterWorkoutSets)
+  const [workoutSets, setWorkoutSets] = useLocalStorage(storageKeys.workoutSets, starterWorkoutSets)
   const [progress] = useLocalStorage(storageKeys.progress, starterProgress)
   const [workoutPlans, setWorkoutPlans] = useLocalStorage(storageKeys.workoutPlans, [])
   const [exercises] = useLocalStorage(storageKeys.exercises, starterExercises)
   const [recoveryLogs] = useLocalStorage(storageKeys.recoveryLogs, starterRecoveryLogs)
   const [activeWorkout, setActiveWorkout] = useLocalStorage(storageKeys.activeWorkout, emptyActiveWorkout)
+  const [editingWorkout, setEditingWorkout] = useState(null)
   const [view, setView] = useState("overview")
 
   const recent = workouts.slice(0, 6)
@@ -58,14 +79,21 @@ export default function Workouts() {
   }
 
   const removeWorkout = (workout) => {
+    const removedSets = workoutSets.filter((set) => set.session_id === workout.id)
+    const workoutName = displayWorkoutName(workout, workoutSets)
     setWorkouts((current) => current.filter((item) => item.id !== workout.id))
+    setWorkoutSets((current) => current.filter((set) => set.session_id !== workout.id))
+    if (activeWorkout?.session_id === workout.id) setActiveWorkout(emptyActiveWorkout)
     toast({
       title: "Workout removed",
-      description: `${workout.workout_type} was removed from your history.`,
+      description: `${workoutName} was removed from your history.`,
       action: (
         <button
           type="button"
-          onClick={() => setWorkouts((current) => [workout, ...current.filter((item) => item.id !== workout.id)])}
+          onClick={() => {
+            setWorkouts((current) => [workout, ...current.filter((item) => item.id !== workout.id)])
+            if (removedSets.length) setWorkoutSets((current) => [...removedSets, ...current.filter((set) => set.session_id !== workout.id)])
+          }}
           className="min-h-11 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
         >
           Undo
@@ -178,13 +206,18 @@ export default function Workouts() {
                   <div className="flex items-center gap-3">
                     <Dumbbell size={18} className="text-indigo-600" />
                     <div>
-                      <p className="font-semibold text-slate-900">{workout.workout_type}</p>
+                      <p className="font-semibold text-slate-900">{displayWorkoutName(workout, workoutSets)}</p>
                       <p className="text-sm text-slate-500">{workout.date} - {workout.duration_minutes || 0} minutes{workout.completed === false ? " - in progress" : ""}</p>
                     </div>
                   </div>
-                  <button type="button" aria-label={`Remove ${workout.workout_type}`} onClick={() => removeWorkout(workout)} className="rounded-xl p-2 text-slate-400 hover:bg-white hover:text-rose-600">
-                    <Trash2 size={16} />
-                  </button>
+                  <div className="flex items-center gap-1">
+                    <button type="button" aria-label={`Edit ${displayWorkoutName(workout, workoutSets)}`} onClick={() => setEditingWorkout(workout)} className="rounded-xl p-2 text-slate-400 hover:bg-white hover:text-indigo-600">
+                      <Pencil size={16} />
+                    </button>
+                    <button type="button" aria-label={`Remove ${displayWorkoutName(workout, workoutSets)}`} onClick={() => removeWorkout(workout)} className="rounded-xl p-2 text-slate-400 hover:bg-white hover:text-rose-600">
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
                 </div>
               ))}
               {!recent.length && <p className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-500">No workouts logged yet.</p>}
@@ -273,13 +306,18 @@ export default function Workouts() {
                   <div className="flex items-center gap-3">
                     <Dumbbell size={18} className="text-indigo-600" />
                     <div>
-                      <p className="font-semibold text-slate-900">{workout.workout_type}</p>
+                      <p className="font-semibold text-slate-900">{displayWorkoutName(workout, workoutSets)}</p>
                       <p className="text-sm text-slate-500">{workout.date} - {workout.duration_minutes || 0} minutes{workout.completed === false ? " - in progress" : ""}</p>
                     </div>
                   </div>
-                  <button type="button" aria-label={`Remove ${workout.workout_type}`} onClick={() => removeWorkout(workout)} className="rounded-xl p-2 text-slate-400 hover:bg-white hover:text-rose-600">
-                    <Trash2 size={16} />
-                  </button>
+                  <div className="flex items-center gap-1">
+                    <button type="button" aria-label={`Edit ${displayWorkoutName(workout, workoutSets)}`} onClick={() => setEditingWorkout(workout)} className="rounded-xl p-2 text-slate-400 hover:bg-white hover:text-indigo-600">
+                      <Pencil size={16} />
+                    </button>
+                    <button type="button" aria-label={`Remove ${displayWorkoutName(workout, workoutSets)}`} onClick={() => removeWorkout(workout)} className="rounded-xl p-2 text-slate-400 hover:bg-white hover:text-rose-600">
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
                 </div>
               ))}
               {!recent.length && <p className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-500">No workouts logged yet.</p>}
@@ -333,6 +371,28 @@ export default function Workouts() {
             )}
           </SectionCard>
         </section>
+      )}
+
+      {editingWorkout && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-black/40 p-4">
+          <div className="mx-auto max-w-4xl">
+            <WorkoutLogModal
+              existingWorkout={editingWorkout}
+              onSaved={(nextWorkout, nextWorkoutSets = []) => {
+                setWorkouts((current) => current.some((workout) => workout.id === nextWorkout.id)
+                  ? current.map((workout) => workout.id === nextWorkout.id ? nextWorkout : workout)
+                  : [nextWorkout, ...current])
+                if (nextWorkoutSets.length) {
+                  setWorkoutSets((current) => [
+                    ...nextWorkoutSets,
+                    ...current.filter((set) => set.session_id !== nextWorkout.id),
+                  ])
+                }
+              }}
+              onClose={() => setEditingWorkout(null)}
+            />
+          </div>
+        </div>
       )}
     </div>
   )

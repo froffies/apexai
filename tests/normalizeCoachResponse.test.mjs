@@ -38,3 +38,22 @@ test("normalizeCoachResponse accepts a typed root object", () => {
   assert.equal(payload.actions[0].type, "log_meal")
   assert.match(payload.reply, /logged that meal/i)
 })
+
+test("normalizeCoachResponse supports meal and workout updates", () => {
+  const mealPayload = normalizeCoachResponse({
+    update_meal_log: {
+      meal_id: "meal_1",
+      food_name: "Vegemite toast",
+    },
+  })
+  assert.equal(mealPayload.actions[0].type, "update_meal_log")
+  assert.match(mealPayload.reply, /updated that meal log/i)
+
+  const workoutPayload = normalizeCoachResponse({
+    type: "update_workout_log",
+    workout_id: "workout_1",
+    exercise_name: "Preacher Curl",
+  })
+  assert.equal(workoutPayload.actions[0].type, "update_workout_log")
+  assert.match(workoutPayload.reply, /updated that workout log/i)
+})

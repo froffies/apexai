@@ -50,22 +50,70 @@ function createRowFromExercise(exerciseName, historyMap, exerciseLibrary = [], e
   }
 }
 
-export default function WorkoutLogModal({ onClose, standalone = false }) {
+function createWorkoutForm(existingWorkout = null) {
+  return {
+    date: existingWorkout?.date || todayISO(),
+    workout_type: existingWorkout?.workout_type || "",
+    duration_minutes: existingWorkout?.duration_minutes ? String(existingWorkout.duration_minutes) : "",
+    notes: existingWorkout?.notes || "",
+    completed: existingWorkout?.completed !== false,
+  }
+}
+
+function buildRowsFromExistingWorkout(existingWorkout, workoutSets = [], historyMap = {}, exerciseLibrary = []) {
+  if (!existingWorkout?.id) return []
+  const sessionSets = workoutSets.filter((set) => set.session_id === existingWorkout.id)
+  if (!sessionSets.length) return []
+
+  const groupedRows = []
+  for (const set of sessionSets) {
+    const exerciseName = String(set.exercise_name || "Exercise").trim() || "Exercise"
+    let row = groupedRows.find((entry) => entry.exercise_name === exerciseName)
+    if (!row) {
+      const reps = Number(set.reps) || 0
+      row = createRowFromExercise(exerciseName, historyMap, exerciseLibrary, {
+        muscle: set.muscle_group,
+        target_sets: 1,
+        target_rep_min: reps,
+        target_rep_max: reps,
+        logged_sets: [],
+      })
+      row.actual_sets = []
+      groupedRows.push(row)
+    }
+
+    row.actual_sets.push({
+      reps: Number(set.reps) || 0,
+      weight_kg: Number(set.weight_kg) || 0,
+    })
+  }
+
+  return groupedRows.map((row) => {
+    const reps = row.actual_sets.map((set) => Number(set.reps) || 0).filter((value) => value > 0)
+    const repMin = reps.length ? Math.min(...reps) : Number(row.rep_min) || 0
+    const repMax = reps.length ? Math.max(...reps) : Number(row.rep_max) || repMin
+    const sets = row.actual_sets.length || Number(row.sets) || 1
+    return {
+      ...row,
+      sets,
+      rep_min: repMin,
+      rep_max: repMax,
+      actual_sets: makeActualSets(sets, repMax || repMin || 8, row.actual_sets[0]?.weight_kg || 0, row.actual_sets),
+    }
+  })
+}
+
+export default function WorkoutLogModal({ existingWorkout = null, onClose, onSaved = null, standalone = false }) {
   const [workouts, setWorkouts] = useLocalStorage(storageKeys.workouts, starterWorkouts)
   const [workoutSets, setWorkoutSets] = useLocalStorage(storageKeys.workoutSets, starterWorkoutSets)
   const [exercises] = useLocalStorage(storageKeys.exercises, starterExercises)
   const [activeWorkout, setActiveWorkout] = useLocalStorage(storageKeys.activeWorkout, emptyActiveWorkout)
-  const [form, setForm] = useState({
-    date: todayISO(),
-    workout_type: "",
-    duration_minutes: "",
-    notes: "",
-    completed: true,
-  })
   const historyMap = useMemo(() => buildExerciseHistoryMap(workoutSets, exercises), [exercises, workoutSets])
   const recentExerciseNames = useMemo(() => getRecentExerciseNames(workoutSets), [workoutSets])
+  const existingRows = useMemo(() => buildRowsFromExistingWorkout(existingWorkout, workoutSets, historyMap, exercises), [existingWorkout, exercises, historyMap, workoutSets])
   const initialRow = useMemo(() => createRowFromExercise(recentExerciseNames[0] || "Bench Press", historyMap, exercises), [exercises, historyMap, recentExerciseNames])
-  const [setRows, setSetRows] = useState([initialRow])
+  const [form, setForm] = useState(() => createWorkoutForm(existingWorkout))
+  const [setRows, setSetRows] = useState(() => existingRows.length ? existingRows : [initialRow])
   const [restTimer, setRestTimer] = useState({ rowIndex: -1, remaining: 0 })
   const [openPickerRow, setOpenPickerRow] = useState(-1)
   const [exerciseSearch, setExerciseSearch] = useState({})
@@ -81,6 +129,14 @@ export default function WorkoutLogModal({ onClose, standalone = false }) {
   }, [restTimer])
 
   useEffect(() => {
+    if (!existingWorkout?.id) return
+    setForm(createWorkoutForm(existingWorkout))
+    setSetRows(existingRows.length ? existingRows : [createRowFromExercise(recentExerciseNames[0] || "Bench Press", historyMap, exercises)])
+    setHydratedActiveWorkoutId(existingWorkout.id)
+  }, [existingRows, existingWorkout, exercises, historyMap, recentExerciseNames])
+
+  useEffect(() => {
+    if (existingWorkout?.id) return
     if (!activeWorkout?.id || activeWorkout.id === hydratedActiveWorkoutId) return
     const rows = (activeWorkout.exercises || []).length
       ? activeWorkout.exercises.map((exercise) => createRowFromExercise(exercise.name, historyMap, exercises, exercise))
@@ -95,7 +151,7 @@ export default function WorkoutLogModal({ onClose, standalone = false }) {
     })
     setSetRows(rows)
     setHydratedActiveWorkoutId(activeWorkout.id)
-  }, [activeWorkout, exercises, historyMap, hydratedActiveWorkoutId, recentExerciseNames])
+  }, [activeWorkout, exercises, existingWorkout, historyMap, hydratedActiveWorkoutId, recentExerciseNames])
 
   const update = (key, value) => setForm((current) => ({ ...current, [key]: value }))
 
@@ -151,9 +207,9 @@ export default function WorkoutLogModal({ onClose, standalone = false }) {
       return
     }
 
-    const sessionId = activeWorkout?.session_id || uid("workout")
-    const workoutName = form.workout_type.trim() || activeWorkout?.name || setRows.map((row) => row.exercise_name).filter(Boolean).join(", ") || "Workout"
-    const durationMinutes = Number(form.duration_minutes) || (activeWorkout.started_at ? Math.max(0, Math.round((Date.now() - new Date(activeWorkout.started_at).getTime()) / 60000)) : 0)
+    const sessionId = existingWorkout?.id || activeWorkout?.session_id || uid("workout")
+    const workoutName = form.workout_type.trim() || existingWorkout?.workout_type || activeWorkout?.name || setRows.map((row) => row.exercise_name).filter(Boolean).join(", ") || "Workout"
+    const durationMinutes = Number(form.duration_minutes) || (!existingWorkout?.id && activeWorkout.started_at ? Math.max(0, Math.round((Date.now() - new Date(activeWorkout.started_at).getTime()) / 60000)) : 0)
 
     const structuredSets = setRows.flatMap((row) => row.actual_sets.map((set, index) => ({
       id: uid("set"),
@@ -186,11 +242,13 @@ export default function WorkoutLogModal({ onClose, standalone = false }) {
 
     writeAppRecordSync(storageKeys.workouts, nextWorkouts)
     writeAppRecordSync(storageKeys.workoutSets, nextWorkoutSets)
-    writeAppRecordSync(storageKeys.activeWorkout, emptyActiveWorkout)
+    if (!existingWorkout?.id) writeAppRecordSync(storageKeys.activeWorkout, emptyActiveWorkout)
 
     setWorkouts(nextWorkouts)
     setWorkoutSets(nextWorkoutSets)
-    setActiveWorkout(emptyActiveWorkout)
+    if (!existingWorkout?.id) setActiveWorkout(emptyActiveWorkout)
+    setStatus("")
+    onSaved?.(nextWorkout, structuredSets)
     onClose?.()
   }
 
@@ -199,7 +257,7 @@ export default function WorkoutLogModal({ onClose, standalone = false }) {
       <div className="rounded-lg bg-white p-4 shadow-sm">
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-lg font-bold text-slate-950">Log workout</h2>
+            <h2 className="text-lg font-bold text-slate-950">{existingWorkout?.id ? "Edit workout log" : "Log workout"}</h2>
             <p className="text-sm text-slate-500">Use exercise history, current-session targets, and real set-by-set logging.</p>
           </div>
           {onClose && (
@@ -209,7 +267,7 @@ export default function WorkoutLogModal({ onClose, standalone = false }) {
           )}
         </div>
 
-        {activeWorkout?.id && (
+        {activeWorkout?.id && !existingWorkout?.id && (
           <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 p-3">
             <p className="text-sm font-semibold text-emerald-800">Active session loaded</p>
             <p className="mt-1 text-sm text-slate-700">{activeWorkout.name} with {(activeWorkout.exercises || []).length} planned exercise(s).</p>
@@ -342,7 +400,7 @@ export default function WorkoutLogModal({ onClose, standalone = false }) {
         </div>
         {status && <p className="mt-3 text-sm font-semibold text-rose-700">{status}</p>}
         <button type="submit" className="mt-4 flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-3 font-semibold text-white">
-          <Check size={18} /> Save workout
+          <Check size={18} /> {existingWorkout?.id ? "Save changes" : "Save workout"}
         </button>
       </div>
     </form>

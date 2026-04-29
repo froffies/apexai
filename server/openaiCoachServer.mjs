@@ -25,7 +25,7 @@ const port = Number(process.env.PORT || process.env.OPENAI_COACH_PORT || 8787)
 const host = process.env.OPENAI_COACH_HOST || (process.env.PORT ? "0.0.0.0" : "127.0.0.1")
 const model = process.env.OPENAI_MODEL || "gpt-4o-mini"
 const nodeEnv = process.env.NODE_ENV || "development"
-const configuredCorsOrigins = (process.env.OPENAI_COACH_CORS_ORIGIN || (nodeEnv === "production" ? "" : "http://127.0.0.1:5173,http://localhost:5173")).split(",").map((origin) => origin.trim()).filter(Boolean)
+const configuredCorsOrigins = (process.env.OPENAI_COACH_CORS_ORIGIN || (nodeEnv === "production" ? "" : "http://127.0.0.1:5173,http://localhost:5173,http://127.0.0.1:4173,http://localhost:4173")).split(",").map((origin) => origin.trim()).filter(Boolean)
 const fallbackCorsOrigin = configuredCorsOrigins[0] || "null"
 const client = process.env.OPENAI_API_KEY ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null
 const requireAuth = process.env.OPENAI_COACH_REQUIRE_AUTH ? process.env.OPENAI_COACH_REQUIRE_AUTH === "true" : nodeEnv === "production"
@@ -38,6 +38,7 @@ const rateLimitWindowMs = Number(process.env.RATE_LIMIT_WINDOW_MS || 60_000)
 const rateLimitMaxRequests = Number(process.env.RATE_LIMIT_MAX_REQUESTS || (nodeEnv === "production" ? 60 : 180))
 const rateLimitBuckets = new Map()
 const telemetryLogFile = process.env.TELEMETRY_LOG_FILE || path.join(process.cwd(), "server-data", "telemetry.ndjson")
+const telemetryRateLimitMaxRequests = Number(process.env.TELEMETRY_RATE_LIMIT_MAX_REQUESTS || (nodeEnv === "production" ? 300 : 2000))
 
 const coachResponseSchema = {
   type: "object",
@@ -55,10 +56,11 @@ const coachResponseSchema = {
         properties: {
           type: {
             type: "string",
-            enum: ["none", "clarify", "log_workout", "log_meal", "create_workout_plan", "create_meal_plan", "update_targets"],
+            enum: ["none", "clarify", "log_workout", "update_workout_log", "log_meal", "update_meal_log", "create_workout_plan", "create_meal_plan", "update_targets"],
           },
           message: { type: "string" },
           date: { type: "string" },
+          workout_id: { type: "string" },
           workout_type: { type: "string" },
           exercise_name: { type: "string" },
           muscle_group: { type: "string" },
@@ -83,6 +85,7 @@ const coachResponseSchema = {
             },
           },
           meal_type: { type: "string" },
+          meal_id: { type: "string" },
           food_name: { type: "string" },
           quantity: { type: "string" },
           calories: { type: "number" },
@@ -189,7 +192,7 @@ You MUST return a JSON object with exactly this structure:
 
 The "reply" field is ALWAYS required. Never omit it. Keep replies short and conversational - 1-3 sentences max for a phone screen.
 
-For actions, each action object must have a "type" field. Valid types: none, clarify, log_workout, log_meal, create_workout_plan, create_meal_plan, update_targets.
+For actions, each action object must have a "type" field. Valid types: none, clarify, log_workout, update_workout_log, log_meal, update_meal_log, create_workout_plan, create_meal_plan, update_targets.
 
 Core rules:
 - Be practical, warm, and direct.
@@ -203,6 +206,15 @@ Core rules:
 - If a user mentions a food but not enough detail to log it accurately, ask a short follow-up question instead of rejecting them. Good follow-ups ask about amount, serving size, brand, or what it was eaten with.
 - Use candidate_food_matches plus recent_messages to infer context. If the previous user turn named the food and the current turn only gives the amount, combine them before deciding whether you can log the meal.
 - Only emit log_meal when you have enough detail and a credible nutrition source. Otherwise, reply with a clarifying question and no log action yet.
+- If the user corrects the amount, serving size, or description of the last meal you logged, treat that as a correction and use update_meal_log instead of logging a duplicate.
+- If the user corrects a meal you just logged, emit update_meal_log with meal_id from recent_meals instead of creating a duplicate meal.
+- If the user corrects the load, reps, sets, or exercise details of the last workout you logged, treat that as a correction and use update_workout_log instead of logging a duplicate.
+- If the user corrects a workout you just logged, emit update_workout_log with workout_id from recent_workouts instead of creating a duplicate workout.
+- Never claim you logged something unless you also return the matching log or update action.
+- Do not create a workout log if sets/reps/load or duration are still missing. Ask the shortest follow-up question needed.
+- If the user only names an exercise plus weight or sets, but not reps or time, ask a short follow-up instead of logging a workout.
+- Never emit log_workout with a blank or generic title like "Workout" if you can identify the exercise.
+- If the user asks where something was logged or saved, answer from the app context instead of inventing a new log action.
 - Default to Australian metric units and Australian food context.
 - If a user reports pain, injury, or medical symptoms, do not diagnose. Suggest speaking with a professional.
 `
@@ -229,6 +241,7 @@ function jsonHeaders() {
   return {
     "Content-Type": "application/json",
     "Access-Control-Allow-Origin": origin,
+    "Access-Control-Allow-Credentials": "true",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, Authorization",
   }
@@ -266,6 +279,7 @@ function logRequest(request, status, extra = "") {
 function checkRateLimit(request) {
   const key = `${requestIp(request)}:${request.url}`
   const now = Date.now()
+  const maxRequests = request.url === "/api/telemetry" ? telemetryRateLimitMaxRequests : rateLimitMaxRequests
   const bucket = rateLimitBuckets.get(key) || { count: 0, resetAt: now + rateLimitWindowMs }
   if (now > bucket.resetAt) {
     bucket.count = 0
@@ -274,7 +288,7 @@ function checkRateLimit(request) {
   bucket.count += 1
   rateLimitBuckets.set(key, bucket)
 
-  if (bucket.count > rateLimitMaxRequests) {
+  if (bucket.count > maxRequests) {
     const error = new Error("Rate limit exceeded")
     error.status = 429
     throw error
@@ -414,8 +428,19 @@ async function verifyBearerUser(request) {
   return data.user
 }
 
-async function verifyRequestAuth(request) {
-  if (!requireAuth) return null
+async function verifyOptionalBearerUser(request) {
+  const header = request.headers.authorization || ""
+  const token = header.startsWith("Bearer ") ? header.slice(7) : ""
+  if (!token || !serverSupabase) return null
+
+  const { data, error } = await serverSupabase.auth.getUser(token)
+  if (error || !data.user) return null
+  return data.user
+}
+
+async function verifyRequestAuth(request, { optional = false } = {}) {
+  if (optional) return verifyOptionalBearerUser(request)
+  if (!requireAuth) return verifyOptionalBearerUser(request)
   return verifyBearerUser(request)
 }
 
@@ -504,7 +529,7 @@ function normalizeSingleOpenFoodFactsProduct(product, sourceType = "barcode_labe
 }
 
 async function handleCoach(request, response) {
-  await verifyRequestAuth(request)
+  await verifyRequestAuth(request, { optional: true })
   const body = await readRequestBody(request)
   validateCoachBody(body)
 
@@ -621,7 +646,7 @@ function extractIngredientTerms(text) {
 }
 
 async function handleNutritionSearch(request, response) {
-  await verifyRequestAuth(request)
+  await verifyRequestAuth(request, { optional: true })
   const body = await readRequestBody(request)
   validateNutritionBody(body)
   const query = String(body.query || "")
@@ -675,7 +700,7 @@ function normalizeChefResponse(value) {
 }
 
 async function handleNutritionChef(request, response) {
-  await verifyRequestAuth(request)
+  await verifyRequestAuth(request, { optional: true })
   const body = await readRequestBody(request)
   validateNutritionChefBody(body)
 
@@ -740,7 +765,7 @@ async function handleDeleteAccount(request, response) {
 }
 
 async function handleTelemetry(request, response) {
-  const user = await verifyRequestAuth(request)
+  const user = await verifyRequestAuth(request, { optional: true })
   const body = await readRequestBody(request)
   validateTelemetryBody(body)
 

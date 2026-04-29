@@ -22,27 +22,38 @@ function sourceTypeLabel(food) {
   return "Reference"
 }
 
-export default function MealLogModal({ defaultMealType = "breakfast", onClose, standalone = false }) {
+function createMealForm(existingMeal, defaultMealType) {
+  return {
+    date: existingMeal?.date || todayISO(),
+    meal_type: existingMeal?.meal_type || defaultMealType || "breakfast",
+    food_name: existingMeal?.food_name || "",
+    quantity: existingMeal?.quantity || "1 serve",
+    calories: existingMeal?.calories !== undefined ? String(existingMeal.calories) : "",
+    protein_g: existingMeal?.protein_g !== undefined ? String(existingMeal.protein_g) : "",
+    carbs_g: existingMeal?.carbs_g !== undefined ? String(existingMeal.carbs_g) : "",
+    fat_g: existingMeal?.fat_g !== undefined ? String(existingMeal.fat_g) : "",
+    nutrition_source: existingMeal?.nutrition_source || "",
+    notes: existingMeal?.notes || "",
+  }
+}
+
+export default function MealLogModal({ defaultMealType = "breakfast", existingMeal = null, onClose, onSaved = null, standalone = false }) {
   const [allMeals, setMeals] = useLocalStorage(storageKeys.meals, starterMeals)
   const [favoriteFoods, setFavoriteFoods] = useLocalStorage(storageKeys.favoriteFoods, [])
   const [recentFoods, setRecentFoods] = useLocalStorage(storageKeys.recentFoods, [])
   const [query, setQuery] = useState("")
-  const [form, setForm] = useState({
-    date: todayISO(),
-    meal_type: defaultMealType || "breakfast",
-    food_name: "",
-    quantity: "1 serve",
-    calories: "",
-    protein_g: "",
-    carbs_g: "",
-    fat_g: "",
-    nutrition_source: "",
-    notes: "",
-  })
+  const [form, setForm] = useState(() => createMealForm(existingMeal, defaultMealType))
   const [matches, setMatches] = useState([])
   const [searching, setSearching] = useState(false)
-  const [manualConfirmed, setManualConfirmed] = useState(false)
+  const [manualConfirmed, setManualConfirmed] = useState(() => Boolean(existingMeal && (!existingMeal.nutrition_source || existingMeal.estimated)))
   const [status, setStatus] = useState("")
+
+  useEffect(() => {
+    setForm(createMealForm(existingMeal, defaultMealType))
+    setQuery(existingMeal?.food_name || "")
+    setManualConfirmed(Boolean(existingMeal && (!existingMeal.nutrition_source || existingMeal.estimated)))
+    setStatus("")
+  }, [defaultMealType, existingMeal])
 
   useEffect(() => {
     let cancelled = false
@@ -128,7 +139,7 @@ export default function MealLogModal({ defaultMealType = "breakfast", onClose, s
 
     const meal = {
       ...form,
-      id: uid("meal"),
+      id: existingMeal?.id || uid("meal"),
       calories: Number(form.calories) || 0,
       protein_g: Number(form.protein_g) || 0,
       carbs_g: Number(form.carbs_g) || 0,
@@ -137,7 +148,9 @@ export default function MealLogModal({ defaultMealType = "breakfast", onClose, s
       nutrition_source: form.nutrition_source || "Manual user-entered macros",
     }
 
-    const nextMeals = [meal, ...allMeals]
+    const nextMeals = existingMeal
+      ? [meal, ...allMeals.filter((item) => item.id !== existingMeal.id)]
+      : [meal, ...allMeals]
     const recentSnapshot = {
       id: uid("food_snapshot"),
       name: meal.food_name,
@@ -155,6 +168,7 @@ export default function MealLogModal({ defaultMealType = "breakfast", onClose, s
     writeAppRecordSync(storageKeys.recentFoods, nextRecentFoods)
     setMeals(nextMeals)
     setRecentFoods(nextRecentFoods)
+    onSaved?.(meal)
     onClose?.()
   }
 
@@ -163,7 +177,7 @@ export default function MealLogModal({ defaultMealType = "breakfast", onClose, s
       <div className="rounded-lg bg-white p-4 shadow-sm">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <h2 className="text-lg font-bold text-slate-950">Log food</h2>
+            <h2 className="text-lg font-bold text-slate-950">{existingMeal ? "Edit food log" : "Log food"}</h2>
             <p className="text-sm text-slate-500">Search verified food data, reuse favourites, or save manual macros cleanly.</p>
           </div>
           {onClose && (
@@ -297,7 +311,7 @@ export default function MealLogModal({ defaultMealType = "breakfast", onClose, s
         </div>
         {status && <p className="mt-3 text-sm font-semibold text-amber-700">{status}</p>}
         <button type="submit" className="mt-4 flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-3 font-semibold text-white">
-          <Check size={18} /> Save meal
+          <Check size={18} /> {existingMeal ? "Save changes" : "Save meal"}
         </button>
       </div>
     </form>

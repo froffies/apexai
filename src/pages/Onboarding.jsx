@@ -174,6 +174,7 @@ export default function Onboarding() {
   const [mealPlans, setMealPlans] = useLocalStorage(storageKeys.mealPlans, [])
   const [progress, setProgress] = useLocalStorage(storageKeys.progress, starterProgress)
   const [step, setStep] = useState(0)
+  const [targetWeightTouched, setTargetWeightTouched] = useState(Boolean(profile.target_weight_kg))
   const [selectedWorkoutOptionId, setSelectedWorkoutOptionId] = useState("")
   const [selectedMealOptionId, setSelectedMealOptionId] = useState("")
   const [form, setForm] = useState({
@@ -209,12 +210,23 @@ export default function Onboarding() {
     }
   }, [recommendation.mealOptions, recommendation.recommendedMealOptionId, selectedMealOptionId])
 
+  useEffect(() => {
+    if (targetWeightTouched) return
+    const suggested = asFieldString(recommendTargetWeight(form))
+    if (suggested !== form.target_weight_kg) {
+      setForm((current) => ({ ...current, target_weight_kg: suggested }))
+    }
+  }, [form.goal, form.weight_kg, form.target_weight_kg, targetWeightTouched])
+
   const selectedWorkoutOption = recommendation.workoutOptions.find((option) => option.id === selectedWorkoutOptionId) || recommendation.workoutOptions[0]
   const selectedMealOption = recommendation.mealOptions.find((option) => option.id === selectedMealOptionId) || recommendation.mealOptions[0]
 
   const update = (key, value) => setForm((current) => ({ ...current, [key]: value }))
   const updateInteger = (key, value) => update(key, sanitizeIntegerInput(value))
-  const updateDecimal = (key, value) => update(key, sanitizeDecimalInput(value))
+  const updateDecimal = (key, value) => {
+    if (key === "target_weight_kg") setTargetWeightTouched(true)
+    update(key, sanitizeDecimalInput(value))
+  }
 
   const finish = () => {
     const nextProfile = { ...recommendation.profile, name: form.name || "Athlete", onboarded: true }
@@ -365,6 +377,11 @@ export default function Onboarding() {
                   compact
                 />
               </div>
+              {!targetWeightTouched ? (
+                <p className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-600">
+                  We are suggesting a starting target weight from your current weight and goal. Override it anytime if you already know the number you want to work toward.
+                </p>
+              ) : null}
               {!stepOneValid && (
                 <p className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-600">
                   {currentMeta.validationHint}

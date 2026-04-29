@@ -18,8 +18,16 @@ function summarizeCoachAction(action) {
     return "I logged that workout for you."
   }
 
+  if (action.type === "update_workout_log") {
+    return "I updated that workout log for you."
+  }
+
   if (action.type === "log_meal") {
     return "I logged that meal for you."
+  }
+
+  if (action.type === "update_meal_log") {
+    return "I updated that meal log for you."
   }
 
   if (action.type === "update_targets") {
@@ -44,7 +52,7 @@ function extractImplicitActions(value) {
   const typedRoot = normalizeAction(value)
   if (typedRoot) return [typedRoot]
 
-  const implicitTypes = ["clarify", "log_workout", "log_meal", "create_workout_plan", "create_meal_plan", "update_targets", "none"]
+  const implicitTypes = ["clarify", "log_workout", "update_workout_log", "log_meal", "update_meal_log", "create_workout_plan", "create_meal_plan", "update_targets", "none"]
   return implicitTypes
     .filter((type) => value?.[type] && typeof value[type] === "object")
     .map((type) => ({ type, ...value[type] }))

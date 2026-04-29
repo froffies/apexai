@@ -386,22 +386,16 @@ export function isShowMealPlanRequest(message) {
 
 export function shouldUseLocalCoach(message, { activeWorkout = null, todaysPlan = null } = {}) {
   const text = clean(message)
-  const parsedMealLog = parseMealLog(message)
   return Boolean(
-    isGreeting(message)
-    || parseTargetUpdate(message)
+    parseTargetUpdate(message)
     || parseRecoveryCheckIn(message)
     || parseActiveWorkoutUpdate(message, activeWorkout)
     || shouldBuildWeeklySchedule(message)
     || /\b(deload|plateau|plateaued|phase|block|stalled|stagnant|progression)\b/.test(text)
     || (todaysPlan && parseWorkoutPlanEdit(message, todaysPlan))
     || (activeWorkout?.id && /\b(what'?s next|next set|next exercise|where am i up to)\b/.test(text))
-    || isWorkoutPlanRequest(message)
-    || isMealPlanRequest(message)
     || isShowWorkoutRequest(message)
     || isShowMealPlanRequest(message)
-    || parseWorkoutLog(message)
-    || (parsedMealLog && !("needsVerification" in parsedMealLog))
   )
 }
 

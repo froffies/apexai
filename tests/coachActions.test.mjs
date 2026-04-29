@@ -70,13 +70,15 @@ test("recovery check-ins and weekly schedule prompts are recognized", () => {
   assert.equal(shouldBuildWeeklySchedule("Can you reshuffle my week?"), true)
 })
 
-test("deterministic coach prompts stay local", () => {
+test("only app-state-specific coach prompts stay local", () => {
   assert.equal(isWorkoutPlanRequest("Build me a workout for today"), true)
   assert.equal(isMealPlanRequest("Meal plan"), true)
   assert.equal(isShowWorkoutRequest("show me the workout"), true)
   assert.equal(isShowMealPlanRequest("show me today's meal plan"), true)
   assert.equal(shouldUseLocalCoach("Plan my week"), true)
-  assert.equal(shouldUseLocalCoach("hello"), true)
+  assert.equal(shouldUseLocalCoach("hello"), false)
+  assert.equal(shouldUseLocalCoach("Build me a workout for today"), false)
+  assert.equal(shouldUseLocalCoach("Meal plan"), false)
   assert.equal(shouldUseLocalCoach("I had vegemite"), false)
   assert.equal(shouldUseLocalCoach("What are three breakfast ideas for me?"), false)
 })
