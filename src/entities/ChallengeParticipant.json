@@ -1,0 +1,24 @@
+{
+  "name": "ChallengeParticipant",
+  "type": "object",
+  "properties": {
+    "challenge_id": {
+      "type": "string"
+    },
+    "user_name": {
+      "type": "string"
+    },
+    "progress_value": {
+      "type": "number",
+      "default": 0
+    },
+    "completed": {
+      "type": "boolean",
+      "default": false
+    }
+  },
+  "required": [
+    "challenge_id",
+    "user_name"
+  ]
+}

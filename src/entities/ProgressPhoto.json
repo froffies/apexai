@@ -1,0 +1,37 @@
+{
+  "name": "ProgressPhoto",
+  "type": "object",
+  "properties": {
+    "date": {
+      "type": "string",
+      "format": "date"
+    },
+    "photo_url": {
+      "type": "string"
+    },
+    "label": {
+      "type": "string"
+    },
+    "notes": {
+      "type": "string"
+    },
+    "weight_kg": {
+      "type": "number"
+    },
+    "body_part": {
+      "type": "string",
+      "enum": [
+        "full_body",
+        "arms",
+        "legs",
+        "core",
+        "chest",
+        "back"
+      ]
+    },
+    "ai_analysis": {
+      "type": "string"
+    }
+  },
+  "required": []
+}

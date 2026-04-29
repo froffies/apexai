@@ -1,0 +1,23 @@
+{
+  "name": "ProgressEntry",
+  "type": "object",
+  "properties": {
+    "date": {
+      "type": "string",
+      "format": "date"
+    },
+    "weight_kg": {
+      "type": "number"
+    },
+    "body_fat_estimate": {
+      "type": "number"
+    },
+    "waist_cm": {
+      "type": "number"
+    },
+    "notes": {
+      "type": "string"
+    }
+  },
+  "required": []
+}

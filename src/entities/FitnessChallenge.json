@@ -1,0 +1,50 @@
+{
+  "name": "FitnessChallenge",
+  "type": "object",
+  "properties": {
+    "title": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "category": {
+      "type": "string",
+      "enum": [
+        "steps",
+        "workouts",
+        "nutrition",
+        "habit",
+        "strength",
+        "cardio"
+      ]
+    },
+    "goal_value": {
+      "type": "number"
+    },
+    "goal_unit": {
+      "type": "string"
+    },
+    "duration_days": {
+      "type": "number"
+    },
+    "start_date": {
+      "type": "string",
+      "format": "date"
+    },
+    "end_date": {
+      "type": "string",
+      "format": "date"
+    },
+    "is_public": {
+      "type": "boolean",
+      "default": true
+    },
+    "creator_name": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "title"
+  ]
+}

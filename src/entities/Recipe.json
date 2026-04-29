@@ -1,0 +1,67 @@
+{
+  "name": "Recipe",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "meal_type": {
+      "type": "string",
+      "enum": [
+        "breakfast",
+        "lunch",
+        "dinner",
+        "snack"
+      ]
+    },
+    "ingredients": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "quantity": {
+            "type": "string"
+          },
+          "calories": {
+            "type": "number"
+          },
+          "protein_g": {
+            "type": "number"
+          },
+          "carbs_g": {
+            "type": "number"
+          },
+          "fat_g": {
+            "type": "number"
+          }
+        },
+        "required": []
+      }
+    },
+    "total_calories": {
+      "type": "number"
+    },
+    "total_protein_g": {
+      "type": "number"
+    },
+    "total_carbs_g": {
+      "type": "number"
+    },
+    "total_fat_g": {
+      "type": "number"
+    },
+    "servings": {
+      "type": "number",
+      "default": 1
+    }
+  },
+  "required": [
+    "name"
+  ]
+}

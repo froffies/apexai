@@ -1,0 +1,26 @@
+{
+  "name": "ShoppingItem",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "quantity": {
+      "type": "string"
+    },
+    "category": {
+      "type": "string"
+    },
+    "purchased": {
+      "type": "boolean",
+      "default": false
+    },
+    "list_date": {
+      "type": "string",
+      "format": "date"
+    }
+  },
+  "required": [
+    "name"
+  ]
+}

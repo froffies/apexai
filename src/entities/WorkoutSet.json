@@ -1,0 +1,38 @@
+{
+  "name": "WorkoutSet",
+  "type": "object",
+  "properties": {
+    "session_id": {
+      "type": "string"
+    },
+    "exercise_name": {
+      "type": "string"
+    },
+    "muscle_group": {
+      "type": "string"
+    },
+    "set_number": {
+      "type": "number"
+    },
+    "reps": {
+      "type": "number"
+    },
+    "weight_kg": {
+      "type": "number"
+    },
+    "duration_seconds": {
+      "type": "number"
+    },
+    "distance_km": {
+      "type": "number"
+    },
+    "notes": {
+      "type": "string"
+    },
+    "date": {
+      "type": "string",
+      "format": "date"
+    }
+  },
+  "required": []
+}

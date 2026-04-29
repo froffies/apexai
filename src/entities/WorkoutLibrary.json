@@ -1,0 +1,34 @@
+{
+  "name": "WorkoutLibrary",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "category": {
+      "type": "string",
+      "enum": [
+        "chest",
+        "back",
+        "shoulders",
+        "arms",
+        "legs",
+        "core",
+        "cardio",
+        "full_body"
+      ]
+    },
+    "description": {
+      "type": "string"
+    },
+    "video_url": {
+      "type": "string"
+    },
+    "muscle_group": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "name"
+  ]
+}

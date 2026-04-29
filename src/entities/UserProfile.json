@@ -1,0 +1,85 @@
+{
+  "name": "UserProfile",
+  "type": "object",
+  "properties": {
+    "goal": {
+      "type": "string",
+      "enum": [
+        "fat_loss",
+        "muscle_gain",
+        "strength",
+        "athletic_performance"
+      ]
+    },
+    "gender": {
+      "type": "string",
+      "enum": [
+        "male",
+        "female",
+        "other"
+      ]
+    },
+    "age": {
+      "type": "number"
+    },
+    "weight_kg": {
+      "type": "number"
+    },
+    "height_cm": {
+      "type": "number"
+    },
+    "target_weight_kg": {
+      "type": "number"
+    },
+    "activity_level": {
+      "type": "string",
+      "enum": [
+        "lightly_active",
+        "moderately_active",
+        "very_active"
+      ]
+    },
+    "daily_calories": {
+      "type": "number"
+    },
+    "protein_g": {
+      "type": "number"
+    },
+    "carbs_g": {
+      "type": "number"
+    },
+    "fat_g": {
+      "type": "number"
+    },
+    "split_type": {
+      "type": "string",
+      "enum": [
+        "ppl",
+        "upper_lower",
+        "full_body",
+        "custom"
+      ],
+      "default": "ppl"
+    },
+    "training_days_per_week": {
+      "type": "number",
+      "default": 4
+    },
+    "onboarded": {
+      "type": "boolean",
+      "default": false
+    },
+    "locale": {
+      "type": "string",
+      "enum": [
+        "AU",
+        "US",
+        "UK",
+        "CA",
+        "NZ"
+      ],
+      "default": "AU"
+    }
+  },
+  "required": []
+}

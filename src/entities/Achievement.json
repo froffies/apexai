@@ -1,0 +1,34 @@
+{
+  "name": "Achievement",
+  "type": "object",
+  "properties": {
+    "key": {
+      "type": "string"
+    },
+    "title": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "icon": {
+      "type": "string"
+    },
+    "earned_at": {
+      "type": "string"
+    },
+    "category": {
+      "type": "string",
+      "enum": [
+        "nutrition",
+        "workout",
+        "consistency",
+        "milestone"
+      ]
+    }
+  },
+  "required": [
+    "key",
+    "title"
+  ]
+}
