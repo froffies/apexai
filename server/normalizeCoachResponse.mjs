@@ -91,6 +91,24 @@ function looksLikeWorkoutPlanPrompt(prompt) {
     || /\bwhat should i train\b/.test(text)
 }
 
+function looksLikeMealLogPrompt(prompt) {
+  const text = String(prompt || "").toLowerCase()
+  return /\b(log|track|save|add|ate|had)\b/.test(text)
+    || /\b(for breakfast|for lunch|for dinner|as a snack)\b/.test(text)
+}
+
+function inferMealTypeFromPrompt(prompt) {
+  const text = String(prompt || "").toLowerCase()
+  if (text.includes("breakfast")) return "breakfast"
+  if (text.includes("lunch")) return "lunch"
+  if (text.includes("dinner")) return "dinner"
+  return "snack"
+}
+
+function replySuggestsSave(reply) {
+  return /\b(log(?:ged|ging)?|save(?:d)?|record(?:ed|ing)?|add(?:ed|ing)?|track(?:ed|ing)?)\b/i.test(String(reply || ""))
+}
+
 function extractExercisesFromReply(reply) {
   const text = String(reply || "")
   const exercises = []
@@ -281,6 +299,27 @@ function inferReplyOnlyActions(reply, prompt) {
       type: "create_workout_plan",
       title: "Coach workout",
       exercises,
+    })
+  }
+
+  const workoutLog = inferWorkoutFromPrompt(prompt)
+  if (workoutLog && replySuggestsSave(reply)) {
+    inferred.push({
+      type: "log_workout",
+      ...workoutLog,
+    })
+  }
+
+  const macros = extractReplyMacros(reply)
+  if (macros && looksLikeMealLogPrompt(prompt) && replySuggestsSave(reply)) {
+    inferred.push({
+      type: "log_meal",
+      ...macros,
+      food_name: inferMealNameFromPrompt(prompt) || "Estimated mixed meal",
+      meal_type: inferMealTypeFromPrompt(prompt),
+      quantity: "1 meal",
+      estimated: true,
+      nutrition_source: "Coach estimate from user-described ingredients and amounts",
     })
   }
   return inferred

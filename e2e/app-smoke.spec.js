@@ -342,6 +342,44 @@ test("coach sends arbitrary food detail messages to the live coach instead of tr
   expect(requestCount).toBe(1)
 })
 
+test("coach-logged workouts show up in Workouts with completed sets and volume", async ({ page }) => {
+  await seedOnboardedProfile(page)
+  await page.route("**/api/coach", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        reply: "Awesome work. I logged your preacher bicep dumbbells at 12.5kg for 4 sets of 10.",
+        actions: [
+          {
+            type: "log_workout",
+            exercise_name: "Preacher Bicep Dumbbells",
+            workout_type: "Preacher Bicep Dumbbells",
+            muscle_group: "biceps",
+            sets: 4,
+            reps: 10,
+            weight_kg: 12.5,
+            duration_seconds: 0,
+          },
+        ],
+        warnings: [],
+      }),
+    })
+  })
+
+  await page.goto("/Coach")
+  await page.getByPlaceholder(/log bench 80kg for 4 sets of 6/i).fill("I did preacher bicep dumbbells 12.5kg for 4 sets of 10")
+  await page.getByRole("button", { name: /^Send$/i }).click()
+
+  await expect(page.getByText(/logged your preacher bicep dumbbells/i)).toBeVisible()
+
+  await page.goto("/Workouts")
+  const recentSessionsSection = page.locator("section").filter({ has: page.getByRole("heading", { name: /recent sessions/i }) }).first()
+  await expect(recentSessionsSection.getByText(/preacher bicep dumbbells/i).first()).toBeVisible()
+  await expect(page.getByText(/4 structured sets logged so far\./i).first()).toBeVisible()
+  await expect(page.getByText("500kg").first()).toBeVisible()
+})
+
 test("logged workouts can be edited in place from Workouts and update volume", async ({ page }) => {
   const today = new Date().toISOString().slice(0, 10)
   await seedState(page, {

@@ -160,6 +160,39 @@ test("normalizeCoachResponse repairs a bare workout log action from the prompt c
   assert.equal(payload.actions[0].weight_kg, 80)
 })
 
+test("normalizeCoachResponse infers a workout log action when the reply says it saved the session", () => {
+  const payload = normalizeCoachResponse({
+    reply: "Awesome workout with the preacher curls! I'll log that for you now.",
+    actions: [],
+  }, {
+    prompt: "I did preacher bicep dumbbells 12.5kg for 4 sets of 10",
+  })
+
+  assert.equal(payload.actions[0].type, "log_workout")
+  assert.equal(payload.actions[0].exercise_name, "Preacher Bicep Dumbbells")
+  assert.equal(payload.actions[0].sets, 4)
+  assert.equal(payload.actions[0].reps, 10)
+  assert.equal(payload.actions[0].weight_kg, 12.5)
+})
+
+test("normalizeCoachResponse infers a meal log action when the reply says it saved the estimate", () => {
+  const payload = normalizeCoachResponse({
+    reply: "I've logged that meal estimate at 320 calories, 18g protein, 20g carbs, and 14g fat.",
+    actions: [],
+  }, {
+    prompt: "I had 2 eggs and 1 slice of rye toast with butter",
+  })
+
+  assert.equal(payload.actions[0].type, "log_meal")
+  assert.equal(payload.actions[0].food_name, "2 eggs and 1 slice of rye toast with butter")
+  assert.equal(payload.actions[0].meal_type, "snack")
+  assert.equal(payload.actions[0].calories, 320)
+  assert.equal(payload.actions[0].protein_g, 18)
+  assert.equal(payload.actions[0].carbs_g, 20)
+  assert.equal(payload.actions[0].fat_g, 14)
+  assert.match(payload.actions[0].nutrition_source, /Coach estimate/i)
+})
+
 test("normalizeCoachResponse downgrades broken meal logs to a clarifying reply", () => {
   const payload = normalizeCoachResponse({
     reply: "It sounds delicious! I'll log your burrito bowl now.",
