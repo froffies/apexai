@@ -38,6 +38,7 @@ export default class ErrorBoundary extends React.Component {
 
   render() {
     if (this.state.error) {
+      const showTechnicalDetails = import.meta.env.DEV || (typeof window !== "undefined" && window.localStorage.getItem("apexai.developerTools") === "true")
       return (
         <main className="flex min-h-screen items-center justify-center bg-slate-50 p-4">
           <section className="max-w-lg rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -48,7 +49,7 @@ export default class ErrorBoundary extends React.Component {
               <div>
                 <p className="text-sm font-semibold uppercase tracking-wide text-rose-600">Unexpected UI error</p>
                 <h1 className="mt-1 text-2xl font-bold text-slate-950">ApexAI hit a screen problem</h1>
-                <p className="mt-2 text-sm text-slate-600">Your saved data is still on device. We can reload, send you home, or copy crash diagnostics for debugging.</p>
+                <p className="mt-2 text-sm text-slate-600">Your saved data is still on device. Reload the app, head back home, or copy a support report if this keeps happening.</p>
                 {this.state.eventId && <p className="mt-2 text-xs font-medium text-slate-500">Event ID: {this.state.eventId}</p>}
               </div>
             </div>
@@ -65,10 +66,12 @@ export default class ErrorBoundary extends React.Component {
               </button>
             </div>
 
-            <details className="mt-4 rounded-lg bg-slate-50 p-3">
-              <summary className="cursor-pointer text-sm font-semibold text-slate-900">Technical details</summary>
-              <p className="mt-3 break-words text-sm text-slate-600">{this.state.error?.message || "Unknown render error"}</p>
-            </details>
+            {showTechnicalDetails && (
+              <details className="mt-4 rounded-lg bg-slate-50 p-3">
+                <summary className="cursor-pointer text-sm font-semibold text-slate-900">Technical details</summary>
+                <p className="mt-3 break-words text-sm text-slate-600">{this.state.error?.message || "Unknown render error"}</p>
+              </details>
+            )}
           </section>
         </main>
       )

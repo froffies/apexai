@@ -750,7 +750,7 @@ export default function Coach() {
     setQuickAction({ type })
   }
 
-  const useQuickOption = (option) => {
+  const handleQuickOption = (option) => {
     if (option.mode === "prefill") {
       focusComposer(option.prompt)
       return
@@ -958,7 +958,7 @@ export default function Coach() {
                   <button
                     key={option.label}
                     type="button"
-                    onClick={() => useQuickOption(option)}
+                    onClick={() => handleQuickOption(option)}
                     className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-left transition hover:border-indigo-300 hover:bg-indigo-50"
                   >
                     <p className="text-sm font-semibold text-slate-950">{option.label}</p>

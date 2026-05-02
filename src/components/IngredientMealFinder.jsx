@@ -171,6 +171,7 @@ export default function IngredientMealFinder() {
     if (chefMode === "verified_only") return builderResults.filter((food) => isVerifiedFoodResult(food))
     return builderResults
   }, [builderResults, chefMode])
+  const builderShowNoResults = builderSearch.trim().length >= 2 && !builderSearching && !filteredBuilderResults.length && !builderStatus
 
   const quickFoods = useMemo(() => ({
     favorites: favoriteFoods.slice(0, 6),
@@ -592,6 +593,11 @@ export default function IngredientMealFinder() {
               })}
             </div>
           )}
+          {builderShowNoResults && (
+            <div className="mt-3 rounded-lg border border-dashed border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
+              No matching foods came back for that search. Try a barcode, a brand name, or a simpler term like "beans", "oats", or "Greek yoghurt".
+            </div>
+          )}
 
           <div className="mt-4 rounded-lg bg-slate-50 p-3">
             <div className="flex items-center justify-between gap-3">
@@ -672,7 +678,11 @@ export default function IngredientMealFinder() {
               </button>
             </div>
           </div>
-          {builderStatus && <p className="mt-3 text-sm font-medium text-slate-600">{builderStatus}</p>}
+          {builderStatus && (
+            <p className={`mt-3 text-sm font-medium ${/failed|add at least|add foods first/i.test(builderStatus) ? "text-amber-700" : "text-emerald-700"}`}>
+              {builderStatus}
+            </p>
+          )}
         </div>
 
         <div className="rounded-lg border border-slate-200 p-4">

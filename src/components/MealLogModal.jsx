@@ -88,6 +88,7 @@ export default function MealLogModal({ defaultMealType = "breakfast", existingMe
 
   const favoriteKeys = useMemo(() => new Set(favoriteFoods.map((food) => foodLookupKey(food))), [favoriteFoods])
   const nutritionMemory = useMemo(() => buildNutritionMemory(allMeals, []), [allMeals])
+  const showNoResults = query.trim().length >= 2 && !searching && !matches.length && !status
   const quickFoods = useMemo(() => ({
     favorites: favoriteFoods.slice(0, 6),
     recent: recentFoods.slice(0, 6),
@@ -277,6 +278,11 @@ export default function MealLogModal({ defaultMealType = "breakfast", existingMe
               )
             })}
           </div>
+          {showNoResults && (
+            <div className="mt-3 rounded-lg border border-dashed border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
+              No matching foods came back for that search. Try a barcode, a brand name, or a simpler term like "tuna", "rice", or "yoghurt".
+            </div>
+          )}
         </div>
 
         <div className="mt-4 grid gap-3">
@@ -309,7 +315,11 @@ export default function MealLogModal({ defaultMealType = "breakfast", existingMe
           )}
           <textarea value={form.notes} onChange={(event) => update("notes", event.target.value)} placeholder="Notes" className="min-h-20 rounded-lg border border-slate-200 px-3 py-2 text-slate-950" />
         </div>
-        {status && <p className="mt-3 text-sm font-semibold text-amber-700">{status}</p>}
+        {status && (
+          <p className={`mt-3 text-sm font-semibold ${/failed|confirm|add a food name/i.test(status) ? "text-amber-700" : "text-emerald-700"}`}>
+            {status}
+          </p>
+        )}
         <button type="submit" className="mt-4 flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-3 font-semibold text-white">
           <Check size={18} /> {existingMeal ? "Save changes" : "Save meal"}
         </button>

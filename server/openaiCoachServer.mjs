@@ -25,12 +25,13 @@ const port = Number(process.env.PORT || process.env.OPENAI_COACH_PORT || 8787)
 const host = process.env.OPENAI_COACH_HOST || (process.env.PORT ? "0.0.0.0" : "127.0.0.1")
 const model = process.env.OPENAI_MODEL || "gpt-4o-mini"
 const nodeEnv = process.env.NODE_ENV || "development"
+const isProduction = nodeEnv === "production"
 const configuredCorsOrigins = (process.env.OPENAI_COACH_CORS_ORIGIN || (nodeEnv === "production" ? "" : "http://127.0.0.1:5173,http://localhost:5173,http://127.0.0.1:4173,http://localhost:4173")).split(",").map((origin) => origin.trim()).filter(Boolean)
 const fallbackCorsOrigin = configuredCorsOrigins[0] || "null"
 const client = process.env.OPENAI_API_KEY ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null
-const requireAuth = process.env.OPENAI_COACH_REQUIRE_AUTH ? process.env.OPENAI_COACH_REQUIRE_AUTH === "true" : nodeEnv === "production"
-const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || ""
-const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || ""
+const requireAuth = process.env.OPENAI_COACH_REQUIRE_AUTH ? process.env.OPENAI_COACH_REQUIRE_AUTH === "true" : isProduction
+const supabaseUrl = process.env.SUPABASE_URL || ""
+const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || ""
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || ""
 const serverSupabase = supabaseUrl && supabaseAnonKey ? createClient(supabaseUrl, supabaseAnonKey, { auth: { persistSession: false } }) : null
 const adminSupabase = supabaseUrl && supabaseServiceRoleKey ? createClient(supabaseUrl, supabaseServiceRoleKey, { auth: { persistSession: false } }) : null
@@ -248,19 +249,25 @@ Goals:
 - Do not claim perfect certainty. If the macro basis is mixed, say so briefly in notes.
 `
 
-function jsonHeaders() {
-  const origin = globalThis.currentRequestOrigin || fallbackCorsOrigin
+function jsonHeaders(origin = fallbackCorsOrigin) {
   return {
     "Content-Type": "application/json",
     "Access-Control-Allow-Origin": origin,
     "Access-Control-Allow-Credentials": "true",
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    "Access-Control-Max-Age": "86400",
+    "Cache-Control": "no-store",
+    "Pragma": "no-cache",
+    "Referrer-Policy": "no-referrer",
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    Vary: "Origin",
   }
 }
 
-function sendJson(response, status, data) {
-  response.writeHead(status, jsonHeaders())
+function sendJson(response, status, data, origin = fallbackCorsOrigin) {
+  response.writeHead(status, jsonHeaders(origin))
   response.end(JSON.stringify(data))
 }
 
@@ -275,11 +282,15 @@ function requestOrigin(request) {
 function applyCors(request) {
   const origin = requestOrigin(request)
   if (!origin || configuredCorsOrigins.includes(origin)) {
-    globalThis.currentRequestOrigin = origin || fallbackCorsOrigin
+    request.apexOrigin = origin || fallbackCorsOrigin
     return true
   }
-  globalThis.currentRequestOrigin = fallbackCorsOrigin
+  request.apexOrigin = fallbackCorsOrigin
   return false
+}
+
+function requestResponseOrigin(request) {
+  return request.apexOrigin || fallbackCorsOrigin
 }
 
 function logRequest(request, status, extra = "") {
@@ -313,7 +324,9 @@ function readRequestBody(request) {
     request.on("data", (chunk) => {
       body += chunk
       if (body.length > 1_000_000) {
-        reject(new Error("Request body too large"))
+        const error = new Error("Request body too large")
+        error.status = 413
+        reject(error)
         request.destroy()
       }
     })
@@ -321,7 +334,9 @@ function readRequestBody(request) {
       try {
         resolve(body ? JSON.parse(body) : {})
       } catch {
-        reject(new Error("Invalid JSON request body"))
+        const error = new Error("Invalid JSON request body")
+        error.status = 400
+        reject(error)
       }
     })
     request.on("error", reject)
@@ -414,6 +429,31 @@ function validateTelemetryBody(body) {
     error.status = 400
     throw error
   }
+}
+
+function createHttpError(status, message, options = {}) {
+  const error = new Error(message)
+  error.status = status
+  error.expose = options.expose ?? status < 500
+  error.logMessage = options.logMessage || message
+  return error
+}
+
+function sanitizeErrorMessage(error, fallbackMessage) {
+  if (!isProduction || error?.expose || (error?.status && error.status < 500)) {
+    return error instanceof Error ? error.message : fallbackMessage
+  }
+  return fallbackMessage
+}
+
+function sendError(response, request, error, fallbackMessage) {
+  const status = error?.status || 500
+  sendJson(
+    response,
+    status,
+    { error: sanitizeErrorMessage(error, fallbackMessage) },
+    requestResponseOrigin(request)
+  )
 }
 
 async function verifyBearerUser(request) {
@@ -619,15 +659,15 @@ function normalizeSingleOpenFoodFactsProduct(product, sourceType = "barcode_labe
 }
 
 async function handleCoach(request, response) {
-  await verifyRequestAuth(request, { optional: true })
+  await verifyRequestAuth(request)
   const body = await readRequestBody(request)
   validateCoachBody(body)
 
   if (!client) {
-    sendJson(response, 503, {
-      error: "OPENAI_API_KEY is not set. Start the AI server with an OpenAI API key to enable the live coach.",
+    throw createHttpError(503, "Live coach is unavailable right now.", {
+      expose: true,
+      logMessage: "OPENAI_API_KEY is not set for the coach server",
     })
-    return
   }
 
   const candidateFoodMatches = {}
@@ -671,7 +711,7 @@ async function handleCoach(request, response) {
   })
 
   const parsed = JSON.parse(completion.choices[0]?.message?.content || "{}")
-  sendJson(response, 200, normalizeCoachResponse(parsed, { prompt: body.message, recentMessages: contextualRecentMessages }))
+  sendJson(response, 200, normalizeCoachResponse(parsed, { prompt: body.message, recentMessages: contextualRecentMessages }), requestResponseOrigin(request))
 }
 
 function verifiedNutritionResult(food) {
@@ -746,12 +786,12 @@ function extractIngredientTerms(text) {
 }
 
 async function handleNutritionSearch(request, response) {
-  await verifyRequestAuth(request, { optional: true })
+  await verifyRequestAuth(request)
   const body = await readRequestBody(request)
   validateNutritionBody(body)
   const query = String(body.query || "")
   const results = await lookupFoodsBroad(query)
-  sendJson(response, 200, { results })
+  sendJson(response, 200, { results }, requestResponseOrigin(request))
 }
 
 function normalizeChefResponse(value) {
@@ -800,15 +840,15 @@ function normalizeChefResponse(value) {
 }
 
 async function handleNutritionChef(request, response) {
-  await verifyRequestAuth(request, { optional: true })
+  await verifyRequestAuth(request)
   const body = await readRequestBody(request)
   validateNutritionChefBody(body)
 
   if (!client) {
-    sendJson(response, 503, {
-      error: "OPENAI_API_KEY is not set. Start the AI server with an OpenAI API key to enable AI chef recipes.",
+    throw createHttpError(503, "Recipe generation is unavailable right now.", {
+      expose: true,
+      logMessage: "OPENAI_API_KEY is not set for nutrition chef",
     })
-    return
   }
 
   const pantry = String(body.pantry || "")
@@ -842,27 +882,31 @@ async function handleNutritionChef(request, response) {
   })
 
   const parsed = JSON.parse(completion.choices[0]?.message?.content || "{}")
-  sendJson(response, 200, { recipe: normalizeChefResponse(parsed) })
+  sendJson(response, 200, { recipe: normalizeChefResponse(parsed) }, requestResponseOrigin(request))
 }
 
 async function handleDeleteAccount(request, response) {
   const user = await verifyBearerUser(request)
   if (!user) {
-    const error = new Error("Account deletion requires authenticated requests")
-    error.status = 401
-    throw error
+    throw createHttpError(401, "Account deletion requires an authenticated session.")
   }
   if (!adminSupabase) {
-    const error = new Error("SUPABASE_SERVICE_ROLE_KEY is required for permanent account deletion")
-    error.status = 501
-    throw error
+    throw createHttpError(503, "Account deletion is unavailable right now.", {
+      expose: true,
+      logMessage: "SUPABASE_SERVICE_ROLE_KEY is not configured for account deletion",
+    })
   }
 
-  await adminSupabase.from("user_app_state").delete().eq("user_id", user.id)
-  await adminSupabase.from("user_profiles").delete().eq("user_id", user.id)
+  const [{ error: stateDeleteError }, { error: profileDeleteError }] = await Promise.all([
+    adminSupabase.from("user_app_state").delete().eq("user_id", user.id),
+    adminSupabase.from("user_profiles").delete().eq("user_id", user.id),
+  ])
+  if (stateDeleteError) throw stateDeleteError
+  if (profileDeleteError) throw profileDeleteError
+
   const { error } = await adminSupabase.auth.admin.deleteUser(user.id)
   if (error) throw error
-  sendJson(response, 200, { deleted: true })
+  sendJson(response, 200, { deleted: true }, requestResponseOrigin(request))
 }
 
 async function handleTelemetry(request, response) {
@@ -883,25 +927,25 @@ async function handleTelemetry(request, response) {
 
   fs.mkdirSync(path.dirname(telemetryLogFile), { recursive: true })
   fs.appendFileSync(telemetryLogFile, `${JSON.stringify(entry)}\n`, "utf8")
-  sendJson(response, 202, { accepted: true })
+  sendJson(response, 202, { accepted: true }, requestResponseOrigin(request))
 }
 
 const server = http.createServer(async (request, response) => {
   const corsAllowed = applyCors(request)
   if (!corsAllowed) {
     logRequest(request, 403, "blocked=cors")
-    sendJson(response, 403, { error: "Origin not allowed" })
+    sendJson(response, 403, { error: "Origin not allowed" }, requestResponseOrigin(request))
     return
   }
 
   if (request.method === "OPTIONS") {
-    response.writeHead(204, jsonHeaders())
+    response.writeHead(204, jsonHeaders(requestResponseOrigin(request)))
     response.end()
     return
   }
 
   if (request.method === "GET" && request.url === "/health") {
-    sendJson(response, 200, { ok: true, model, openaiConfigured: Boolean(client), authRequired: requireAuth, supabaseConfigured: Boolean(serverSupabase), adminConfigured: Boolean(adminSupabase), corsOrigins: configuredCorsOrigins })
+    sendJson(response, 200, { ok: true, model, openaiConfigured: Boolean(client), authRequired: requireAuth, supabaseConfigured: Boolean(serverSupabase), adminConfigured: Boolean(adminSupabase), corsOrigins: configuredCorsOrigins }, requestResponseOrigin(request))
     return
   }
 
@@ -913,7 +957,7 @@ const server = http.createServer(async (request, response) => {
     } catch (error) {
       const status = error.status || 500
       logRequest(request, status, "handler=coach")
-      sendJson(response, status, { error: error instanceof Error ? error.message : "AI coach request failed" })
+      sendError(response, request, error, "Live coach is unavailable right now.")
     }
     return
   }
@@ -926,7 +970,7 @@ const server = http.createServer(async (request, response) => {
     } catch (error) {
       const status = error.status || 500
       logRequest(request, status, "handler=nutrition")
-      sendJson(response, status, { error: error instanceof Error ? error.message : "Nutrition search failed" })
+      sendError(response, request, error, "Nutrition search is unavailable right now.")
     }
     return
   }
@@ -939,7 +983,7 @@ const server = http.createServer(async (request, response) => {
     } catch (error) {
       const status = error.status || 500
       logRequest(request, status, "handler=nutrition-chef")
-      sendJson(response, status, { error: error instanceof Error ? error.message : "AI chef request failed" })
+      sendError(response, request, error, "Recipe generation is unavailable right now.")
     }
     return
   }
@@ -952,7 +996,7 @@ const server = http.createServer(async (request, response) => {
     } catch (error) {
       const status = error.status || 500
       logRequest(request, status, "handler=delete-account")
-      sendJson(response, status, { error: error instanceof Error ? error.message : "Account deletion failed" })
+      sendError(response, request, error, "Account deletion failed.")
     }
     return
   }
@@ -965,12 +1009,12 @@ const server = http.createServer(async (request, response) => {
     } catch (error) {
       const status = error.status || 500
       logRequest(request, status, "handler=telemetry")
-      sendJson(response, status, { error: error instanceof Error ? error.message : "Telemetry request failed" })
+      sendError(response, request, error, "Telemetry request failed.")
     }
     return
   }
 
-  sendJson(response, 404, { error: "Not found" })
+  sendJson(response, 404, { error: "Not found" }, requestResponseOrigin(request))
 })
 
 server.listen(port, host, () => {

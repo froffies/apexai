@@ -42,7 +42,7 @@ async function waitForServerExit(serverProcess, timeoutMs = 50) {
   })
 }
 
-test("local API server exposes health, local nutrition, telemetry, and coach fallback", async (t) => {
+test("local API server exposes health, local nutrition, telemetry, and sanitized coach fallback", async (t) => {
   const port = randomPort()
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "apexai-server-test-"))
   const telemetryFile = path.join(tempDir, "telemetry.ndjson")
@@ -56,6 +56,7 @@ test("local API server exposes health, local nutrition, telemetry, and coach fal
       OPENFOODFACTS_ENABLED: "false",
       TELEMETRY_LOG_FILE: telemetryFile,
       OPENAI_API_KEY: "",
+      NODE_ENV: "production",
     },
     stdio: ["ignore", "pipe", "pipe"],
   })
@@ -87,10 +88,16 @@ test("local API server exposes health, local nutrition, telemetry, and coach fal
   const health = await healthResponse.json()
   assert.equal(health.ok, true)
   assert.equal(health.authRequired, false)
+  assert.match(healthResponse.headers.get("access-control-allow-methods") || "", /GET/)
+  assert.equal(healthResponse.headers.get("cache-control"), "no-store")
+  assert.equal(healthResponse.headers.get("x-content-type-options"), "nosniff")
 
   const nutritionResponse = await fetch(`http://127.0.0.1:${port}/api/nutrition/search`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      Origin: "http://127.0.0.1:5173",
+    },
     body: JSON.stringify({ query: "oats" }),
   })
   const nutrition = await nutritionResponse.json()
@@ -100,7 +107,10 @@ test("local API server exposes health, local nutrition, telemetry, and coach fal
 
   const telemetryResponse = await fetch(`http://127.0.0.1:${port}/api/telemetry`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      Origin: "http://127.0.0.1:5173",
+    },
     body: JSON.stringify({ type: "test_event", level: "info", payload: { scope: "server-test" } }),
   })
   const telemetry = await telemetryResponse.json()
@@ -111,12 +121,64 @@ test("local API server exposes health, local nutrition, telemetry, and coach fal
 
   const coachResponse = await fetch(`http://127.0.0.1:${port}/api/coach`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      Origin: "http://127.0.0.1:5173",
+    },
     body: JSON.stringify({ message: "Log bench press 80kg for 4 sets of 6" }),
   })
   const coach = await coachResponse.json()
   assert.equal(coachResponse.status, 503)
-  assert.match(coach.error, /OPENAI_API_KEY/i)
+  assert.equal(coach.error, "Live coach is unavailable right now.")
 
   assert.match(output, /ApexAI OpenAI coach server listening/i)
+})
+
+test("protected API endpoints require auth when production auth is enabled", async (t) => {
+  const port = randomPort()
+  const serverProcess = spawn(process.execPath, [serverEntry], {
+    cwd,
+    env: {
+      ...process.env,
+      OPENAI_COACH_PORT: String(port),
+      OPENAI_COACH_REQUIRE_AUTH: "true",
+      OPENAI_COACH_CORS_ORIGIN: "http://127.0.0.1:5173",
+      OPENFOODFACTS_ENABLED: "false",
+      OPENAI_API_KEY: "",
+      NODE_ENV: "production",
+      SUPABASE_URL: "https://example.supabase.co",
+      SUPABASE_ANON_KEY: "test-anon-key",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  })
+
+  t.after(async () => {
+    serverProcess.kill()
+  })
+
+  await waitForHealth(port)
+
+  const coachResponse = await fetch(`http://127.0.0.1:${port}/api/coach`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Origin: "http://127.0.0.1:5173",
+    },
+    body: JSON.stringify({ message: "hello" }),
+  })
+  const coach = await coachResponse.json()
+  assert.equal(coachResponse.status, 401)
+  assert.match(coach.error, /Missing Authorization bearer token/i)
+
+  const nutritionResponse = await fetch(`http://127.0.0.1:${port}/api/nutrition/search`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Origin: "http://127.0.0.1:5173",
+    },
+    body: JSON.stringify({ query: "oats" }),
+  })
+  const nutrition = await nutritionResponse.json()
+  assert.equal(nutritionResponse.status, 401)
+  assert.match(nutrition.error, /Missing Authorization bearer token/i)
 })

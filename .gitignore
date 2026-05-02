@@ -5,6 +5,8 @@ playwright-report/
 server-data/
 .env
 .env.local
+.env.*
+!.env.example
 *.log
 vite-dev.log
 vite-dev.err.log

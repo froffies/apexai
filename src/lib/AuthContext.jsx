@@ -30,10 +30,20 @@ function mapSupabaseUser(user) {
 
 export function AuthProvider({ children }) {
   const cloudConfigured = isCloudConfigured()
-  const [localMode, setLocalMode] = useState(() => window.localStorage.getItem("apexai.localMode") === "true")
-  const [user, setUser] = useState(cloudConfigured && !localMode ? null : localUser)
-  const [isLoadingAuth, setIsLoadingAuth] = useState(cloudConfigured && !localMode)
+  const localModeAllowed = !cloudConfigured || import.meta.env.DEV || import.meta.env.VITE_APEXAI_ALLOW_LOCAL_MODE === "true"
+  const [localMode, setLocalMode] = useState(() => localModeAllowed && window.localStorage.getItem("apexai.localMode") === "true")
+  const [user, setUser] = useState(cloudConfigured && !(localModeAllowed && localMode) ? null : localUser)
+  const [isLoadingAuth, setIsLoadingAuth] = useState(cloudConfigured && !(localModeAllowed && localMode))
   const [cloudStatus, setCloudStatus] = useState(cloudConfigured ? "Cloud auth ready" : "Local mode")
+
+  useEffect(() => {
+    if (localModeAllowed || typeof window === "undefined") return
+    window.localStorage.removeItem("apexai.localMode")
+    if (localMode) {
+      setLocalMode(false)
+      setUser(cloudConfigured ? null : localUser)
+    }
+  }, [cloudConfigured, localMode, localModeAllowed])
 
   useEffect(() => {
     if (!cloudConfigured || localMode || !supabase) {
@@ -90,7 +100,7 @@ export function AuthProvider({ children }) {
       mounted = false
       subscription.subscription.unsubscribe()
     }
-  }, [cloudConfigured, localMode])
+  }, [cloudConfigured, localMode, localModeAllowed])
 
   const signInWithEmail = async (email, password) => {
     if (!supabase) throw new Error("Supabase is not configured")
@@ -109,6 +119,10 @@ export function AuthProvider({ children }) {
   }
 
   const continueLocally = () => {
+    if (!localModeAllowed) {
+      setCloudStatus("Sign in is required on this app.")
+      return
+    }
     window.localStorage.setItem("apexai.localMode", "true")
     setLocalMode(true)
     setUser(localUser)
@@ -128,6 +142,9 @@ export function AuthProvider({ children }) {
   const deleteAccountPermanently = async () => {
     if (!cloudConfigured || localMode) return
     await deleteRemoteAccount()
+    if (supabase) await supabase.auth.signOut()
+    window.localStorage.removeItem("apexai.localMode")
+    setLocalMode(false)
     setUser(null)
     setCloudUser(null)
   }
@@ -156,6 +173,7 @@ export function AuthProvider({ children }) {
       cloudConfigured,
       cloudStatus,
       localMode,
+      localModeAllowed,
       setUser,
       signInWithEmail,
       signUpWithEmail,
@@ -168,7 +186,7 @@ export function AuthProvider({ children }) {
       navigateToLogin: () => undefined,
       logout,
     }),
-    [cloudConfigured, cloudStatus, isLoadingAuth, localMode, user]
+    [cloudConfigured, cloudStatus, isLoadingAuth, localMode, localModeAllowed, user]
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
