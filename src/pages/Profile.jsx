@@ -12,7 +12,7 @@ const DataManager = lazy(() => import("@/components/DataManager"))
 const NativeIntegrationPanel = lazy(() => import("@/components/NativeIntegrationPanel"))
 
 export default function Profile() {
-  const { cloudConfigured, localMode, deleteAccountPermanently } = useAuth()
+  const { user, cloudConfigured, cloudStatus, localMode, logout, deleteAccountPermanently } = useAuth()
   const [profile, setProfile] = useLocalStorage(storageKeys.profile, defaultProfile)
   const [meals] = useLocalStorage(storageKeys.meals, starterMeals)
   const [workouts] = useLocalStorage(storageKeys.workouts, starterWorkouts)
@@ -74,6 +74,28 @@ export default function Profile() {
         subtitle="These targets drive the dashboard, coach suggestions, and daily macro pacing."
         action={<button type="button" onClick={() => setEditingTargets(true)} className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm">Edit macros</button>}
       />
+
+      <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-lg font-bold text-slate-950">Account</h2>
+            <p className="mt-1 text-sm text-slate-600">
+              {cloudConfigured && !localMode
+                ? `${user?.email || "Signed-in account"} • ${cloudStatus || "Cloud sync active"}`
+                : "You're using ApexAI on this device only."}
+            </p>
+          </div>
+          {cloudConfigured && !localMode ? (
+            <button type="button" onClick={() => void logout()} className="min-h-11 rounded-lg border border-slate-200 px-4 text-sm font-semibold text-slate-700">
+              Sign out
+            </button>
+          ) : (
+            <div className="rounded-lg bg-slate-100 px-3 py-2 text-sm font-medium text-slate-600">
+              Local mode
+            </div>
+          )}
+        </div>
+      </section>
 
       <form onSubmit={save} className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
         <div className="grid gap-4 md:grid-cols-2">

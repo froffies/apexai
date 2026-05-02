@@ -19,4 +19,7 @@ test("cloud auth sign-in flow works when Supabase credentials are configured", a
 
   await expect(page.getByRole("heading", { name: /sign in to continue/i })).toHaveCount(0)
   await expect(page).toHaveURL(/(\/|\/onboarding)$/)
+  await page.reload()
+  await expect(page.getByRole("heading", { name: /sign in to continue/i })).toHaveCount(0)
+  await expect(page).toHaveURL(/(\/|\/onboarding)$/)
 })
