@@ -141,10 +141,10 @@ export function recommendProgressionBlock({ profile = {}, progress = [], workout
   const previousVolume = average(weeklyVolume.slice(-4, -2).map((entry) => entry.volume))
 
   let phase = "build"
-  let title = "Build block"
+  let title = "Base training phase"
   let durationWeeks = 4
-  let summary = `Stay in a normal build block for your ${goalLabel(goal).toLowerCase()} goal.`
-  let adjustments = ["Progress load when reps stay clean and sleep is stable."]
+  let summary = `You're in your normal training phase for ${goalLabel(goal).toLowerCase()}. Build steadily while recovery stays consistent.`
+  let adjustments = ["Progress load when reps stay clean and recovery feels steady."]
 
   if (lowRecoveryDays >= 2 || (averageSleep && averageSleep < 6)) {
     phase = "deload"

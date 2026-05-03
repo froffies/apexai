@@ -11,6 +11,16 @@ const localUser = {
   provider: "local",
 }
 
+const cloudStatusMessages = {
+  ready: "Cloud auth ready",
+  active: "Cloud sync active",
+  local: "Local mode",
+  signInRequired: "Sign in is required on this app.",
+  signOut: "Signed out",
+  authIssue: "We couldn't refresh your account right now.",
+  syncDelay: "Sync is taking longer than usual.",
+}
+
 function withTimeout(promise, ms) {
   return Promise.race([
     promise,
@@ -34,7 +44,7 @@ export function AuthProvider({ children }) {
   const [localMode, setLocalMode] = useState(() => localModeAllowed && window.localStorage.getItem("apexai.localMode") === "true")
   const [user, setUser] = useState(cloudConfigured && !(localModeAllowed && localMode) ? null : localUser)
   const [isLoadingAuth, setIsLoadingAuth] = useState(cloudConfigured && !(localModeAllowed && localMode))
-  const [cloudStatus, setCloudStatus] = useState(cloudConfigured ? "Cloud auth ready" : "Local mode")
+  const [cloudStatus, setCloudStatus] = useState(cloudConfigured ? cloudStatusMessages.ready : cloudStatusMessages.local)
 
   useEffect(() => {
     if (localModeAllowed || typeof window === "undefined") return
@@ -54,6 +64,17 @@ export function AuthProvider({ children }) {
 
     let mounted = true
 
+    const syncCloudState = async (mappedUser) => {
+      if (!mappedUser || !mounted) return
+      try {
+        const hydratedCount = await withTimeout(hydrateCloudState(), 8000)
+        if (!hydratedCount) await withTimeout(syncAllLocalToCloud(), 8000)
+        if (mounted) setCloudStatus(cloudStatusMessages.active)
+      } catch {
+        if (mounted) setCloudStatus(cloudStatusMessages.syncDelay)
+      }
+    }
+
     const loadSession = async () => {
       try {
         const { data } = await withTimeout(supabase.auth.getSession(), 8000)
@@ -61,17 +82,14 @@ export function AuthProvider({ children }) {
         const mappedUser = mapSupabaseUser(data.session?.user)
         setUser(mappedUser)
         setCloudUser(mappedUser)
-        if (mappedUser) {
-          try {
-            const hydratedCount = await withTimeout(hydrateCloudState(), 8000)
-            if (!hydratedCount) await withTimeout(syncAllLocalToCloud(), 8000)
-            if (mounted) setCloudStatus("Cloud sync active")
-          } catch (error) {
-            if (mounted) setCloudStatus(error instanceof Error ? error.message : "Cloud sync failed")
-          }
+        if (mounted) setIsLoadingAuth(false)
+        if (mappedUser) void syncCloudState(mappedUser)
+        else if (mounted) setCloudStatus(cloudStatusMessages.ready)
+      } catch {
+        if (mounted) {
+          setCloudStatus(cloudStatusMessages.authIssue)
+          setIsLoadingAuth(false)
         }
-      } catch (error) {
-        if (mounted) setCloudStatus(error instanceof Error ? error.message : "Auth failed")
       } finally {
         if (mounted) setIsLoadingAuth(false)
       }
@@ -85,15 +103,9 @@ export function AuthProvider({ children }) {
       const mappedUser = mapSupabaseUser(session?.user)
       setUser(mappedUser)
       setCloudUser(mappedUser)
-      if (mappedUser) {
-        try {
-          const hydratedCount = await withTimeout(hydrateCloudState(), 8000)
-          if (!hydratedCount) await withTimeout(syncAllLocalToCloud(), 8000)
-          if (mounted) setCloudStatus("Cloud sync active")
-        } catch (error) {
-          if (mounted) setCloudStatus(error instanceof Error ? error.message : "Cloud sync failed")
-        }
-      }
+      setIsLoadingAuth(false)
+      if (mappedUser) void syncCloudState(mappedUser)
+      else if (mounted) setCloudStatus(cloudStatusMessages.signOut)
     })
 
     return () => {
@@ -120,19 +132,19 @@ export function AuthProvider({ children }) {
 
   const continueLocally = () => {
     if (!localModeAllowed) {
-      setCloudStatus("Sign in is required on this app.")
+      setCloudStatus(cloudStatusMessages.signInRequired)
       return
     }
     window.localStorage.setItem("apexai.localMode", "true")
     setLocalMode(true)
     setUser(localUser)
     setCloudUser(null)
-    setCloudStatus("Local mode")
+    setCloudStatus(cloudStatusMessages.local)
   }
 
   const syncNow = async () => {
     await syncAllLocalToCloud()
-    setCloudStatus("Cloud sync active")
+    setCloudStatus(cloudStatusMessages.active)
   }
 
   const deleteAccountData = async () => {

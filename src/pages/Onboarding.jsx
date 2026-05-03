@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
+import { useNavigate } from "react-router-dom"
 import { ArrowRight, CheckCircle2, Dumbbell, Flame, Sparkles, Target, Utensils } from "lucide-react"
 import ChoiceGrid from "@/components/ChoiceGrid"
 import PageHeader from "@/components/PageHeader"
@@ -169,6 +170,7 @@ function OptionCard({ option, selected, onSelect, kind }) {
 }
 
 export default function Onboarding() {
+  const navigate = useNavigate()
   const [profile, setProfile] = useLocalStorage(storageKeys.profile, defaultProfile)
   const [workoutPlans, setWorkoutPlans] = useLocalStorage(storageKeys.workoutPlans, [])
   const [mealPlans, setMealPlans] = useLocalStorage(storageKeys.mealPlans, [])
@@ -253,7 +255,7 @@ export default function Onboarding() {
     setMealPlans(nextMealPlans)
     setProgress(nextProgress)
     window.dispatchEvent(new CustomEvent("apexai-storage", { detail: { key: "*" } }))
-    window.location.assign("/")
+    navigate("/", { replace: true })
   }
 
   return (

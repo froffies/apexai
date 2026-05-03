@@ -70,9 +70,9 @@ export default function Profile() {
     <div className="mx-auto flex max-w-5xl flex-col gap-6 p-4 sm:p-6 lg:p-8">
       <PageHeader
         eyebrow="Profile"
-        title="Plan settings"
-        subtitle="These targets drive the dashboard, coach suggestions, and daily macro pacing."
-        action={<button type="button" onClick={() => setEditingTargets(true)} className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm">Edit macros</button>}
+        title="Profile and targets"
+        subtitle="Keep your personal details, nutrition targets, and training preferences up to date."
+        action={<button type="button" onClick={() => setEditingTargets(true)} className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm">Adjust targets</button>}
       />
 
       <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">

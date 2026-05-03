@@ -98,7 +98,7 @@ export function generateLocalChefRecipe(pantry, mealType = "dinner", servings = 
       name: term,
       quantity: "to taste",
       estimated: true,
-      source: "Offline fallback could not verify this ingredient precisely",
+      source: "Estimated from your ingredient list",
       source_type: "estimated",
       calories: 0,
       protein_g: 0,
@@ -109,7 +109,7 @@ export function generateLocalChefRecipe(pantry, mealType = "dinner", servings = 
 
   return recalcRecipeFromIngredients({
     title: matchedFoods.length > 1 ? `${matchedFoods[0].name} pantry bowl` : suggestion.name,
-    description: "Offline pantry recipe built from the local verified catalogue while live recipe generation is unavailable.",
+    description: "Pantry recipe built from the local verified catalogue while live recipe help is unavailable.",
     meal_type: mealType,
     servings: safeServings,
     ingredients,
@@ -119,7 +119,7 @@ export function generateLocalChefRecipe(pantry, mealType = "dinner", servings = 
       "Plate the meal, then adjust portion size to fit the macro target shown below.",
     ],
     notes: allowEstimated
-      ? "Offline fallback recipe. For broader pantry matching and smarter recipes, run the nutrition server with OpenAI enabled."
-      : "Offline verified-only fallback. Unmatched pantry items were omitted because estimates are disabled.",
+      ? "This recipe uses the local food catalogue and may estimate unmatched ingredients from what you entered."
+      : "This recipe only uses ingredients the app could verify in the local catalogue.",
   })
 }
