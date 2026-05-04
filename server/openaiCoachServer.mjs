@@ -4,6 +4,7 @@ import path from "node:path"
 import OpenAI from "openai"
 import { createClient } from "@supabase/supabase-js"
 import { searchVerifiedFoods, verifiedFoods } from "../src/lib/nutritionDatabase.js"
+import { buildMealContext, mealStateNeedsClarification } from "./mealStateBuilder.mjs"
 import { normalizeCoachResponse } from "./normalizeCoachResponse.mjs"
 
 function loadDotEnv() {
@@ -249,6 +250,38 @@ Goals:
 - Do not claim perfect certainty. If the macro basis is mixed, say so briefly in notes.
 `
 
+const mealCoachInstructions = `
+You are ApexAI's dedicated meal logging specialist inside an Australian fitness app.
+
+Return JSON only with exactly this structure:
+{
+  "reply": "Short user-facing response",
+  "actions": [],
+  "warnings": []
+}
+
+Valid action types here are: none, clarify, log_meal, update_meal_log.
+
+You will receive a structured meal_context that already merges fragmented conversation history across turns.
+
+Critical rules:
+- Treat meal_context as the source of truth for the meal so far.
+- Do not ask for information that meal_context already contains.
+- Backend state, not your judgement, decides whether the meal is ready to log.
+- If meal_context.ready_to_log is true, stop clarifying and return one combined log_meal or update_meal_log action now.
+- If meal_context.clarification_attempts is 2 or more, prioritise logging with reasonable estimates instead of asking another follow-up.
+- Use meal_context.summary as the canonical combined meal description. Do not drop previously captured foods.
+- If the user corrected a quantity or ingredient, use the latest value from meal_context.
+- If the user described one eating event over multiple turns, log it as one combined meal.
+- Never split one eating event into multiple log_meal actions for separate sub-items.
+- Never ask for information already present in meal_context.items, meal_context.summary, or recent_messages.
+- If the user began by saying they had or ate the meal, treat that as logging intent.
+- Only ask a clarification question when a critical logging detail is still missing and meal_context says it is not ready yet.
+- If you say the meal was logged or saved, you MUST include a real log_meal or update_meal_log action with calories, protein_g, carbs_g, fat_g, quantity, estimated, nutrition_source, and food_name.
+- If meal_context.summary already gives enough detail, do not ask more questions just because the quantity is unusual. 17 eggs is unusual, not impossible.
+- Keep the reply concise and mobile-friendly. Prefer 1-2 short sentences.
+`
+
 function jsonHeaders(origin = fallbackCorsOrigin) {
   return {
     "Content-Type": "application/json",
@@ -345,6 +378,21 @@ function readRequestBody(request) {
 
 function safeArray(value, limit) {
   return Array.isArray(value) ? value.slice(0, limit) : []
+}
+
+function safeRecentArray(value, limit) {
+  return Array.isArray(value) ? value.slice(-limit) : []
+}
+
+function normalizeRecentMessages(value, currentMessage, limit = 18) {
+  const messages = safeRecentArray(value, limit)
+  if (!messages.length) return messages
+  const normalizedCurrent = String(currentMessage || "").trim()
+  const last = messages[messages.length - 1]
+  if (last?.role === "user" && String(last.content || "").trim() === normalizedCurrent) {
+    return messages.slice(0, -1)
+  }
+  return messages
 }
 
 function assertObject(value, label) {
@@ -581,6 +629,16 @@ function extractCoachFoodSearchTerms(message) {
     .slice(0, 4)
 }
 
+function buildMealCandidateFoodTerms(mealContext) {
+  if (!mealContext?.items?.length) return []
+  return [...new Set(
+    mealContext.items
+      .flatMap((item) => [item.base_name, item.label])
+      .map((term) => cleanLookupText(term))
+      .filter(Boolean)
+  )].slice(0, 4)
+}
+
 function isLikelyCoachFoodTurn(message, recentMessages = []) {
   const text = cleanLookupText(message)
   if (!text) return false
@@ -670,18 +728,72 @@ async function handleCoach(request, response) {
     })
   }
 
+  const contextualRecentMessages = needsRecentChatContext(body.message)
+    ? normalizeRecentMessages(body.recentMessages, body.message, 18)
+    : []
+  const mealContext = buildMealContext(contextualRecentMessages, body.message, body.mealSession || null)
+
   const candidateFoodMatches = {}
-  if (shouldHydrateCoachFoodMatches(body.message, body.recentMessages)) {
-    const candidateFoodTerms = buildCoachCandidateFoodTerms(body.message, body.recentMessages)
+  const candidateFoodTerms = mealContext
+    ? buildMealCandidateFoodTerms(mealContext)
+    : shouldHydrateCoachFoodMatches(body.message, body.recentMessages)
+      ? buildCoachCandidateFoodTerms(body.message, body.recentMessages)
+      : []
+  if (candidateFoodTerms.length) {
     const foodLookups = await Promise.all(candidateFoodTerms.map(async (term) => [term, (await lookupFoodsBroad(term)).slice(0, 6)]))
     for (const [term, matches] of foodLookups) {
       candidateFoodMatches[term] = matches
     }
   }
 
-  const contextualRecentMessages = needsRecentChatContext(body.message)
-    ? safeArray(body.recentMessages, 4)
-    : []
+  if (mealContext && mealStateNeedsClarification(mealContext)) {
+    const clarifyMessage = mealContext.clarifyQuestion || "I need a bit more detail before I can log that meal."
+    sendJson(response, 200, {
+      reply: clarifyMessage,
+      actions: [{ type: "clarify", message: clarifyMessage }],
+      warnings: [],
+      meal_session: mealContext,
+    }, requestResponseOrigin(request))
+    return
+  }
+
+  if (mealContext) {
+    const mealPayload = {
+      current_date: new Date().toISOString().slice(0, 10),
+      user_message: String(body.message || ""),
+      profile: body.profile || {},
+      meal_context: mealContext,
+      recent_messages: safeRecentArray(mealContext.thread_messages, 8),
+      recent_meals: safeArray(body.meals, 6),
+      candidate_food_matches: candidateFoodMatches,
+    }
+
+    const completion = await client.chat.completions.create({
+      model,
+      max_completion_tokens: 350,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: mealCoachInstructions },
+        { role: "user", content: JSON.stringify(mealPayload) },
+      ],
+    })
+
+    const parsed = JSON.parse(completion.choices[0]?.message?.content || "{}")
+      sendJson(
+        response,
+        200,
+        {
+          ...normalizeCoachResponse(parsed, {
+            prompt: body.message,
+            recentMessages: contextualRecentMessages,
+            mealContext,
+          }),
+          meal_session: mealContext,
+        },
+        requestResponseOrigin(request)
+      )
+      return
+    }
 
   const payload = {
     current_date: new Date().toISOString().slice(0, 10),
@@ -697,6 +809,7 @@ async function handleCoach(request, response) {
     active_workout: body.activeWorkout || null,
     verified_food_catalogue: verifiedFoods,
     candidate_food_matches: candidateFoodMatches,
+    meal_context: mealContext,
   }
 
 

@@ -6,6 +6,7 @@ const dataPrefix = "apexai."
 const schemaVersion = 1
 const cloudExcludedKeys = new Set([
   "apexai.telemetry.buffer",
+  "apexai.coachMealSession",
 ])
 let cloudUser = null
 let syncPaused = false

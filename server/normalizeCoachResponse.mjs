@@ -91,12 +91,6 @@ function looksLikeWorkoutPlanPrompt(prompt) {
     || /\bwhat should i train\b/.test(text)
 }
 
-function looksLikeMealLogPrompt(prompt) {
-  const text = String(prompt || "").toLowerCase()
-  return /\b(log|track|save|add|ate|had)\b/.test(text)
-    || /\b(for breakfast|for lunch|for dinner|as a snack)\b/.test(text)
-}
-
 function inferMealTypeFromPrompt(prompt) {
   const text = String(prompt || "").toLowerCase()
   if (text.includes("breakfast")) return "breakfast"
@@ -107,6 +101,10 @@ function inferMealTypeFromPrompt(prompt) {
 
 function replySuggestsSave(reply) {
   return /\b(log(?:ged|ging)?|save(?:d)?|record(?:ed|ing)?|add(?:ed|ing)?|track(?:ed|ing)?)\b/i.test(String(reply || ""))
+}
+
+function replyClaimsSuccessfulSave(reply) {
+  return /\b(i(?:'ve| have)|we(?:'ve| have)|it'?s)\s+(?:logged|saved|tracked|recorded)\b|\b(?:logged|saved|tracked|recorded)\s+(?:that|it|your meal|your food|the meal)\b/i.test(String(reply || ""))
 }
 
 function extractExercisesFromReply(reply) {
@@ -223,6 +221,71 @@ function defaultMealQuantity(action) {
   return "1 meal"
 }
 
+function mealContextSummary(mealContext) {
+  return typeof mealContext?.summary === "string" ? mealContext.summary.trim() : ""
+}
+
+function mealContextToMealAction(mealContext, reply, fallbackPrompt = "") {
+  const summary = mealContextSummary(mealContext)
+  if (!mealContext?.readyToLog || !summary) return null
+  const macros = extractReplyMacros(reply)
+  if (!macros) return null
+  return normalizeMealAction({
+    type: "log_meal",
+    food_name: summary,
+    meal_type: inferMealTypeFromPrompt(fallbackPrompt),
+    quantity: "1 meal",
+    estimated: true,
+    nutrition_source: "Coach estimate from accumulated meal details across chat",
+    ...macros,
+  })
+}
+
+function isMealPersistenceAction(action) {
+  return action?.type === "log_meal" || action?.type === "update_meal_log"
+}
+
+function extractActionMealMacros(actions) {
+  const mealActions = safeArray(actions, 8).filter(isMealPersistenceAction)
+  if (!mealActions.length) return null
+  if (mealActions.length === 1 && hasMealMacros(mealActions[0])) {
+    return {
+      calories: Number(mealActions[0].calories),
+      protein_g: Number(mealActions[0].protein_g),
+      carbs_g: Number(mealActions[0].carbs_g),
+      fat_g: Number(mealActions[0].fat_g),
+    }
+  }
+  if (!mealActions.every(hasMealMacros)) return null
+  return mealActions.reduce((totals, action) => ({
+    calories: totals.calories + Number(action.calories),
+    protein_g: totals.protein_g + Number(action.protein_g),
+    carbs_g: totals.carbs_g + Number(action.carbs_g),
+    fat_g: totals.fat_g + Number(action.fat_g),
+  }), { calories: 0, protein_g: 0, carbs_g: 0, fat_g: 0 })
+}
+
+function projectMealActionFromContext(actions, mealContext, reply, fallbackPrompt = "") {
+  if (!mealContext?.readyToLog || !mealContextSummary(mealContext)) return null
+
+  const mealActions = safeArray(actions, 8).filter(isMealPersistenceAction)
+  const primary = mealActions[0] || {}
+  const macros = extractReplyMacros(reply) || extractActionMealMacros(mealActions)
+  if (!macros) return null
+
+  const updateTarget = mealActions.find((action) => action.type === "update_meal_log" && action.meal_id)
+  return normalizeMealAction({
+    type: updateTarget ? "update_meal_log" : "log_meal",
+    ...(updateTarget ? { meal_id: updateTarget.meal_id } : {}),
+    meal_type: primary.meal_type || inferMealTypeFromPrompt(fallbackPrompt),
+    food_name: mealContext.summary,
+    quantity: "1 meal",
+    estimated: primary.estimated ?? true,
+    nutrition_source: primary.nutrition_source || "Coach estimate from accumulated meal details across chat",
+    ...macros,
+  })
+}
+
 function normalizeMealAction(action) {
   if (!action || typeof action !== "object") return action
 
@@ -309,19 +372,6 @@ function inferReplyOnlyActions(reply, prompt) {
       ...workoutLog,
     })
   }
-
-  const macros = extractReplyMacros(reply)
-  if (macros && looksLikeMealLogPrompt(prompt) && replySuggestsSave(reply)) {
-    inferred.push({
-      type: "log_meal",
-      ...macros,
-      food_name: inferMealNameFromPrompt(prompt) || "Estimated mixed meal",
-      meal_type: inferMealTypeFromPrompt(prompt),
-      quantity: "1 meal",
-      estimated: true,
-      nutrition_source: "Coach estimate from user-described ingredients and amounts",
-    })
-  }
   return inferred
 }
 
@@ -341,7 +391,7 @@ function extractImplicitActions(value) {
 export function normalizeCoachResponse(value, context = {}) {
   if (!value || typeof value !== "object") throw new Error("OpenAI returned an invalid coach payload")
 
-  const actions = [
+  const baseActions = [
     ...safeArray(value.actions, 8).map(normalizeAction).filter(Boolean),
     ...extractImplicitActions(value),
     ...inferReplyOnlyActions(value.reply, context.prompt),
@@ -350,12 +400,30 @@ export function normalizeCoachResponse(value, context = {}) {
     .map(normalizeMealAction)
     .slice(0, 8)
 
+  const projectedMealAction = projectMealActionFromContext(baseActions, context.mealContext, value.reply, context.prompt)
+  const recoveredMealAction = projectedMealAction || mealContextToMealAction(context.mealContext, value.reply, context.prompt)
+  const actions = [
+    ...(recoveredMealAction ? [recoveredMealAction] : []),
+    ...baseActions.filter((action) => {
+      if (recoveredMealAction && isMealPersistenceAction(action)) return false
+      if (context.mealContext?.readyToLog && action?.type === "clarify") return false
+      return true
+    }),
+  ].slice(0, 8)
+
   const clarifyOverride = actions[0]?.type === "clarify" && typeof actions[0]?.message === "string" && actions[0].message.trim()
     ? actions[0].message.trim()
     : ""
   const originalReply = typeof value.reply === "string" && value.reply.trim() ? value.reply.trim() : ""
   const shouldUseClarifyOverride = Boolean(clarifyOverride && (!originalReply || /\b(log(?:ged)?|save(?:d)?|update(?:d)?|create(?:d)?|built)\b/i.test(originalReply)))
-  const reply = shouldUseClarifyOverride
+  const hasPersistedAction = actions.some((action) => ["log_meal", "update_meal_log", "log_workout", "update_workout_log"].includes(action?.type))
+  const mealReadyWithoutAction = Boolean(context.mealContext?.readyToLog && !actions.some(isMealPersistenceAction))
+  const shouldBlockFakeSaveReply = replyClaimsSuccessfulSave(originalReply) && !hasPersistedAction
+  const reply = mealReadyWithoutAction
+    ? "I have the meal details, but I couldn't save it just now."
+    : shouldBlockFakeSaveReply
+    ? "I have the meal details, but I couldn't save it just now."
+    : shouldUseClarifyOverride
     ? clarifyOverride
     : originalReply || summarizeCoachAction(actions[0]) || "I'm here. Tell me what you want to log or plan next."
 

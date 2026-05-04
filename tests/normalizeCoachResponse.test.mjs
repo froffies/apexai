@@ -1,5 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
+import { buildMealContext } from "../server/mealStateBuilder.mjs"
 import { normalizeCoachResponse } from "../server/normalizeCoachResponse.mjs"
 
 test("normalizeCoachResponse keeps explicit reply and actions", () => {
@@ -175,24 +176,6 @@ test("normalizeCoachResponse infers a workout log action when the reply says it 
   assert.equal(payload.actions[0].weight_kg, 12.5)
 })
 
-test("normalizeCoachResponse infers a meal log action when the reply says it saved the estimate", () => {
-  const payload = normalizeCoachResponse({
-    reply: "I've logged that meal estimate at 320 calories, 18g protein, 20g carbs, and 14g fat.",
-    actions: [],
-  }, {
-    prompt: "I had 2 eggs and 1 slice of rye toast with butter",
-  })
-
-  assert.equal(payload.actions[0].type, "log_meal")
-  assert.equal(payload.actions[0].food_name, "2 eggs and 1 slice of rye toast with butter")
-  assert.equal(payload.actions[0].meal_type, "snack")
-  assert.equal(payload.actions[0].calories, 320)
-  assert.equal(payload.actions[0].protein_g, 18)
-  assert.equal(payload.actions[0].carbs_g, 20)
-  assert.equal(payload.actions[0].fat_g, 14)
-  assert.match(payload.actions[0].nutrition_source, /Coach estimate/i)
-})
-
 test("normalizeCoachResponse downgrades broken meal logs to a clarifying reply", () => {
   const payload = normalizeCoachResponse({
     reply: "It sounds delicious! I'll log your burrito bowl now.",
@@ -203,4 +186,125 @@ test("normalizeCoachResponse downgrades broken meal logs to a clarifying reply",
 
   assert.equal(payload.actions[0].type, "clarify")
   assert.match(payload.reply, /need a bit more detail/i)
+})
+
+test("normalizeCoachResponse rebuilds a meal log action from accumulated meal context", () => {
+  const mealContext = buildMealContext([
+    { role: "user", content: "i had egg and tea" },
+    { role: "assistant", content: "What type of tea?" },
+    { role: "user", content: "earl grey" },
+    { role: "assistant", content: "How much tea did you have and was there any milk or sugar?" },
+    { role: "user", content: "250ml, no sugar no milk" },
+    { role: "assistant", content: "How many eggs did you have?" },
+    { role: "user", content: "17 fried eggs" },
+    { role: "assistant", content: "Anything they were cooked in?" },
+    { role: "user", content: "cooked in 100g of salted butter" },
+  ], "used to fry the eggs")
+
+  const payload = normalizeCoachResponse({
+    reply: "I've logged that meal at roughly 2,230 calories, 164g protein, 47g carbs, and 236g fat.",
+    actions: [],
+    warnings: [],
+  }, {
+    prompt: "used to fry the eggs",
+    mealContext,
+  })
+
+  assert.equal(payload.actions[0].type, "log_meal")
+  assert.equal(payload.actions[0].food_name, "17 fried eggs cooked in 100g salted butter, plus 250ml Earl Grey tea with no milk and no sugar")
+  assert.equal(payload.actions[0].calories, 2230)
+  assert.equal(payload.actions[0].protein_g, 164)
+  assert.equal(payload.actions[0].carbs_g, 47)
+  assert.equal(payload.actions[0].fat_g, 236)
+})
+
+test("normalizeCoachResponse collapses split meal actions into one combined persisted meal when meal state is ready", () => {
+  const mealContext = buildMealContext([
+    { role: "user", content: "i had egg and tea" },
+    { role: "assistant", content: "What type of tea?" },
+    { role: "user", content: "earl grey" },
+    { role: "assistant", content: "How much tea did you have and was there any milk or sugar?" },
+    { role: "user", content: "250ml, no sugar no milk" },
+    { role: "assistant", content: "How many eggs did you have?" },
+    { role: "user", content: "17 fried eggs" },
+    { role: "assistant", content: "Anything they were cooked in?" },
+    { role: "user", content: "cooked in 100g of salted butter" },
+  ], "the eggs")
+
+  const payload = normalizeCoachResponse({
+    reply: "That combined meal comes to about 2,230 calories, 164g protein, 47g carbs, and 236g fat.",
+    actions: [
+      {
+        type: "log_meal",
+        food_name: "17 fried eggs",
+        meal_type: "breakfast",
+        quantity: "17 eggs",
+        calories: 1220,
+        protein_g: 109,
+        carbs_g: 7,
+        fat_g: 85,
+        nutrition_source: "Estimate",
+      },
+      {
+        type: "log_meal",
+        food_name: "250ml Earl Grey tea",
+        meal_type: "breakfast",
+        quantity: "250ml",
+        calories: 0,
+        protein_g: 0,
+        carbs_g: 0,
+        fat_g: 0,
+        nutrition_source: "Estimate",
+      },
+    ],
+  }, {
+    prompt: "the eggs",
+    mealContext,
+  })
+
+  assert.equal(payload.actions.length, 1)
+  assert.equal(payload.actions[0].type, "log_meal")
+  assert.equal(payload.actions[0].food_name, "17 fried eggs cooked in 100g salted butter, plus 250ml Earl Grey tea with no milk and no sugar")
+  assert.equal(payload.actions[0].quantity, "1 meal")
+})
+
+test("normalizeCoachResponse refuses to keep clarifying once meal state is already ready to log", () => {
+  const mealContext = buildMealContext([
+    { role: "user", content: "i had egg and tea" },
+    { role: "assistant", content: "What type of tea?" },
+    { role: "user", content: "earl grey" },
+    { role: "assistant", content: "How much tea did you have and was there any milk or sugar?" },
+    { role: "user", content: "250ml, no sugar no milk" },
+    { role: "assistant", content: "How many eggs did you have?" },
+    { role: "user", content: "17 fried eggs" },
+    { role: "assistant", content: "Anything they were cooked in?" },
+    { role: "user", content: "cooked in 100g of salted butter" },
+  ], "the eggs")
+
+  const payload = normalizeCoachResponse({
+    reply: "I still need more detail before I can log that meal.",
+    actions: [{ type: "clarify", message: "I still need more detail before I can log that meal." }],
+    warnings: [],
+  }, {
+    prompt: "the eggs",
+    mealContext,
+  })
+
+  assert.equal(payload.actions.length, 0)
+  assert.equal(payload.reply, "I have the meal details, but I couldn't save it just now.")
+})
+
+test("normalizeCoachResponse blocks fake meal save wording when no real action can be recovered", () => {
+  const mealContext = buildMealContext([{ role: "user", content: "i had beans" }], "i just did")
+  const payload = normalizeCoachResponse({
+    reply: "I've logged that meal for you.",
+    actions: [],
+    warnings: [],
+  }, {
+    prompt: "i just did",
+    mealContext,
+  })
+
+  assert.equal(payload.actions.length, 0)
+  assert.equal(payload.reply, "I have the meal details, but I couldn't save it just now.")
 })

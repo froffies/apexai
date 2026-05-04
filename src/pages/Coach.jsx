@@ -53,6 +53,24 @@ function createStarterMessage() {
   }
 }
 
+function createEmptyMealSession() {
+  return {
+    active: false,
+    items: [],
+    clarificationAttempts: 0,
+    clarificationCounts: {},
+    readyToLog: false,
+    shouldStopClarifying: false,
+    summary: "",
+    clarifyQuestion: "",
+    wantsLogging: false,
+    wantsNutrition: false,
+    mealConversation: false,
+    lastMainKey: "",
+    lastDrinkKey: "",
+  }
+}
+
 const promptCards = [
   { title: "Plan today", description: "Choose whether to build, view, start, or edit today's workout.", action: "today" },
   { title: "Plan the week", description: "Pick the exact kind of weekly planning you want.", action: "schedule" },
@@ -216,6 +234,7 @@ export default function Coach() {
   const [activeWorkout, setActiveWorkout] = useLocalStorage(storageKeys.activeWorkout, emptyActiveWorkout)
   const [exercises] = useLocalStorage(storageKeys.exercises, starterExercises)
   const [messages, setMessages] = useLocalStorage(storageKeys.chat, [createStarterMessage()])
+  const [mealSession, setMealSession] = useLocalStorage(storageKeys.coachMealSession, createEmptyMealSession())
   const [input, setInput] = useState("")
   const [listening, setListening] = useState(false)
   const [thinking, setThinking] = useState(false)
@@ -265,6 +284,7 @@ export default function Coach() {
 
   const clearConversation = () => {
     setMessages([createStarterMessage()])
+    setMealSession(createEmptyMealSession())
     setInput("")
     setQuickAction(null)
     setAiError("")
@@ -462,16 +482,17 @@ export default function Coach() {
       })
     }
 
-    const mealLog = parseMealLog(content)
-    if (mealLog) {
-      if ("needsVerification" in mealLog) return appendAssistant(mealLog.reply)
-      const loggedMealId = "id" in mealLog && mealLog.id ? mealLog.id : uid("meal")
-      const loggedMeal = { id: loggedMealId, ...mealLog }
-      setMeals((current) => [loggedMeal, ...current])
-      return appendAssistant(`Logged ${loggedMeal.food_name} with verified Australian nutrition: ${loggedMeal.calories} kcal, ${loggedMeal.protein_g}g protein, ${loggedMeal.carbs_g}g carbs, ${loggedMeal.fat_g}g fat.`, {
-        loggedMealIds: [loggedMeal.id],
-      })
-    }
+      const mealLog = parseMealLog(content)
+      if (mealLog) {
+        if ("needsVerification" in mealLog) return appendAssistant(mealLog.reply)
+        const loggedMealId = "id" in mealLog && mealLog.id ? mealLog.id : uid("meal")
+        const loggedMeal = { id: loggedMealId, ...mealLog }
+        setMeals((current) => [loggedMeal, ...current])
+        setMealSession(createEmptyMealSession())
+        return appendAssistant(`Logged ${loggedMeal.food_name} with verified Australian nutrition: ${loggedMeal.calories} kcal, ${loggedMeal.protein_g}g protein, ${loggedMeal.carbs_g}g carbs, ${loggedMeal.fat_g}g fat.`, {
+          loggedMealIds: [loggedMeal.id],
+        })
+      }
 
     return appendAssistant(coachReply(content, { profile, totals, todaysWorkouts }))
   }
@@ -488,6 +509,7 @@ export default function Coach() {
     const updatedMealIds = []
     const loggedWorkoutIds = []
     const updatedWorkoutIds = []
+    const requestedMealPersistence = (coachResponse.actions || []).some((action) => action?.type === "log_meal" || action?.type === "update_meal_log")
 
     for (const action of coachResponse.actions || []) {
       if (action.type === "update_targets") {
@@ -673,7 +695,19 @@ export default function Coach() {
 
     const warnings = [...(coachResponse.warnings || []), ...rejectedActions].filter(Boolean)
     const suffix = warnings.length ? `\n\n${warnings.join(" ")}` : ""
-    return appendAssistant(`${coachResponse.reply}${suffix}`, {
+    const mealSaveSucceeded = loggedMealIds.length > 0 || updatedMealIds.length > 0
+    const nextMealSession = coachResponse?.meal_session && typeof coachResponse.meal_session === "object"
+      ? coachResponse.meal_session
+      : null
+    if (mealSaveSucceeded) {
+      setMealSession(createEmptyMealSession())
+    } else if (nextMealSession && (nextMealSession.active || nextMealSession.mealConversation || nextMealSession.summary)) {
+      setMealSession(nextMealSession)
+    }
+    const replyText = requestedMealPersistence && !mealSaveSucceeded && /\b(logged|saved|tracked|recorded)\b/i.test(String(coachResponse.reply || ""))
+      ? "I have the meal details, but I couldn't save it just now."
+      : coachResponse.reply
+    return appendAssistant(`${replyText}${suffix}`, {
       ...(attachedPlan ? { plan: attachedPlan } : {}),
       ...(loggedMealIds.length ? { loggedMealIds } : {}),
       ...(updatedMealIds.length ? { updatedMealIds } : {}),
@@ -684,7 +718,7 @@ export default function Coach() {
 
   const submitCoachPrompt = async (rawContent) => {
     const content = String(rawContent || "").trim()
-    if (!content) return
+    if (!content || thinking) return
     const userMessage = { id: uid("chat"), role: "user", content, timestamp: new Date().toISOString() }
     setInput("")
     setQuickAction(null)
@@ -715,7 +749,8 @@ export default function Coach() {
         mealPlans: mealPlans.slice(0, 6),
         recoveryLogs: recoveryLogs.slice(0, 6),
         activeWorkout,
-        recentMessages: [...messages, userMessage].slice(-6),
+        recentMessages: messages.slice(-20),
+        mealSession,
       })
       if (!coachResponse) {
         const assistantMessage = appendAssistant("I couldn't get a valid response from the live coach, so I didn't log or change anything. Please try again.")
@@ -971,7 +1006,7 @@ export default function Coach() {
         )}
 
         <form onSubmit={send} className="flex gap-3 border-t border-slate-200 bg-white p-3" style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}>
-          <input ref={inputRef} value={input} onChange={(event) => setInput(event.target.value)} placeholder={activeWorkout?.id ? "Set done 6 reps at 80kg..." : "Log bench 80kg for 4 sets of 6..."} className="min-h-11 min-w-0 flex-1 rounded-xl border border-slate-200 px-3 py-3 text-sm text-slate-950 shadow-sm" />
+          <input ref={inputRef} value={input} onChange={(event) => setInput(event.target.value)} disabled={thinking} placeholder={activeWorkout?.id ? "Set done 6 reps at 80kg..." : "Log bench 80kg for 4 sets of 6..."} className="min-h-11 min-w-0 flex-1 rounded-xl border border-slate-200 px-3 py-3 text-sm text-slate-950 shadow-sm disabled:bg-slate-50 disabled:text-slate-400" />
           <button type="button" onClick={startVoice} disabled={!speechAvailable} className="flex min-h-11 min-w-11 items-center justify-center rounded-xl border border-slate-200 text-slate-700 disabled:opacity-40">
             {listening ? <MicOff size={18} /> : <Mic size={18} />}
           </button>
