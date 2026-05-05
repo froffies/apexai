@@ -1,9 +1,8 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { buildMealContext } from "../server/mealStateBuilder.mjs"
 import { normalizeCoachResponse } from "../server/normalizeCoachResponse.mjs"
 
-test("normalizeCoachResponse keeps explicit reply and actions", () => {
+test("normalizeCoachResponse keeps explicit safe actions and warnings", () => {
   const payload = normalizeCoachResponse({
     reply: "Done.",
     actions: [{ type: "update_targets", daily_calories: 2400 }],
@@ -16,295 +15,142 @@ test("normalizeCoachResponse keeps explicit reply and actions", () => {
   assert.deepEqual(payload.warnings, ["Heads up"])
 })
 
-test("normalizeCoachResponse promotes top-level action payloads", () => {
+test("normalizeCoachResponse builds a deterministic meal persistence action from ready session state", () => {
   const payload = normalizeCoachResponse({
-    create_workout_plan: {
-      title: "Upper strength",
-      exercises: [{ name: "Bench Press", setsReps: "4x6-8" }],
+    reply: "That combined meal comes to roughly 2,230 calories, 164g protein, 47g carbs, and 236g fat.",
+    actions: [{ type: "log_meal", calories: 2230, protein_g: 164, carbs_g: 47, fat_g: 236 }],
+    warnings: [],
+  }, {
+    prompt: "i just did",
+    mealContext: {
+      readyToLog: true,
+      alreadyLogged: false,
+      summary: "17 fried eggs cooked in 100g salted butter, plus 250ml Earl Grey tea with no milk and no sugar",
+      persistedMealId: "",
+      correctionRequested: false,
     },
-  })
-
-  assert.equal(payload.actions.length, 1)
-  assert.equal(payload.actions[0].type, "create_workout_plan")
-  assert.match(payload.reply, /Upper strength/i)
-})
-
-test("normalizeCoachResponse accepts a typed root object", () => {
-  const payload = normalizeCoachResponse({
-    type: "log_meal",
-    food_name: "Greek yoghurt",
+    workoutContext: null,
   })
 
   assert.equal(payload.actions.length, 1)
   assert.equal(payload.actions[0].type, "log_meal")
-  assert.match(payload.reply, /logged that meal/i)
+  assert.equal(payload.actions[0].food_name, "17 fried eggs cooked in 100g salted butter, plus 250ml Earl Grey tea with no milk and no sugar")
+  assert.equal(payload.actions[0].nutrition_source, "Coach estimate from accumulated meal details across chat")
 })
 
-test("normalizeCoachResponse supports meal and workout updates", () => {
-  const mealPayload = normalizeCoachResponse({
-    update_meal_log: {
-      meal_id: "meal_1",
-      food_name: "Vegemite toast",
+test("normalizeCoachResponse upgrades deterministic meal actions into updates for persisted corrections", () => {
+  const payload = normalizeCoachResponse({
+    reply: "That correction brings the meal to about 320 calories, 22g protein, 3g carbs, and 21g fat.",
+    actions: [{ type: "log_meal", calories: 320, protein_g: 22, carbs_g: 3, fat_g: 21 }],
+    warnings: [],
+  }, {
+    prompt: "actually 3 eggs not 2",
+    mealContext: {
+      readyToLog: true,
+      alreadyLogged: false,
+      summary: "3 eggs, plus 250ml Earl Grey tea with no milk and no sugar",
+      persistedMealId: "meal_fix",
+      correctionRequested: true,
     },
-  })
-  assert.equal(mealPayload.actions[0].type, "update_meal_log")
-  assert.match(mealPayload.reply, /updated that meal log/i)
-
-  const workoutPayload = normalizeCoachResponse({
-    type: "update_workout_log",
-    workout_id: "workout_1",
-    exercise_name: "Preacher Curl",
-  })
-  assert.equal(workoutPayload.actions[0].type, "update_workout_log")
-  assert.match(workoutPayload.reply, /updated that workout log/i)
-})
-
-test("normalizeCoachResponse fills an estimated meal source when macros are present", () => {
-  const payload = normalizeCoachResponse({
-    type: "log_meal",
-    food_name: "Eggs fried in butter",
-    calories: 2230,
-    protein_g: 164,
-    carbs_g: 47,
-    fat_g: 236,
+    workoutContext: null,
   })
 
   assert.equal(payload.actions.length, 1)
-  assert.equal(payload.actions[0].type, "log_meal")
-  assert.equal(payload.actions[0].estimated, true)
-  assert.match(payload.actions[0].nutrition_source, /Coach estimate/i)
+  assert.equal(payload.actions[0].type, "update_meal_log")
+  assert.equal(payload.actions[0].meal_id, "meal_fix")
 })
 
-test("normalizeCoachResponse repairs a bare meal action from the reply and prompt context", () => {
+test("normalizeCoachResponse builds a deterministic workout persistence action from ready session state", () => {
   const payload = normalizeCoachResponse({
-    reply: "Your meal of 2 eggs and rye toast comes to about 270 calories, 20g protein, 18g carbs, and 13g fat.",
-    actions: [{ type: "log_meal" }],
-  }, {
-    prompt: "I had 2 eggs and rye toast",
-  })
-
-  assert.equal(payload.actions.length, 1)
-  assert.equal(payload.actions[0].type, "log_meal")
-  assert.equal(payload.actions[0].food_name, "2 eggs and rye toast")
-  assert.equal(payload.actions[0].calories, 270)
-  assert.equal(payload.actions[0].protein_g, 20)
-  assert.equal(payload.actions[0].carbs_g, 18)
-  assert.equal(payload.actions[0].fat_g, 13)
-})
-
-test("normalizeCoachResponse repairs a bare workout plan action from reply text", () => {
-  const payload = normalizeCoachResponse({
-    reply: "Here's a workout plan for today: 1) Barbell squat, 3 sets of 8 reps, 2) Bench press, 3 sets of 8 reps, 3) Bent-over row, 3 sets of 8 reps.",
-    actions: [{ type: "create_workout_plan" }],
-  })
-
-  assert.equal(payload.actions.length, 1)
-  assert.equal(payload.actions[0].type, "create_workout_plan")
-  assert.equal(payload.actions[0].exercises.length, 3)
-  assert.equal(payload.actions[0].exercises[0].name, "Barbell Squat")
-  assert.equal(payload.actions[0].exercises[0].setsReps, "3x8")
-})
-
-test("normalizeCoachResponse infers a workout plan action from a conversational reply", () => {
-  const payload = normalizeCoachResponse({
-    reply: "Let's build you an upper body workout! How about including exercises like bench press, rows, and shoulder presses? Let me know if you want to add or change anything!",
+    reply: "Nice work. Bench press 80kg for 4 sets of 6 is saved.",
     actions: [],
-  }, {
-    prompt: "build me a workout for today",
-  })
-
-  assert.equal(payload.actions[0].type, "create_workout_plan")
-  assert.equal(payload.actions[0].exercises.length, 3)
-  assert.equal(payload.actions[0].exercises[0].name, "Bench Press")
-})
-
-test("normalizeCoachResponse parses numbered workout lists from a conversational reply", () => {
-  const payload = normalizeCoachResponse({
-    reply: "Here's a focused workout plan for today: 1. Squats - 3 sets of 8 reps 2. Bench press - 3 sets of 8 reps 3. Bent-over rows - 3 sets of 8 reps 4. Deadlifts - 3 sets of 6 reps.",
-    actions: [],
-  }, {
-    prompt: "build me a workout for today",
-  })
-
-  assert.equal(payload.actions[0].type, "create_workout_plan")
-  assert.equal(payload.actions[0].exercises.length, 4)
-  assert.equal(payload.actions[0].exercises[0].name, "Squats")
-  assert.equal(payload.actions[0].exercises[1].name, "Bench Press")
-})
-
-test("normalizeCoachResponse parses numbered workout lines with parentheses", () => {
-  const payload = normalizeCoachResponse({
-    reply: "Here's a workout for today focusing on muscle gain:\n1. Bench Press (4 sets of 8 reps)\n2. Bent Over Row (4 sets of 8 reps)\n3. Dumbbell Shoulder Press (3 sets of 10 reps)",
-    actions: [],
-  }, {
-    prompt: "build me a workout for today",
-  })
-
-  assert.equal(payload.actions[0].type, "create_workout_plan")
-  assert.equal(payload.actions[0].exercises.length, 3)
-  assert.equal(payload.actions[0].exercises[0].name, "Bench Press")
-  assert.equal(payload.actions[0].exercises[0].setsReps, "4x8")
-})
-
-test("normalizeCoachResponse repairs a bare workout log action from the prompt context", () => {
-  const payload = normalizeCoachResponse({
-    reply: "Nice work on the bench press! I've logged 80kg for 4 sets of 6 reps.",
-    actions: [{ type: "log_workout" }],
+    warnings: [],
   }, {
     prompt: "I did bench press 80kg for 4 sets of 6",
+    mealContext: null,
+    workoutContext: {
+      readyToLog: true,
+      alreadyLogged: false,
+      persistedWorkoutId: "",
+      correctionRequested: false,
+      exercise_name: "Bench Press",
+      workout_type: "Bench Press",
+      muscle_group: "chest",
+      sets: 4,
+      reps: 6,
+      weight_kg: 80,
+      duration_seconds: 0,
+      distance_km: 0,
+    },
   })
 
+  assert.equal(payload.actions.length, 1)
   assert.equal(payload.actions[0].type, "log_workout")
   assert.equal(payload.actions[0].exercise_name, "Bench Press")
   assert.equal(payload.actions[0].sets, 4)
   assert.equal(payload.actions[0].reps, 6)
-  assert.equal(payload.actions[0].weight_kg, 80)
 })
 
-test("normalizeCoachResponse infers a workout log action when the reply says it saved the session", () => {
-  const payload = normalizeCoachResponse({
-    reply: "Awesome workout with the preacher curls! I'll log that for you now.",
-    actions: [],
-  }, {
-    prompt: "I did preacher bicep dumbbells 12.5kg for 4 sets of 10",
-  })
-
-  assert.equal(payload.actions[0].type, "log_workout")
-  assert.equal(payload.actions[0].exercise_name, "Preacher Bicep Dumbbells")
-  assert.equal(payload.actions[0].sets, 4)
-  assert.equal(payload.actions[0].reps, 10)
-  assert.equal(payload.actions[0].weight_kg, 12.5)
-})
-
-test("normalizeCoachResponse downgrades broken meal logs to a clarifying reply", () => {
-  const payload = normalizeCoachResponse({
-    reply: "It sounds delicious! I'll log your burrito bowl now.",
-    actions: [{ type: "log_meal" }],
-  }, {
-    prompt: "For lunch I ate a burrito bowl with beef rice beans cheese and salsa",
-  })
-
-  assert.equal(payload.actions[0].type, "clarify")
-  assert.match(payload.reply, /need a bit more detail/i)
-})
-
-test("normalizeCoachResponse rebuilds a meal log action from accumulated meal context", () => {
-  const mealContext = buildMealContext([
-    { role: "user", content: "i had egg and tea" },
-    { role: "assistant", content: "What type of tea?" },
-    { role: "user", content: "earl grey" },
-    { role: "assistant", content: "How much tea did you have and was there any milk or sugar?" },
-    { role: "user", content: "250ml, no sugar no milk" },
-    { role: "assistant", content: "How many eggs did you have?" },
-    { role: "user", content: "17 fried eggs" },
-    { role: "assistant", content: "Anything they were cooked in?" },
-    { role: "user", content: "cooked in 100g of salted butter" },
-  ], "used to fry the eggs")
-
-  const payload = normalizeCoachResponse({
-    reply: "I've logged that meal at roughly 2,230 calories, 164g protein, 47g carbs, and 236g fat.",
-    actions: [],
+test("normalizeCoachResponse returns already-logged replies instead of reopening persisted sessions", () => {
+  const mealPayload = normalizeCoachResponse({
+    reply: "I've logged that meal for you.",
+    actions: [{ type: "log_meal", calories: 100, protein_g: 10, carbs_g: 10, fat_g: 2 }],
     warnings: [],
   }, {
-    prompt: "used to fry the eggs",
-    mealContext,
+    mealContext: {
+      alreadyLogged: true,
+      persistedSummary: "Greek yoghurt bowl",
+    },
   })
 
-  assert.equal(payload.actions[0].type, "log_meal")
-  assert.equal(payload.actions[0].food_name, "17 fried eggs cooked in 100g salted butter, plus 250ml Earl Grey tea with no milk and no sugar")
-  assert.equal(payload.actions[0].calories, 2230)
-  assert.equal(payload.actions[0].protein_g, 164)
-  assert.equal(payload.actions[0].carbs_g, 47)
-  assert.equal(payload.actions[0].fat_g, 236)
+  assert.equal(mealPayload.actions.length, 0)
+  assert.match(mealPayload.reply, /already saved Greek yoghurt bowl/i)
 })
 
-test("normalizeCoachResponse collapses split meal actions into one combined persisted meal when meal state is ready", () => {
-  const mealContext = buildMealContext([
-    { role: "user", content: "i had egg and tea" },
-    { role: "assistant", content: "What type of tea?" },
-    { role: "user", content: "earl grey" },
-    { role: "assistant", content: "How much tea did you have and was there any milk or sugar?" },
-    { role: "user", content: "250ml, no sugar no milk" },
-    { role: "assistant", content: "How many eggs did you have?" },
-    { role: "user", content: "17 fried eggs" },
-    { role: "assistant", content: "Anything they were cooked in?" },
-    { role: "user", content: "cooked in 100g of salted butter" },
-  ], "the eggs")
-
+test("normalizeCoachResponse prefers deterministic clarification from session state", () => {
   const payload = normalizeCoachResponse({
-    reply: "That combined meal comes to about 2,230 calories, 164g protein, 47g carbs, and 236g fat.",
-    actions: [
-      {
-        type: "log_meal",
-        food_name: "17 fried eggs",
-        meal_type: "breakfast",
-        quantity: "17 eggs",
-        calories: 1220,
-        protein_g: 109,
-        carbs_g: 7,
-        fat_g: 85,
-        nutrition_source: "Estimate",
-      },
-      {
-        type: "log_meal",
-        food_name: "250ml Earl Grey tea",
-        meal_type: "breakfast",
-        quantity: "250ml",
-        calories: 0,
-        protein_g: 0,
-        carbs_g: 0,
-        fat_g: 0,
-        nutrition_source: "Estimate",
-      },
-    ],
+    reply: "I've logged that meal for you.",
+    actions: [{ type: "log_meal", calories: 100, protein_g: 10, carbs_g: 10, fat_g: 2 }],
+    warnings: [],
   }, {
-    prompt: "the eggs",
-    mealContext,
+    mealContext: {
+      clarifyQuestion: "How many eggs did you have?",
+      readyToLog: false,
+      alreadyLogged: false,
+    },
   })
 
   assert.equal(payload.actions.length, 1)
-  assert.equal(payload.actions[0].type, "log_meal")
-  assert.equal(payload.actions[0].food_name, "17 fried eggs cooked in 100g salted butter, plus 250ml Earl Grey tea with no milk and no sugar")
-  assert.equal(payload.actions[0].quantity, "1 meal")
+  assert.equal(payload.actions[0].type, "clarify")
+  assert.equal(payload.reply, "How many eggs did you have?")
 })
 
-test("normalizeCoachResponse refuses to keep clarifying once meal state is already ready to log", () => {
-  const mealContext = buildMealContext([
-    { role: "user", content: "i had egg and tea" },
-    { role: "assistant", content: "What type of tea?" },
-    { role: "user", content: "earl grey" },
-    { role: "assistant", content: "How much tea did you have and was there any milk or sugar?" },
-    { role: "user", content: "250ml, no sugar no milk" },
-    { role: "assistant", content: "How many eggs did you have?" },
-    { role: "user", content: "17 fried eggs" },
-    { role: "assistant", content: "Anything they were cooked in?" },
-    { role: "user", content: "cooked in 100g of salted butter" },
-  ], "the eggs")
-
-  const payload = normalizeCoachResponse({
-    reply: "I still need more detail before I can log that meal.",
-    actions: [{ type: "clarify", message: "I still need more detail before I can log that meal." }],
-    warnings: [],
-  }, {
-    prompt: "the eggs",
-    mealContext,
-  })
-
-  assert.equal(payload.actions.length, 0)
-  assert.equal(payload.reply, "I have the meal details, but I couldn't save it just now.")
-})
-
-test("normalizeCoachResponse blocks fake meal save wording when no real action can be recovered", () => {
-  const mealContext = buildMealContext([{ role: "user", content: "i had beans" }], "i just did")
+test("normalizeCoachResponse blocks fake persistence wording when no real save action exists", () => {
   const payload = normalizeCoachResponse({
     reply: "I've logged that meal for you.",
     actions: [],
     warnings: [],
   }, {
-    prompt: "i just did",
-    mealContext,
+    mealContext: {
+      readyToLog: false,
+      alreadyLogged: false,
+    },
+    workoutContext: null,
   })
 
   assert.equal(payload.actions.length, 0)
-  assert.equal(payload.reply, "I have the meal details, but I couldn't save it just now.")
+  assert.equal(payload.reply, "I have the details, but I couldn't save it just now.")
+})
+
+test("normalizeCoachResponse blocks save wording after a failed persistence attempt", () => {
+  const payload = normalizeCoachResponse({
+    reply: "I saved that workout for you.",
+    actions: [{ type: "log_workout", exercise_name: "Bench Press", workout_type: "Bench Press" }],
+    warnings: [],
+  }, {
+    persistenceAttempted: true,
+    persistenceSucceeded: false,
+  })
+
+  assert.equal(payload.reply, "I have the details, but I couldn't save it just now.")
 })

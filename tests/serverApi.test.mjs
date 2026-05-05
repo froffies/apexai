@@ -125,13 +125,83 @@ test("local API server exposes health, local nutrition, telemetry, and sanitized
       "Content-Type": "application/json",
       Origin: "http://127.0.0.1:5173",
     },
-    body: JSON.stringify({ message: "Log bench press 80kg for 4 sets of 6" }),
+    body: JSON.stringify({ message: "hello" }),
   })
   const coach = await coachResponse.json()
   assert.equal(coachResponse.status, 503)
   assert.equal(coach.error, "Live coach is unavailable right now.")
 
   assert.match(output, /ApexAI OpenAI coach server listening/i)
+})
+
+test("deterministic coach logging still works when OpenAI is unavailable", async (t) => {
+  const port = randomPort()
+  const serverProcess = spawn(process.execPath, [serverEntry], {
+    cwd,
+    env: {
+      ...process.env,
+      OPENAI_COACH_PORT: String(port),
+      OPENAI_COACH_REQUIRE_AUTH: "false",
+      OPENAI_COACH_CORS_ORIGIN: "http://127.0.0.1:5173",
+      OPENFOODFACTS_ENABLED: "false",
+      OPENAI_API_KEY: "",
+      NODE_ENV: "production",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  })
+
+  t.after(async () => {
+    serverProcess.kill()
+  })
+
+  await waitForHealth(port)
+
+  const coachResponse = await fetch(`http://127.0.0.1:${port}/api/coach`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Origin: "http://127.0.0.1:5173",
+    },
+    body: JSON.stringify({
+      message: "17 eggs fried in 100g of salted butter",
+      mealSession: {
+        active: true,
+        mealConversation: true,
+        readyToLog: true,
+        clarificationAttempts: 2,
+        clarificationCounts: { "egg:quantity": 1, "egg:cooking_medium": 1 },
+        summary: "17 fried eggs cooked in 100g salted butter",
+        clarifyQuestion: "",
+        items: [
+          {
+            base_name: "egg",
+            label: "Eggs",
+            category: "food",
+            quantity: { amount: 17, unit: "egg", text: "17 eggs" },
+            preparation: ["fried"],
+            exclusions: [],
+            attached_to: null,
+            relation: null,
+          },
+          {
+            base_name: "salted butter",
+            label: "Salted Butter",
+            category: "ingredient",
+            quantity: { amount: 100, unit: "g", text: "100g" },
+            preparation: ["salted"],
+            exclusions: [],
+            attached_to: "egg",
+            relation: "cooked_in",
+          },
+        ],
+      },
+    }),
+  })
+  const coach = await coachResponse.json()
+  assert.equal(coachResponse.status, 200)
+  assert.equal(coach.actions?.[0]?.type, "log_meal")
+  assert.match(coach.actions?.[0]?.food_name || "", /17 fried eggs cooked in 100g salted butter/i)
+  assert.ok(Number(coach.actions?.[0]?.calories) > 1500)
 })
 
 test("protected API endpoints require auth when production auth is enabled", async (t) => {

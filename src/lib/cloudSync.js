@@ -7,6 +7,7 @@ const schemaVersion = 1
 const cloudExcludedKeys = new Set([
   "apexai.telemetry.buffer",
   "apexai.coachMealSession",
+  "apexai.coachWorkoutSession",
 ])
 let cloudUser = null
 let syncPaused = false

@@ -68,6 +68,42 @@ function createEmptyMealSession() {
     mealConversation: false,
     lastMainKey: "",
     lastDrinkKey: "",
+    persisted: false,
+    persistedMealId: "",
+    persistedSummary: "",
+    persistedAt: "",
+    alreadyLogged: false,
+    correctionRequested: false,
+    thread_messages: [],
+  }
+}
+
+function createEmptyWorkoutSession() {
+  return {
+    active: false,
+    workoutConversation: false,
+    exercise_name: "",
+    workout_type: "",
+    muscle_group: "full_body",
+    sets: 0,
+    reps: 0,
+    weight_kg: 0,
+    duration_seconds: 0,
+    distance_km: 0,
+    clarificationAttempts: 0,
+    clarificationCounts: {},
+    readyToLog: false,
+    shouldStopClarifying: false,
+    clarifyQuestion: "",
+    summary: "",
+    wantsLogging: false,
+    persisted: false,
+    persistedWorkoutId: "",
+    persistedSummary: "",
+    persistedAt: "",
+    alreadyLogged: false,
+    correctionRequested: false,
+    thread_messages: [],
   }
 }
 
@@ -161,6 +197,63 @@ function resolveMealNutritionSource(action, fallback = "") {
   return "Coach estimate from user-described ingredients and amounts"
 }
 
+function buildPersistedMealSession(session, action, mealId) {
+  const base = session && typeof session === "object" ? session : createEmptyMealSession()
+  return {
+    ...createEmptyMealSession(),
+    ...base,
+    active: false,
+    readyToLog: false,
+    shouldStopClarifying: false,
+    clarifyQuestion: "",
+    persisted: true,
+    persistedMealId: mealId,
+    persistedSummary: String(action?.food_name || base?.summary || "").trim(),
+    persistedAt: new Date().toISOString(),
+    alreadyLogged: false,
+    correctionRequested: false,
+  }
+}
+
+function buildPersistedWorkoutSession(session, action, workoutId) {
+  const base = session && typeof session === "object" ? session : createEmptyWorkoutSession()
+  const summary = String(
+    base?.summary
+    || action?.workout_type
+    || action?.exercise_name
+    || ""
+  ).trim()
+  return {
+    ...createEmptyWorkoutSession(),
+    ...base,
+    active: false,
+    readyToLog: false,
+    shouldStopClarifying: false,
+    clarifyQuestion: "",
+    persisted: true,
+    persistedWorkoutId: workoutId,
+    persistedSummary: summary,
+    persistedAt: new Date().toISOString(),
+    alreadyLogged: false,
+    correctionRequested: false,
+  }
+}
+
+function formatCoachMealConfirmation(prefix, meal) {
+  return `${prefix}: ${meal.food_name}. ${Math.round(Number(meal.calories) || 0)} kcal, ${Math.round(Number(meal.protein_g) || 0)}g protein, ${Math.round(Number(meal.carbs_g) || 0)}g carbs, ${Math.round(Number(meal.fat_g) || 0)}g fat.`
+}
+
+function formatCoachWorkoutConfirmation(prefix, workout, action) {
+  const label = String(workout.workout_type || action?.workout_type || action?.exercise_name || "your workout").trim()
+  const reps = Math.round(Number(action?.reps) || 0)
+  const sets = Math.max(1, Math.round(Number(action?.sets) || 1))
+  const weight = Number(action?.weight_kg) || 0
+  const durationMinutes = Math.round(Number(action?.duration_seconds || 0) / 60)
+  if (durationMinutes > 0) return `${prefix}: ${label} for ${durationMinutes} min.`
+  if (reps > 0) return `${prefix}: ${label} for ${sets} set${sets === 1 ? "" : "s"} of ${reps}${weight > 0 ? ` at ${weight}kg` : ""}.`
+  return `${prefix}: ${label}.`
+}
+
 function replaceWorkoutSessionSets(current, sessionId, nextSets) {
   return [...nextSets, ...current.filter((set) => set.session_id !== sessionId)]
 }
@@ -235,6 +328,7 @@ export default function Coach() {
   const [exercises] = useLocalStorage(storageKeys.exercises, starterExercises)
   const [messages, setMessages] = useLocalStorage(storageKeys.chat, [createStarterMessage()])
   const [mealSession, setMealSession] = useLocalStorage(storageKeys.coachMealSession, createEmptyMealSession())
+  const [workoutSession, setWorkoutSession] = useLocalStorage(storageKeys.coachWorkoutSession, createEmptyWorkoutSession())
   const [input, setInput] = useState("")
   const [listening, setListening] = useState(false)
   const [thinking, setThinking] = useState(false)
@@ -285,6 +379,7 @@ export default function Coach() {
   const clearConversation = () => {
     setMessages([createStarterMessage()])
     setMealSession(createEmptyMealSession())
+    setWorkoutSession(createEmptyWorkoutSession())
     setInput("")
     setQuickAction(null)
     setAiError("")
@@ -464,35 +559,42 @@ export default function Coach() {
     const workoutLog = parseWorkoutLog(content)
     if (workoutLog) {
       const sessionId = uid("workout")
-      setWorkouts((current) => [
-        {
-          id: sessionId,
-          date: todayISO(),
-          workout_type: workoutLog.exercise_name,
-          duration_minutes: Math.round((workoutLog.duration_seconds || 0) / 60),
-          notes: workoutLog.notes,
-          completed: true,
-        },
-        ...current,
-      ])
+      const loggedWorkout = {
+        id: sessionId,
+        date: todayISO(),
+        workout_type: workoutLog.exercise_name,
+        duration_minutes: Math.round((workoutLog.duration_seconds || 0) / 60),
+        notes: workoutLog.notes,
+        completed: true,
+      }
+      setWorkouts((current) => [loggedWorkout, ...current])
       const sets = makeWorkoutSetsFromLog(workoutLog, sessionId)
       setWorkoutSets((current) => [...sets, ...current])
+      setWorkoutSession(buildPersistedWorkoutSession(
+        workoutSession,
+        { workout_type: loggedWorkout.workout_type, exercise_name: workoutLog.exercise_name },
+        sessionId
+      ))
       return appendAssistant(`Logged ${workoutLog.exercise_name}: ${workoutLog.sets} set(s) x ${workoutLog.reps || "time"} at ${workoutLog.weight_kg || 0}kg. Workouts and analytics updated.`, {
         loggedWorkoutIds: [sessionId],
       })
     }
 
-      const mealLog = parseMealLog(content)
-      if (mealLog) {
-        if ("needsVerification" in mealLog) return appendAssistant(mealLog.reply)
-        const loggedMealId = "id" in mealLog && mealLog.id ? mealLog.id : uid("meal")
-        const loggedMeal = { id: loggedMealId, ...mealLog }
-        setMeals((current) => [loggedMeal, ...current])
-        setMealSession(createEmptyMealSession())
-        return appendAssistant(`Logged ${loggedMeal.food_name} with verified Australian nutrition: ${loggedMeal.calories} kcal, ${loggedMeal.protein_g}g protein, ${loggedMeal.carbs_g}g carbs, ${loggedMeal.fat_g}g fat.`, {
-          loggedMealIds: [loggedMeal.id],
-        })
-      }
+    const mealLog = parseMealLog(content)
+    if (mealLog) {
+      if ("needsVerification" in mealLog) return appendAssistant(mealLog.reply)
+      const loggedMealId = "id" in mealLog && mealLog.id ? mealLog.id : uid("meal")
+      const loggedMeal = { id: loggedMealId, ...mealLog }
+      setMeals((current) => [loggedMeal, ...current])
+      setMealSession(buildPersistedMealSession(
+        mealSession,
+        { food_name: loggedMeal.food_name, ...loggedMeal },
+        loggedMeal.id
+      ))
+      return appendAssistant(`Logged ${loggedMeal.food_name} with verified Australian nutrition: ${loggedMeal.calories} kcal, ${loggedMeal.protein_g}g protein, ${loggedMeal.carbs_g}g carbs, ${loggedMeal.fat_g}g fat.`, {
+        loggedMealIds: [loggedMeal.id],
+      })
+    }
 
     return appendAssistant(coachReply(content, { profile, totals, todaysWorkouts }))
   }
@@ -509,7 +611,14 @@ export default function Coach() {
     const updatedMealIds = []
     const loggedWorkoutIds = []
     const updatedWorkoutIds = []
+    let latestLoggedMeal = null
+    let latestUpdatedMeal = null
+    let latestLoggedWorkout = null
+    let latestUpdatedWorkout = null
+    let latestLoggedWorkoutAction = null
+    let latestUpdatedWorkoutAction = null
     const requestedMealPersistence = (coachResponse.actions || []).some((action) => action?.type === "log_meal" || action?.type === "update_meal_log")
+    const requestedWorkoutPersistence = (coachResponse.actions || []).some((action) => action?.type === "log_workout" || action?.type === "update_workout_log")
 
     for (const action of coachResponse.actions || []) {
       if (action.type === "update_targets") {
@@ -600,6 +709,8 @@ export default function Coach() {
         setWorkouts((current) => [workoutLog, ...current])
         if (loggedSets.length) setWorkoutSets((current) => [...loggedSets, ...current])
         loggedWorkoutIds.push(sessionId)
+        latestLoggedWorkout = workoutLog
+        latestLoggedWorkoutAction = action
       }
 
       if (action.type === "update_workout_log") {
@@ -630,6 +741,8 @@ export default function Coach() {
         setWorkouts((current) => current.map((workout) => workout.id === workoutId ? nextWorkout : workout))
         setWorkoutSets((current) => replaceWorkoutSessionSets(current, workoutId, nextSets))
         updatedWorkoutIds.push(workoutId)
+        latestUpdatedWorkout = nextWorkout
+        latestUpdatedWorkoutAction = action
       }
 
       if (action.type === "log_meal") {
@@ -639,24 +752,23 @@ export default function Coach() {
         } else {
           const nutritionSource = resolveMealNutritionSource(action)
           const mealId = uid("meal")
-          setMeals((current) => [
-            {
-              id: mealId,
-              date: action.date || todayISO(),
-              meal_type: action.meal_type || "snack",
-              food_name: action.food_name || "Estimated mixed meal",
-              quantity: String(action.quantity || "1 serve"),
-              calories: numberOrZero(action.calories),
-              protein_g: numberOrZero(action.protein_g),
-              carbs_g: numberOrZero(action.carbs_g),
-              fat_g: numberOrZero(action.fat_g),
-              estimated: action.estimated ?? true,
-              nutrition_source: nutritionSource,
-              notes: action.message || "Logged by OpenAI coach",
-            },
-            ...current,
-          ])
+          const nextMeal = {
+            id: mealId,
+            date: action.date || todayISO(),
+            meal_type: action.meal_type || "snack",
+            food_name: action.food_name || "Estimated mixed meal",
+            quantity: String(action.quantity || "1 serve"),
+            calories: numberOrZero(action.calories),
+            protein_g: numberOrZero(action.protein_g),
+            carbs_g: numberOrZero(action.carbs_g),
+            fat_g: numberOrZero(action.fat_g),
+            estimated: action.estimated ?? true,
+            nutrition_source: nutritionSource,
+            notes: action.message || "Logged by OpenAI coach",
+          }
+          setMeals((current) => [nextMeal, ...current])
           loggedMealIds.push(mealId)
+          latestLoggedMeal = nextMeal
         }
       }
 
@@ -690,23 +802,62 @@ export default function Coach() {
         }
         setMeals((current) => upsertMealEntry(current, nextMeal))
         updatedMealIds.push(mealId)
+        latestUpdatedMeal = nextMeal
       }
     }
 
     const warnings = [...(coachResponse.warnings || []), ...rejectedActions].filter(Boolean)
     const suffix = warnings.length ? `\n\n${warnings.join(" ")}` : ""
     const mealSaveSucceeded = loggedMealIds.length > 0 || updatedMealIds.length > 0
+    const workoutSaveSucceeded = loggedWorkoutIds.length > 0 || updatedWorkoutIds.length > 0
     const nextMealSession = coachResponse?.meal_session && typeof coachResponse.meal_session === "object"
       ? coachResponse.meal_session
       : null
+    const nextWorkoutSession = coachResponse?.workout_session && typeof coachResponse.workout_session === "object"
+      ? coachResponse.workout_session
+      : null
     if (mealSaveSucceeded) {
-      setMealSession(createEmptyMealSession())
+      const persistedSource = nextMealSession || mealSession
+      const persistedMeal = latestLoggedMeal || latestUpdatedMeal
+      const persistedMealId = loggedMealIds[0] || updatedMealIds[0] || ""
+      setMealSession(buildPersistedMealSession(
+        persistedSource,
+        { food_name: persistedMeal?.food_name || nextMealSession?.summary || "", ...(persistedMeal || {}) },
+        persistedMealId
+      ))
     } else if (nextMealSession && (nextMealSession.active || nextMealSession.mealConversation || nextMealSession.summary)) {
       setMealSession(nextMealSession)
     }
-    const replyText = requestedMealPersistence && !mealSaveSucceeded && /\b(logged|saved|tracked|recorded)\b/i.test(String(coachResponse.reply || ""))
-      ? "I have the meal details, but I couldn't save it just now."
-      : coachResponse.reply
+    if (workoutSaveSucceeded) {
+      const persistedSource = nextWorkoutSession || workoutSession
+      const persistedWorkout = latestLoggedWorkout || latestUpdatedWorkout
+      const persistedWorkoutId = loggedWorkoutIds[0] || updatedWorkoutIds[0] || ""
+      setWorkoutSession(buildPersistedWorkoutSession(
+        persistedSource,
+        {
+          workout_type: persistedWorkout?.workout_type || nextWorkoutSession?.summary || "",
+          exercise_name: latestLoggedWorkoutAction?.exercise_name || latestUpdatedWorkoutAction?.exercise_name || "",
+        },
+        persistedWorkoutId
+      ))
+    } else if (nextWorkoutSession && (nextWorkoutSession.active || nextWorkoutSession.workoutConversation || nextWorkoutSession.summary)) {
+      setWorkoutSession(nextWorkoutSession)
+    }
+
+    let replyText = coachResponse.reply
+    if (requestedMealPersistence && !mealSaveSucceeded) {
+      replyText = "I have the meal details, but I couldn't save it just now."
+    } else if (requestedWorkoutPersistence && !workoutSaveSucceeded) {
+      replyText = "I have the details, but I couldn't save it just now."
+    } else if (latestLoggedMeal) {
+      replyText = formatCoachMealConfirmation("Saved to today's nutrition", latestLoggedMeal)
+    } else if (latestUpdatedMeal) {
+      replyText = formatCoachMealConfirmation("Updated today's nutrition", latestUpdatedMeal)
+    } else if (latestLoggedWorkout && latestLoggedWorkoutAction) {
+      replyText = formatCoachWorkoutConfirmation("Saved to Workouts", latestLoggedWorkout, latestLoggedWorkoutAction)
+    } else if (latestUpdatedWorkout && latestUpdatedWorkoutAction) {
+      replyText = formatCoachWorkoutConfirmation("Updated your workout log", latestUpdatedWorkout, latestUpdatedWorkoutAction)
+    }
     return appendAssistant(`${replyText}${suffix}`, {
       ...(attachedPlan ? { plan: attachedPlan } : {}),
       ...(loggedMealIds.length ? { loggedMealIds } : {}),
@@ -751,6 +902,7 @@ export default function Coach() {
         activeWorkout,
         recentMessages: messages.slice(-20),
         mealSession,
+        workoutSession,
       })
       if (!coachResponse) {
         const assistantMessage = appendAssistant("I couldn't get a valid response from the live coach, so I didn't log or change anything. Please try again.")

@@ -306,7 +306,7 @@ test("coach can save an estimated mixed meal without showing the old skipped war
   await page.getByPlaceholder(/log bench 80kg for 4 sets of 6/i).fill("yes calculate")
   await page.getByRole("button", { name: /^Send$/i }).click()
 
-  await expect(page.getByText(/roughly 2,517 calories/i)).toBeVisible()
+  await expect(page.getByText(/saved to today's nutrition: eggs fried in butter with rye toast and vegemite\./i)).toBeVisible()
   await expect(page.getByText(/skipped one meal log/i)).toHaveCount(0)
   await expect(page.getByText(/couldn't save that meal yet/i)).toHaveCount(0)
 
@@ -566,13 +566,118 @@ test("fragmented coach meal logs persist into Nutrition after refresh", async ({
     await page.getByRole("button", { name: /^Send$/i }).click()
   }
 
-  await expect(page.getByText(/I logged 17 fried eggs cooked in 100g salted butter/i)).toBeVisible()
+  await expect(page.getByText(/saved to today's nutrition: 17 fried eggs cooked in 100g salted butter, plus 250ml earl grey tea with no milk and no sugar\./i)).toBeVisible()
 
   await page.goto("/Nutrition")
   await page.reload()
   const todayMealsSection = page.locator("section").filter({ has: page.getByRole("heading", { name: /today's meals/i }) })
   await expect(todayMealsSection.getByText("17 fried eggs cooked in 100g salted butter, plus 250ml Earl Grey tea with no milk and no sugar")).toBeVisible()
   await expect(todayMealsSection.getByText(/2230 kcal - 164g protein/i)).toBeVisible()
+})
+
+test("coach does not create duplicate meals when a redundant follow-up arrives after a persisted save", async ({ page }) => {
+  await seedOnboardedProfile(page)
+  await page.route("**/api/coach", async (route) => {
+    const body = route.request().postDataJSON()
+    const message = String(body.message || "").toLowerCase()
+    const mealSession = body.mealSession || null
+
+    if (message.includes("egg and tea")) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          reply: "How many eggs did you have?",
+          actions: [{ type: "clarify", message: "How many eggs did you have?" }],
+          warnings: [],
+          meal_session: {
+            active: true,
+            mealConversation: true,
+            readyToLog: false,
+            clarificationAttempts: 0,
+            clarificationCounts: {},
+            summary: "eggs, plus tea",
+            clarifyQuestion: "How many eggs did you have?",
+            items: [
+              { base_name: "egg", label: "Egg", category: "food", quantity: null, preparation: [], exclusions: [], attached_to: null, relation: null },
+              { base_name: "tea", label: "Tea", category: "drink", quantity: null, preparation: [], exclusions: [], attached_to: null, relation: null },
+            ],
+          },
+        }),
+      })
+      return
+    }
+
+    if (message.includes("17 eggs fried in 100g of salted butter")) {
+      expect(mealSession?.summary || "").toMatch(/eggs, plus tea/i)
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          reply: "I logged 17 fried eggs cooked in 100g salted butter, plus 250ml Earl Grey tea with no milk and no sugar. That estimate comes to roughly 2,230 calories, 164g protein, 47g carbs, and 236g fat.",
+          actions: [
+            {
+              type: "log_meal",
+              food_name: "17 fried eggs cooked in 100g salted butter, plus 250ml Earl Grey tea with no milk and no sugar",
+              meal_type: "breakfast",
+              quantity: "1 meal",
+              calories: 2230,
+              protein_g: 164,
+              carbs_g: 47,
+              fat_g: 236,
+              estimated: true,
+              nutrition_source: "Coach estimate from accumulated meal details across chat",
+            },
+          ],
+          warnings: [],
+          meal_session: {
+            ...mealSession,
+            active: true,
+            mealConversation: true,
+            readyToLog: true,
+            summary: "17 fried eggs cooked in 100g salted butter, plus 250ml Earl Grey tea with no milk and no sugar",
+            clarifyQuestion: "",
+          },
+        }),
+      })
+      return
+    }
+
+    expect(mealSession?.persisted).toBe(true)
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        reply: "I already saved 17 fried eggs cooked in 100g salted butter, plus 250ml Earl Grey tea with no milk and no sugar in today's nutrition log. If you want to change it, tell me what to update.",
+        actions: [],
+        warnings: [],
+        meal_session: {
+          ...mealSession,
+          alreadyLogged: true,
+          active: false,
+          readyToLog: false,
+        },
+      }),
+    })
+  })
+
+  await page.goto("/Coach")
+  const composer = page.getByPlaceholder(/log bench 80kg for 4 sets of 6/i)
+  for (const message of [
+    "i had egg and tea",
+    "17 eggs fried in 100g of salted butter",
+    "i just did",
+  ]) {
+    await composer.fill(message)
+    await page.getByRole("button", { name: /^Send$/i }).click()
+  }
+
+  await expect(page.getByText(/already saved 17 fried eggs cooked in 100g salted butter/i)).toBeVisible()
+
+  await page.goto("/Nutrition")
+  await page.reload()
+  const todayMealsSection = page.locator("section").filter({ has: page.getByRole("heading", { name: /today's meals/i }) })
+  await expect(todayMealsSection.getByText("17 fried eggs cooked in 100g salted butter, plus 250ml Earl Grey tea with no milk and no sugar")).toHaveCount(1)
 })
 
 test("coach sends arbitrary food detail messages to the live coach instead of tripping the local build-block fallback", async ({ page }) => {
@@ -629,13 +734,133 @@ test("coach-logged workouts show up in Workouts with completed sets and volume",
   await page.getByPlaceholder(/log bench 80kg for 4 sets of 6/i).fill("I did preacher bicep dumbbells 12.5kg for 4 sets of 10")
   await page.getByRole("button", { name: /^Send$/i }).click()
 
-  await expect(page.getByText(/logged your preacher bicep dumbbells/i)).toBeVisible()
+  await expect(page.getByText(/saved to workouts: preacher bicep dumbbells for 4 sets of 10 at 12\.5kg\./i)).toBeVisible()
 
   await page.goto("/Workouts")
   const recentSessionsSection = page.locator("section").filter({ has: page.getByRole("heading", { name: /recent sessions/i }) }).first()
   await expect(recentSessionsSection.getByText(/preacher bicep dumbbells/i).first()).toBeVisible()
   await expect(page.getByText(/4 structured sets logged so far\./i).first()).toBeVisible()
   await expect(page.getByText("500kg").first()).toBeVisible()
+})
+
+test("fragmented coach workout logs persist into Workouts after refresh", async ({ page }) => {
+  await seedOnboardedProfile(page)
+  await page.route("**/api/coach", async (route) => {
+    const body = route.request().postDataJSON()
+    const message = String(body.message || "").toLowerCase()
+    const workoutSession = body.workoutSession || null
+
+    if (message === "bench press") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          reply: "How much weight did you use for bench press?",
+          actions: [{ type: "clarify", message: "How much weight did you use for bench press?" }],
+          warnings: [],
+          workout_session: {
+            active: true,
+            workoutConversation: true,
+            exercise_name: "Bench Press",
+            workout_type: "Bench Press",
+            muscle_group: "full_body",
+            sets: 0,
+            reps: 0,
+            weight_kg: 0,
+            duration_seconds: 0,
+            distance_km: 0,
+            clarificationAttempts: 0,
+            clarificationCounts: {},
+            readyToLog: false,
+            shouldStopClarifying: false,
+            clarifyQuestion: "How much weight did you use for bench press?",
+            summary: "Bench Press",
+            wantsLogging: true,
+          },
+        }),
+      })
+      return
+    }
+
+    if (message === "80kg") {
+      expect(workoutSession?.exercise_name).toBe("Bench Press")
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          reply: "How many sets did you do?",
+          actions: [{ type: "clarify", message: "How many sets did you do?" }],
+          warnings: [],
+          workout_session: {
+            ...workoutSession,
+            weight_kg: 80,
+            clarifyQuestion: "How many sets did you do?",
+          },
+        }),
+      })
+      return
+    }
+
+    if (message === "4 sets") {
+      expect(workoutSession?.weight_kg).toBe(80)
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          reply: "How many reps did you do?",
+          actions: [{ type: "clarify", message: "How many reps did you do?" }],
+          warnings: [],
+          workout_session: {
+            ...workoutSession,
+            sets: 4,
+            clarifyQuestion: "How many reps did you do?",
+          },
+        }),
+      })
+      return
+    }
+
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        reply: "I logged bench press 80kg for 4 sets of 6.",
+        actions: [
+          {
+            type: "log_workout",
+            exercise_name: "Bench Press",
+            workout_type: "Bench Press",
+            muscle_group: "chest",
+            sets: 4,
+            reps: 6,
+            weight_kg: 80,
+            duration_seconds: 0,
+          },
+        ],
+        warnings: [],
+        workout_session: {
+          ...workoutSession,
+          readyToLog: true,
+          summary: "Bench Press 80kg for 4 sets of 6",
+          clarifyQuestion: "",
+        },
+      }),
+    })
+  })
+
+  await page.goto("/Coach")
+  const composer = page.getByPlaceholder(/log bench 80kg for 4 sets of 6/i)
+  for (const message of ["bench press", "80kg", "4 sets", "6 reps"]) {
+    await composer.fill(message)
+    await page.getByRole("button", { name: /^Send$/i }).click()
+  }
+
+  await page.goto("/Workouts")
+  await page.reload()
+  const recentSessionsSection = page.locator("section").filter({ has: page.getByRole("heading", { name: /recent sessions/i }) }).first()
+  await expect(recentSessionsSection.getByText(/bench press/i).first()).toBeVisible()
+  await expect(page.getByText(/4 structured sets logged so far\./i).first()).toBeVisible()
+  await expect(page.getByText(/1,?920kg/).first()).toBeVisible()
 })
 
 test("logged workouts can be edited in place from Workouts and update volume", async ({ page }) => {

@@ -4,7 +4,14 @@ import path from "node:path"
 import OpenAI from "openai"
 import { createClient } from "@supabase/supabase-js"
 import { searchVerifiedFoods, verifiedFoods } from "../src/lib/nutritionDatabase.js"
-import { buildMealContext, mealStateNeedsClarification } from "./mealStateBuilder.mjs"
+import { buildCoachSessionState } from "./coachSessionState.mjs"
+import {
+  buildDeterministicMealAction,
+  buildDeterministicWorkoutAction,
+  deterministicAlreadyLoggedReply,
+  deterministicClarifyActionFromSession,
+  summarizeCoachAction,
+} from "./coachLoggingRules.mjs"
 import { normalizeCoachResponse } from "./normalizeCoachResponse.mjs"
 
 function loadDotEnv() {
@@ -420,6 +427,8 @@ function validateCoachBody(body) {
   assertObject(body, "request body")
   assertString(body.message, "message", 3000)
   if (body.profile !== undefined) assertObject(body.profile, "profile")
+  if (body.mealSession !== undefined) assertObject(body.mealSession, "mealSession")
+  if (body.workoutSession !== undefined) assertObject(body.workoutSession, "workoutSession")
   for (const key of ["recentMessages", "meals", "workouts", "workoutSets", "workoutPlans", "mealPlans", "recoveryLogs"]) {
     if (body[key] !== undefined && !Array.isArray(body[key])) {
       const error = new Error(`${key} must be an array`)
@@ -721,17 +730,25 @@ async function handleCoach(request, response) {
   const body = await readRequestBody(request)
   validateCoachBody(body)
 
-  if (!client) {
-    throw createHttpError(503, "Live coach is unavailable right now.", {
-      expose: true,
-      logMessage: "OPENAI_API_KEY is not set for the coach server",
-    })
-  }
-
   const contextualRecentMessages = needsRecentChatContext(body.message)
     ? normalizeRecentMessages(body.recentMessages, body.message, 18)
     : []
-  const mealContext = buildMealContext(contextualRecentMessages, body.message, body.mealSession || null)
+  const { mealSession: rawMealContext, workoutSession: workoutContext } = buildCoachSessionState({
+    recentMessages: contextualRecentMessages,
+    currentMessage: body.message,
+    mealSession: body.mealSession || null,
+    workoutSession: body.workoutSession || null,
+  })
+  const mealContext = rawMealContext
+    && (
+      safeArray(rawMealContext.items, 16).length
+      || rawMealContext.readyToLog
+      || rawMealContext.alreadyLogged
+      || rawMealContext.persisted
+      || rawMealContext.clarifyQuestion
+    )
+    ? rawMealContext
+    : null
 
   const candidateFoodMatches = {}
   const candidateFoodTerms = mealContext
@@ -746,15 +763,89 @@ async function handleCoach(request, response) {
     }
   }
 
-  if (mealContext && mealStateNeedsClarification(mealContext)) {
-    const clarifyMessage = mealContext.clarifyQuestion || "I need a bit more detail before I can log that meal."
+  if (mealContext?.alreadyLogged) {
     sendJson(response, 200, {
-      reply: clarifyMessage,
-      actions: [{ type: "clarify", message: clarifyMessage }],
+      reply: deterministicAlreadyLoggedReply(mealContext, "meal"),
+      actions: [],
       warnings: [],
       meal_session: mealContext,
+      workout_session: workoutContext,
     }, requestResponseOrigin(request))
     return
+  }
+
+  if (workoutContext?.alreadyLogged) {
+    sendJson(response, 200, {
+      reply: deterministicAlreadyLoggedReply(workoutContext, "workout"),
+      actions: [],
+      warnings: [],
+      meal_session: mealContext,
+      workout_session: workoutContext,
+    }, requestResponseOrigin(request))
+    return
+  }
+
+  const mealClarifyAction = deterministicClarifyActionFromSession(mealContext)
+  if (mealClarifyAction) {
+    const clarifyMessage = mealClarifyAction.message || "I need a bit more detail before I can log that meal."
+    sendJson(response, 200, {
+      reply: clarifyMessage,
+      actions: [mealClarifyAction],
+      warnings: [],
+      meal_session: mealContext,
+      workout_session: workoutContext,
+    }, requestResponseOrigin(request))
+    return
+  }
+
+  const workoutClarifyAction = deterministicClarifyActionFromSession(workoutContext)
+  if (workoutClarifyAction) {
+    sendJson(response, 200, {
+      reply: workoutClarifyAction.message,
+      actions: [workoutClarifyAction],
+      warnings: [],
+      meal_session: mealContext,
+      workout_session: workoutContext,
+    }, requestResponseOrigin(request))
+    return
+  }
+
+  if (mealContext?.readyToLog) {
+    const mealAction = buildDeterministicMealAction({
+      mealSession: mealContext,
+      explicitActions: [],
+      prompt: body.message,
+      candidateFoodMatches,
+    })
+    if (mealAction) {
+      sendJson(response, 200, {
+        reply: summarizeCoachAction(mealAction),
+        actions: [mealAction],
+        warnings: [],
+        meal_session: mealContext,
+        workout_session: workoutContext,
+      }, requestResponseOrigin(request))
+      return
+    }
+  }
+
+  if (!mealContext && workoutContext?.readyToLog) {
+    const workoutAction = buildDeterministicWorkoutAction({ workoutSession: workoutContext, explicitActions: [] })
+    sendJson(response, 200, {
+      reply: summarizeCoachAction(workoutAction),
+      actions: workoutAction ? [workoutAction] : [],
+      warnings: [],
+      meal_session: mealContext,
+      workout_session: workoutContext,
+    }, requestResponseOrigin(request))
+    return
+  }
+
+  if (!client) {
+    throw createHttpError(503, "Live coach is unavailable right now.", {
+      expose: true,
+      logMessage: "OPENAI_API_KEY is not set for the coach server",
+    })
   }
 
   if (mealContext) {
@@ -779,21 +870,25 @@ async function handleCoach(request, response) {
     })
 
     const parsed = JSON.parse(completion.choices[0]?.message?.content || "{}")
-      sendJson(
-        response,
-        200,
-        {
-          ...normalizeCoachResponse(parsed, {
-            prompt: body.message,
-            recentMessages: contextualRecentMessages,
-            mealContext,
-          }),
-          meal_session: mealContext,
-        },
-        requestResponseOrigin(request)
-      )
-      return
-    }
+    sendJson(
+      response,
+      200,
+      {
+        ...normalizeCoachResponse(parsed, {
+          prompt: body.message,
+          recentMessages: contextualRecentMessages,
+          recentMeals: safeArray(body.meals, 12),
+          recentWorkouts: safeArray(body.workouts, 12),
+          mealContext,
+          workoutContext,
+        }),
+        meal_session: mealContext,
+        workout_session: workoutContext,
+      },
+      requestResponseOrigin(request)
+    )
+    return
+  }
 
   const payload = {
     current_date: new Date().toISOString().slice(0, 10),
@@ -810,6 +905,7 @@ async function handleCoach(request, response) {
     verified_food_catalogue: verifiedFoods,
     candidate_food_matches: candidateFoodMatches,
     meal_context: mealContext,
+    workout_context: workoutContext,
   }
 
 
@@ -824,7 +920,18 @@ async function handleCoach(request, response) {
   })
 
   const parsed = JSON.parse(completion.choices[0]?.message?.content || "{}")
-  sendJson(response, 200, normalizeCoachResponse(parsed, { prompt: body.message, recentMessages: contextualRecentMessages }), requestResponseOrigin(request))
+  sendJson(response, 200, {
+    ...normalizeCoachResponse(parsed, {
+      prompt: body.message,
+      recentMessages: contextualRecentMessages,
+      recentMeals: safeArray(body.meals, 12),
+      recentWorkouts: safeArray(body.workouts, 12),
+      mealContext,
+      workoutContext,
+    }),
+    meal_session: mealContext,
+    workout_session: workoutContext,
+  }, requestResponseOrigin(request))
 }
 
 function verifiedNutritionResult(food) {

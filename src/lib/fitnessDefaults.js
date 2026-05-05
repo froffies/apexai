@@ -10,6 +10,7 @@ export const storageKeys = {
   recoveryLogs: "apexai.recoveryLogs",
   chat: "apexai.chat",
   coachMealSession: "apexai.coachMealSession",
+  coachWorkoutSession: "apexai.coachWorkoutSession",
   shopping: "apexai.shopping",
   recipes: "apexai.recipes",
   favoriteFoods: "apexai.favoriteFoods",
