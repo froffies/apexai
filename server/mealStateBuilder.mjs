@@ -131,6 +131,19 @@ const CORRECTION_PREFIX = /^(actually|no\b|nah\b|correction|change that|make tha
 const FINALISE_PATTERN = /^(?:i just did|i already did|that'?s it|thats it|log it|save it|go ahead|that was it)$/i
 const MEAL_REFERENCE_PATTERN = /\b(no sugar|no milk|without sugar|without milk|cooked in|fried in|used to fry|used for|earl grey|the eggs?|the tea|the coffee|the toast|the beans?|the chicken|the rice|the butter|the oil)\b/i
 const ASSISTANT_MEAL_PATTERN = /\b(what type|what kind|how much|how many|milk|sugar|cooked in|fried in|used for|before i can log|need more detail|meal details|calories|protein|carbs|fat|estimate|serving size|amount|quantity)\b/i
+const PREPARATION_PATTERNS = [
+  ["hard boiled", /\bhard boiled\b/i],
+  ["soft boiled", /\bsoft boiled\b/i],
+  ["fried", /\bfried\b/i],
+  ["boiled", /\bboiled\b/i],
+  ["poached", /\bpoached\b/i],
+  ["scrambled", /\bscrambled\b/i],
+  ["grilled", /\bgrilled\b/i],
+  ["baked", /\bbaked\b/i],
+  ["toasted", /\btoasted\b/i],
+  ["roasted", /\broasted\b/i],
+  ["steamed", /\bsteamed\b/i],
+]
 
 const QUANTITY_PATTERN = new RegExp(
   `(?<amount>\\d+(?:\\.\\d+)?|${[...QUANTITY_WORDS.keys()].join("|")})\\s*(?:(?<intensity>whole|entire)\\s+)?(?<unit>${QUANTITY_UNITS.join("|")})\\b(?:\\s+of)?\\s*(?<food>.*)$`,
@@ -149,6 +162,23 @@ function titleCase(text) {
   return String(text || "")
     .trim()
     .replace(/\w\S*/g, (word) => word.charAt(0).toUpperCase() + word.slice(1))
+}
+
+function safeArray(value, limit = 8) {
+  return Array.isArray(value) ? value.slice(0, limit) : []
+}
+
+function extractPreparations(text) {
+  const normalized = cleanText(text)
+  if (!normalized) return []
+  const preparations = PREPARATION_PATTERNS
+    .filter(([, pattern]) => pattern.test(normalized))
+    .map(([label]) => label)
+
+  if (preparations.includes("hard boiled") || preparations.includes("soft boiled")) {
+    return preparations.filter((label) => label !== "boiled")
+  }
+  return preparations
 }
 
 function toAmount(raw) {
@@ -331,6 +361,14 @@ function deriveBaseName(label, fallback = "") {
   return words.slice(-2).join(" ")
 }
 
+function defaultDisplayLabel(baseName, fallback = "") {
+  const normalized = cleanText(baseName || fallback)
+  if (!normalized) return ""
+  if (normalized === "egg") return "eggs"
+  if (normalized === "earl grey tea") return "Earl Grey tea"
+  return fallback || normalized
+}
+
 function buildQuantity(amount, unit, modifier = "") {
   const numericAmount = toAmount(amount)
   const normalizedUnit = normalizeUnit(unit)
@@ -360,7 +398,7 @@ function createItem({ label = "", baseName = "", quantity = null, category = "",
   const safeCategory = category || detectCategory(safeBaseName || label)
   return {
     key: cleanText(safeBaseName || label),
-    label: titleCase(label || safeBaseName),
+    label: titleCase(defaultDisplayLabel(safeBaseName, label || safeBaseName)),
     baseName: safeBaseName,
     quantity,
     category: safeCategory,
@@ -372,22 +410,70 @@ function createItem({ label = "", baseName = "", quantity = null, category = "",
   }
 }
 
+function preparationKey(item) {
+  return safeArray(item?.preparation, 8)
+    .map((entry) => cleanText(entry))
+    .filter(Boolean)
+    .sort()
+    .join("|")
+}
+
+function itemReferenceKey(item) {
+  const base = cleanText(item?.baseName || item?.key || item?.label)
+  if (!base) return ""
+  const prep = preparationKey(item)
+  return prep ? `${base}::${prep}` : base
+}
+
+function ingredientMatchesItem(entry, item) {
+  const attachedTo = cleanText(entry?.attachedTo || "")
+  const reference = itemReferenceKey(item)
+  const base = cleanText(item?.baseName || item?.key || "")
+  return Boolean(attachedTo && (attachedTo === reference || attachedTo === base))
+}
+
+function findBestItemIndex(state, nextItem) {
+  const key = cleanText(nextItem.baseName || nextItem.key || nextItem.label)
+  const nextAttachment = cleanText(nextItem.attachedTo || "")
+  const nextPreparationKey = preparationKey(nextItem)
+  const candidates = state.items
+    .map((item, index) => ({ item, index }))
+    .filter(({ item }) => {
+      const existingKey = cleanText(item.baseName || item.key)
+      const sameAttachment = cleanText(item.attachedTo || "") === nextAttachment
+      return sameAttachment && (
+        existingKey === key
+        || existingKey.includes(key)
+        || key.includes(existingKey)
+      )
+    })
+
+  if (!candidates.length) return -1
+
+  const exactPreparation = candidates.find(({ item }) => preparationKey(item) === nextPreparationKey)
+  if (nextPreparationKey && exactPreparation) return exactPreparation.index
+
+  const unpreparedCandidate = candidates.find(({ item }) => !preparationKey(item))
+  if (nextPreparationKey && unpreparedCandidate) return unpreparedCandidate.index
+
+  if (nextPreparationKey) return -1
+  if (candidates.length === 1) return candidates[0].index
+
+  return candidates.at(-1).index
+}
+
 function upsertItem(state, nextItem, { preferLast = true } = {}) {
   const key = cleanText(nextItem.baseName || nextItem.key || nextItem.label)
   if (!key) return false
 
-  const index = state.items.findIndex((item) => {
-    const existingKey = cleanText(item.baseName || item.key)
-    const sameAttachment = cleanText(item.attachedTo || "") === cleanText(nextItem.attachedTo || "")
-    return sameAttachment && (
-      existingKey === key
-      || existingKey.includes(key)
-      || key.includes(existingKey)
-    )
-  })
+  const index = findBestItemIndex(state, nextItem)
   if (index === -1) {
-    state.items.push(cloneItem({ ...nextItem, key }))
-    if (nextItem.category === "food") state.lastMainKey = key
+    const inserted = cloneItem({ ...nextItem, key })
+    state.items.push(inserted)
+    if (nextItem.category === "food") {
+      state.lastMainKey = key
+      state.lastMainReference = itemReferenceKey(inserted)
+    }
     if (nextItem.category === "drink") state.lastDrinkKey = key
     return true
   }
@@ -407,7 +493,10 @@ function upsertItem(state, nextItem, { preferLast = true } = {}) {
 
   if (preferLast && nextItem.quantity) merged.quantity = nextItem.quantity
   state.items[index] = merged
-  if (merged.category === "food") state.lastMainKey = key
+  if (merged.category === "food") {
+    state.lastMainKey = key
+    state.lastMainReference = itemReferenceKey(merged)
+  }
   if (merged.category === "drink") state.lastDrinkKey = key
   return true
 }
@@ -483,15 +572,21 @@ function parseIngredientPhrase(text) {
   const source = normalized
     .replace(/^(?:cooked|cook|fried|used)\s+(?:in|to fry)\s+/, "")
     .replace(/^(?:with)\s+/, "")
+    .replace(/^just\s+/, "")
     .trim()
   if (!source) return null
+
+  const sourceBaseName = deriveBaseName(source)
+  if (relation === "cooked_in" && sourceBaseName === "water") return null
 
   const match = source.match(QUANTITY_PATTERN)
   if (match?.groups) {
     const foodLabel = match.groups.food || (normalizeUnit(match.groups.unit) === "egg" ? "eggs" : "")
+    const baseName = deriveBaseName(foodLabel || match.groups.unit)
+    if (relation === "cooked_in" && baseName === "water") return null
     const item = createItem({
-      label: foodLabel || match.groups.unit,
-      baseName: deriveBaseName(foodLabel || match.groups.unit),
+      label: defaultDisplayLabel(baseName, foodLabel || match.groups.unit),
+      baseName,
       quantity: buildQuantity(match.groups.amount, match.groups.unit, match.groups.intensity),
       category: "ingredient",
       preparation: source.includes("salted") ? ["salted"] : source.includes("unsalted") ? ["unsalted"] : [],
@@ -502,15 +597,62 @@ function parseIngredientPhrase(text) {
   }
 
   if (source) {
+    if (relation === "cooked_in" && sourceBaseName === "water") return null
     return createItem({
-      label: source,
-      baseName: deriveBaseName(source),
+      label: defaultDisplayLabel(sourceBaseName, source),
+      baseName: sourceBaseName,
       category: "ingredient",
       relation,
       sourceMessage: text,
     })
   }
   return null
+}
+
+function findInheritedTarget(state, preparations = []) {
+  const normalizedPreparations = preparations.map((entry) => cleanText(entry)).filter(Boolean)
+  const primaryItems = state.items.filter((item) => !item.attachedTo && item.category === "food")
+  if (!primaryItems.length) return null
+  if (normalizedPreparations.length) {
+    const exact = [...primaryItems].reverse().find((item) => {
+      const itemPreparations = safeArray(item.preparation, 8).map((entry) => cleanText(entry))
+      return normalizedPreparations.every((entry) => itemPreparations.includes(entry))
+    })
+    if (exact) return exact
+  }
+  const lastPrimary = [...primaryItems].reverse().find((item) => cleanText(item.baseName || item.key || "") === cleanText(state.lastMainKey || ""))
+  return lastPrimary || primaryItems.at(-1)
+}
+
+function parseInheritedFoodClause(state, clause) {
+  const normalized = normalizeLabel(clause)
+  const referencePreparations = extractPreparations(normalized)
+  const quantityReferenceMatch = normalized.match(new RegExp(
+    `^(?<amount>\\d+(?:\\.\\d+)?|${[...QUANTITY_WORDS.keys()].join("|")})\\s+(?:(?<reference>that|those|them|ones?)\\s+)?(?:were|was)?\\s*(?<details>.*)$`,
+    "i"
+  ))
+  const hasInheritedReference = Boolean(quantityReferenceMatch?.groups?.reference && /\b(that|those|them|ones?)\b/i.test(quantityReferenceMatch.groups.reference))
+  const preparationReferenceMatch = !hasInheritedReference
+    ? normalized.match(/^(?<details>(?:hard|soft)\s+boiled|fried|boiled|poached|scrambled|grilled|baked|toasted|roasted|steamed)(?:\s+eggs?)?\s+(?:were|was)\b/i)
+    : null
+
+  if (!hasInheritedReference && !preparationReferenceMatch) return null
+
+  const target = findInheritedTarget(state, referencePreparations)
+  if (!target) return null
+
+  const quantity = hasInheritedReference
+    ? buildQuantity(quantityReferenceMatch.groups.amount, target.quantity?.unit || (/\begg\b/.test(target.baseName) ? "egg" : "serve"))
+    : target.quantity || null
+
+  return createItem({
+    label: defaultDisplayLabel(target.baseName, target.label),
+    baseName: target.baseName,
+    quantity,
+    category: target.category,
+    preparation: referencePreparations.length ? referencePreparations : safeArray(target.preparation, 8),
+    sourceMessage: clause,
+  })
 }
 
 function parseMeasuredFoodClause(clause) {
@@ -521,20 +663,22 @@ function parseMeasuredFoodClause(clause) {
   const withSplit = ingredientText ? [ingredientText] : normalized.split(/\bwith\b/)
 
   const quantityMatch = mainText.match(QUANTITY_PATTERN)
-  const countedFoodMatch = quantityMatch ? null : mainText.match(new RegExp(`^(?<amount>\\d+(?:\\.\\d+)?|${[...QUANTITY_WORDS.keys()].join("|")})\\s+(?<preparation>fried|boiled|poached|scrambled|grilled|baked|toasted)?\\s*(?<food>[a-z][a-z\\s%-]+)$`, "i"))
+  const countedFoodMatch = quantityMatch ? null : mainText.match(new RegExp(`^(?<amount>\\d+(?:\\.\\d+)?|${[...QUANTITY_WORDS.keys()].join("|")})\\s+(?<food>[a-z][a-z\\s%-]+)$`, "i"))
   let item = null
+  const preparations = extractPreparations(mainText)
   if (countedFoodMatch?.groups && looksFoodishPhrase(countedFoodMatch.groups.food)) {
+    const baseName = deriveBaseName(countedFoodMatch.groups.food.trim())
     const quantity = {
       amount: toAmount(countedFoodMatch.groups.amount) || 1,
-      unit: singularize(deriveBaseName(countedFoodMatch.groups.food).split(" ").at(-1) || "serve"),
-      text: `${toAmount(countedFoodMatch.groups.amount) || 1} ${countedFoodMatch.groups.food}`.trim(),
+      unit: singularize(baseName.split(" ").at(-1) || "serve"),
+      text: `${toAmount(countedFoodMatch.groups.amount) || 1} ${defaultDisplayLabel(baseName, countedFoodMatch.groups.food).toLowerCase()}`.trim(),
       modifier: "",
     }
     item = createItem({
-      label: countedFoodMatch.groups.food.trim(),
-      baseName: deriveBaseName(countedFoodMatch.groups.food.trim()),
+      label: defaultDisplayLabel(baseName, countedFoodMatch.groups.food.trim()),
+      baseName,
       quantity,
-      preparation: countedFoodMatch.groups.preparation ? [cleanText(countedFoodMatch.groups.preparation)] : [],
+      preparation: preparations,
       sourceMessage: clause,
     })
   } else if (quantityMatch?.groups) {
@@ -542,30 +686,28 @@ function parseMeasuredFoodClause(clause) {
     const quantity = buildQuantity(quantityMatch.groups.amount, quantityMatch.groups.unit, quantityMatch.groups.intensity)
     const rest = (quantityMatch.groups.food?.trim() || "").replace(/^not\s+\d+(?:\.\d+)?\b.*$/i, "").trim()
     const label = rest || (unit === "egg" ? "eggs" : unit)
-    const preparation = []
-    if (/\bfried\b/.test(normalized)) preparation.push("fried")
-    if (/\bboiled\b/.test(normalized)) preparation.push("boiled")
-    if (/\bpoached\b/.test(normalized)) preparation.push("poached")
-    if (/\bgrilled\b/.test(normalized)) preparation.push("grilled")
-    if (/\bbaked\b/.test(normalized)) preparation.push("baked")
-    if (/\btoasted\b/.test(normalized)) preparation.push("toasted")
+    const baseName = deriveBaseName(label || mainText)
+    const preparation = [...preparations]
     if (/\bwholemeal\b/.test(normalized)) preparation.push("wholemeal")
     if (/\brye\b/.test(normalized)) preparation.push("rye")
     item = createItem({
-      label: label || mainText,
-      baseName: deriveBaseName(label || mainText),
+      label: defaultDisplayLabel(baseName, label || mainText),
+      baseName,
       quantity,
       preparation,
       sourceMessage: clause,
     })
   } else {
-    const contentWords = normalized
+    const contentWords = mainText
       .split(" ")
       .filter((word) => word && !STOPWORDS.has(word))
     if (!contentWords.length) return { item: null, attachedIngredient: null }
+    const label = contentWords.join(" ")
+    const baseName = deriveBaseName(label)
     item = createItem({
-      label: contentWords.join(" "),
-      baseName: deriveBaseName(contentWords.join(" ")),
+      label: defaultDisplayLabel(baseName, label),
+      baseName,
+      preparation: preparations,
       sourceMessage: clause,
     })
   }
@@ -606,17 +748,29 @@ function applyPendingQuantity(state, item) {
 
 function attachLooseIngredientsToTarget(state, targetBaseName) {
   if (!targetBaseName) return false
+  const target = [...state.items]
+    .reverse()
+    .find((item) => !item.attachedTo && item.category === "food" && cleanText(item.baseName || item.key || "") === cleanText(targetBaseName))
+  const targetReference = target ? itemReferenceKey(target) : cleanText(targetBaseName)
   let changed = false
   state.items = state.items.map((item) => {
     if (item.category !== "ingredient" || item.attachedTo) return item
     changed = true
     return {
       ...item,
-      attachedTo: targetBaseName,
+      attachedTo: targetReference,
       relation: item.relation || "cooked_in",
     }
   })
   return changed
+}
+
+function findCookingMediumTarget(state) {
+  const primaryFoods = state.items.filter((item) => !item.attachedTo && item.category === "food")
+  if (!primaryFoods.length) return null
+  const reversed = [...primaryFoods].reverse()
+  const pendingFried = reversed.find((item) => item.preparation?.includes("fried") && !state.items.some((entry) => ingredientMatchesItem(entry, item) && entry.relation === "cooked_in"))
+  return pendingFried || reversed[0]
 }
 
 function mergeClauseIntoState(state, clause) {
@@ -660,23 +814,34 @@ function mergeClauseIntoState(state, clause) {
   const quantityOnly = parseQuantityOnly(normalized)
   if (quantityOnly) return assignQuantityToPendingItem(state, quantityOnly)
 
+  const inheritedItem = parseInheritedFoodClause(state, clause)
+  if (inheritedItem) {
+    return upsertItem(state, inheritedItem, { preferLast: true })
+  }
+
   if (/^(?:cooked|fried|used)\s+(?:in|to fry)\s+/.test(normalizedWithoutAlso)) {
     const ingredient = parseIngredientPhrase(normalizedWithoutAlso)
     if (ingredient) {
-      const attachedTo = state.lastMainKey || state.items.find((item) => item.category !== "ingredient")?.baseName || ""
+      const cookingTarget = findCookingMediumTarget(state)
+      const attachedTo = cookingTarget
+        ? itemReferenceKey(cookingTarget)
+        : state.lastMainReference || state.lastMainKey || state.items.find((item) => item.category !== "ingredient")?.baseName || ""
       changed = upsertItem(state, { ...ingredient, attachedTo, relation: ingredient.relation || "cooked_in" }) || changed
       return changed
     }
   }
 
   const { item, attachedIngredient } = parseMeasuredFoodClause(clause)
+  let nextItem = null
   if (item) {
-    const nextItem = applyPendingQuantity(state, item)
+    nextItem = applyPendingQuantity(state, item)
     changed = upsertItem(state, nextItem, { preferLast: true }) || changed
   }
   if (attachedIngredient) {
-    const targetBase = item?.baseName || state.lastMainKey || ""
-    changed = upsertItem(state, { ...attachedIngredient, attachedTo: targetBase || attachedIngredient.attachedTo || "" }, { preferLast: true }) || changed
+    const targetReference = item
+      ? state.lastMainReference || itemReferenceKey(nextItem || item)
+      : state.lastMainReference || state.lastMainKey || ""
+    changed = upsertItem(state, { ...attachedIngredient, attachedTo: targetReference || attachedIngredient.attachedTo || "" }, { preferLast: true }) || changed
   }
 
   return changed
@@ -713,7 +878,7 @@ function describeItem(item, state) {
     }
   }
 
-  const attachedIngredients = state.items.filter((entry) => cleanText(entry.attachedTo || "") === cleanText(mainItem.baseName || mainItem.key))
+  const attachedIngredients = state.items.filter((entry) => ingredientMatchesItem(entry, mainItem))
   const cookedIn = attachedIngredients.filter((entry) => entry.relation === "cooked_in")
   if (cookedIn.length) {
     const ingredientText = cookedIn.map((entry) => describeIngredient(entry)).join(" and ")
@@ -818,7 +983,7 @@ function identifyMissingDetails(state) {
       continue
     }
     const needsCookingMedium = item.preparation?.includes("fried")
-      && !state.items.some((entry) => cleanText(entry.attachedTo || "") === cleanText(item.baseName) && entry.relation === "cooked_in")
+      && !state.items.some((entry) => ingredientMatchesItem(entry, item) && entry.relation === "cooked_in")
       && !cookingMediumShouldStopClarifying(item, state)
     if (needsCookingMedium) {
       missing.push({ type: "cooking_medium", item })
@@ -840,9 +1005,14 @@ function buildClarifyQuestion(state) {
     : null
   const alternateTarget = missing.find((entry) => !lastClarificationTargets.includes(clarificationKey(entry.item.baseName, entry.type)))
   const firstMissing = currentTarget || alternateTarget || missing[0]
-  const label = firstMissing.item.label || titleCase(firstMissing.item.baseName)
-  if (firstMissing.type === "cooking_medium") return `What were the ${label.toLowerCase()} cooked in?`
-  return `How much ${label.toLowerCase()} did you have?`
+  const baseName = cleanText(firstMissing.item.baseName || firstMissing.item.label)
+  const displayName = titleCase(defaultDisplayLabel(baseName, firstMissing.item.label || firstMissing.item.baseName))
+  if (firstMissing.type === "cooking_medium") {
+    const cookedLabel = baseName === "egg" ? "eggs" : displayName.toLowerCase()
+    return `What were the ${cookedLabel} cooked in?`
+  }
+  if (baseName === "egg") return "How many eggs did you have?"
+  return `How much ${displayName.toLowerCase()} did you have?`
 }
 
 function detectMealIntent(turns = []) {
@@ -858,6 +1028,7 @@ function seedStateFromExistingSession(state, existingSession) {
   if (!existingSession?.active || !Array.isArray(existingSession.items) || !existingSession.items.length) return
   state.items = existingSession.items.map((item) => toInternalItem(item))
   state.lastMainKey = cleanText(existingSession.lastMainKey || state.items.findLast?.((item) => item.category !== "ingredient")?.baseName || state.lastMainKey)
+  state.lastMainReference = cleanText(existingSession.lastMainReference || itemReferenceKey(state.items.findLast?.((item) => item.category === "food" && !item.attachedTo) || {}) || state.lastMainReference)
   state.lastDrinkKey = cleanText(existingSession.lastDrinkKey || state.items.findLast?.((item) => item.category === "drink")?.baseName || state.lastDrinkKey)
   state.clarificationAttempts = Math.max(0, Number(existingSession.clarificationAttempts) || 0)
   state.clarificationCounts = mergeClarificationCounts(state.clarificationCounts, existingSession.clarificationCounts || {})
@@ -878,6 +1049,7 @@ export function emptyMealSession() {
     wantsNutrition: false,
     mealConversation: false,
     lastMainKey: "",
+    lastMainReference: "",
     lastDrinkKey: "",
   }
 }
@@ -891,6 +1063,7 @@ export function buildMealStateFromConversation(recentMessages = [], currentMessa
     clarificationAttempts: clarificationStats.total,
     clarificationCounts: clarificationStats.counts,
     lastMainKey: "",
+    lastMainReference: "",
     lastDrinkKey: "",
     mealConversation: false,
     shouldStopClarifying: false,
@@ -959,6 +1132,7 @@ export function buildMealContext(recentMessages = [], currentMessage = "", exist
       attached_to: item.attachedTo || null,
       relation: item.relation || null,
     })),
+    lastMainReference: mealState.lastMainReference,
     thread_messages: mealState.threadTurns?.map((entry) => ({ role: entry.role, content: String(entry.content || "") })) || [],
   }
 }

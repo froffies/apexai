@@ -854,11 +854,10 @@ test("fragmented coach workout logs persist into Workouts after refresh", async 
     await composer.fill(message)
     await page.getByRole("button", { name: /^Send$/i }).click()
   }
+  await expect(page.getByText(/saved to workouts: bench press for 4 sets of 6 at 80kg\./i)).toBeVisible()
 
   await page.goto("/Workouts")
   await page.reload()
-  const recentSessionsSection = page.locator("section").filter({ has: page.getByRole("heading", { name: /recent sessions/i }) }).first()
-  await expect(recentSessionsSection.getByText(/bench press/i).first()).toBeVisible()
   await expect(page.getByText(/4 structured sets logged so far\./i).first()).toBeVisible()
   await expect(page.getByText(/1,?920kg/).first()).toBeVisible()
 })

@@ -67,9 +67,9 @@ test("meal session clarification flow advances instead of repeating the same mis
     user("17 fried eggs"),
   ])
 
-  assert.equal(snapshots[0].session.clarifyQuestion, "How much egg did you have?")
+  assert.equal(snapshots[0].session.clarifyQuestion, "How many eggs did you have?")
   assert.equal(snapshots[1].session.clarifyQuestion, "How much earl grey tea did you have?")
-  assert.equal(snapshots[2].session.clarifyQuestion, "How much egg did you have?")
+  assert.equal(snapshots[2].session.clarifyQuestion, "How many eggs did you have?")
   assert.equal(snapshots[3].session.clarifyQuestion, "What were the eggs cooked in?")
 })
 
@@ -203,4 +203,23 @@ test("meal session handles fifty varied fragmented conversations without loops o
     assert.equal(session.clarifyQuestion, "", `scenario ${index + 1} should not ask another clarification`)
     assert.match(session.summary, /\S+/, `scenario ${index + 1} should keep a non-empty summary`)
   }
+})
+
+test("meal session logs mixed same-food preparations without inventing bogus water-based items", () => {
+  const conversation = [
+    user("i had egg"),
+    assistant("How many eggs did you have?"),
+    user("15 fried eggs and two that were hard boiled"),
+    assistant("What were the eggs cooked in?"),
+    user("fried eggs cooked in butter, hard boiled were just boiled in water"),
+  ]
+
+  const { session } = replayMealConversation(conversation)
+
+  assert.ok(session)
+  assert.equal(session.readyToLog, true)
+  assert.equal(session.clarifyQuestion, "")
+  assert.equal(session.summary, "15 fried eggs cooked in butter, plus 2 hard boiled eggs")
+  assert.equal(session.items.filter((item) => !item.attached_to).length, 2)
+  assert.equal(session.items.filter((item) => item.base_name === "water").length, 0)
 })
