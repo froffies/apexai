@@ -106,6 +106,7 @@ test("onboarding review explains the target method and offers optional starter p
   await expect(page.getByRole("heading", { name: /choose how you want week one to start/i })).toBeVisible()
   await expect(page.getByRole("heading", { name: /choose the first food structure you want to follow/i })).toBeVisible()
   await expect(page.getByRole("button", { name: /decide later/i })).toHaveCount(2)
+  await expectNoHorizontalOverflow(page)
 })
 
 test("onboarding can skip starter workout and nutrition plans while still saving the profile", async ({ page }) => {

@@ -117,29 +117,29 @@ function OptionCard({ option, selected, onSelect, kind }) {
     <button
       type="button"
       onClick={() => onSelect(option.id)}
-      className={`grid gap-3 rounded-2xl border p-4 text-left transition ${selected ? "border-indigo-500 bg-indigo-50 shadow-sm" : "border-slate-200 bg-white hover:border-slate-300"}`}
+      className={`grid min-w-0 gap-3 rounded-2xl border p-4 text-left transition ${selected ? "border-indigo-500 bg-indigo-50 shadow-sm" : "border-slate-200 bg-white hover:border-slate-300"}`}
       aria-pressed={selected}
     >
       <div className="flex items-start justify-between gap-3">
-        <div>
+        <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <span className={`rounded-full px-2.5 py-1 text-xs font-semibold uppercase tracking-[0.16em] ${selected ? "bg-white text-indigo-700" : "bg-slate-100 text-slate-600"}`}>
               {option.badge}
             </span>
             {selected ? <span className="text-xs font-semibold uppercase tracking-[0.16em] text-indigo-700">Selected</span> : null}
           </div>
-          <h3 className="mt-2 text-base font-bold text-slate-950">{option.label}</h3>
-          <p className="mt-1 text-sm text-slate-600">{option.description}</p>
+          <h3 className="mt-2 text-base font-bold leading-snug text-slate-950 break-words">{option.label}</h3>
+          <p className="mt-1 text-sm leading-relaxed text-slate-600 break-words">{option.description}</p>
         </div>
-        <div className={`rounded-full p-2 ${selected ? "bg-indigo-600 text-white" : "bg-slate-100 text-slate-500"}`}>
+        <div className={`shrink-0 rounded-full p-2 ${selected ? "bg-indigo-600 text-white" : "bg-slate-100 text-slate-500"}`}>
           {kind === "workout" ? <Dumbbell size={16} /> : <Utensils size={16} />}
         </div>
       </div>
 
-      <p className={`text-sm ${selected ? "text-indigo-700" : "text-slate-500"}`}>{option.reason}</p>
+      <p className={`text-sm leading-relaxed break-words ${selected ? "text-indigo-700" : "text-slate-500"}`}>{option.reason}</p>
 
       {option.summary ? (
-        <div className={`rounded-xl px-3 py-2 text-sm font-medium ${selected ? "bg-white text-slate-900" : "bg-slate-50 text-slate-700"}`}>
+        <div className={`rounded-xl px-3 py-2 text-sm font-medium leading-relaxed break-words ${selected ? "bg-white text-slate-900" : "bg-slate-50 text-slate-700"}`}>
           {option.summary}
         </div>
       ) : null}
@@ -147,9 +147,9 @@ function OptionCard({ option, selected, onSelect, kind }) {
       {plan?.exercises?.length ? (
         <div className="grid gap-2">
           {plan.exercises.slice(0, 4).map((exercise) => (
-            <div key={exercise.name} className={`flex items-center justify-between rounded-xl px-3 py-2 text-sm ${selected ? "bg-white" : "bg-slate-50"}`}>
-              <span className="text-slate-700">{exercise.name}</span>
-              <span className="font-semibold text-slate-950">{exercise.setsReps}</span>
+            <div key={exercise.name} className={`grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 rounded-xl px-3 py-2 text-sm ${selected ? "bg-white" : "bg-slate-50"}`}>
+              <span className="min-w-0 break-words text-slate-700">{exercise.name}</span>
+              <span className="shrink-0 text-right font-semibold text-slate-950">{exercise.setsReps}</span>
             </div>
           ))}
         </div>
@@ -158,9 +158,9 @@ function OptionCard({ option, selected, onSelect, kind }) {
       {plan?.meals?.length ? (
         <div className="grid gap-2">
           {plan.meals.slice(0, 5).map((meal, index) => (
-            <div key={`${meal.food_name}-${index}`} className={`flex items-center justify-between rounded-xl px-3 py-2 text-sm ${selected ? "bg-white" : "bg-slate-50"}`}>
-              <span className="text-slate-700">{meal.food_name}</span>
-              <span className="font-semibold text-slate-950">{meal.calories} kcal</span>
+            <div key={`${meal.food_name}-${index}`} className={`grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 rounded-xl px-3 py-2 text-sm ${selected ? "bg-white" : "bg-slate-50"}`}>
+              <span className="min-w-0 break-words text-slate-700">{meal.food_name}</span>
+              <span className="shrink-0 text-right font-semibold text-slate-950">{meal.calories} kcal</span>
             </div>
           ))}
         </div>
@@ -399,7 +399,7 @@ export default function Onboarding() {
           {step === 2 && (
             <StepShell>
               <h2 className="text-lg font-bold text-slate-950">{currentMeta.sectionTitle}</h2>
-              <div className="mt-4 grid gap-4 lg:grid-cols-[340px_1fr]">
+              <div className="mt-4 grid gap-4 xl:grid-cols-[340px_1fr]">
                 <div className="grid gap-4">
                   <div className="rounded-2xl bg-slate-50 p-4">
                     <div className="flex items-start justify-between gap-3">
