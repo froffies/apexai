@@ -398,8 +398,14 @@ export function deterministicAlreadyLoggedReply(session, kind = "meal") {
     : `I already saved ${summary} in Workouts. If you want to change it, tell me what to update.`
 }
 
-export function buildDeterministicMealAction({ mealSession, explicitActions = [], reply = "", prompt = "", candidateFoodMatches = {} }) {
-  if (!mealSession?.readyToLog || mealSession?.alreadyLogged) return null
+export function buildDeterministicMealAction({ mealSession, explicitActions = [], prompt = "", candidateFoodMatches = {}, allowAnswerOnly = false }) {
+  if (!mealSession?.readyToLog || mealSession?.alreadyLogged || mealSession?.suppressed || (mealSession?.answerOnly && !allowAnswerOnly)) return null
+  const shouldPersist =
+    mealSession?.wantsLogging !== false
+    || mealSession?.correctionRequested
+    || mealSession?.referenceMeal
+    || (allowAnswerOnly && mealSession?.answerOnly)
+  if (!shouldPersist) return null
 
   const explicit = firstMealAction(explicitActions)
   const macros = hasMealMacros(explicit)
@@ -416,26 +422,33 @@ export function buildDeterministicMealAction({ mealSession, explicitActions = []
           carbs_g: Number(mealSession.macros.carbs_g),
           fat_g: Number(mealSession.macros.fat_g),
         }
-      : estimateMealMacros(mealSession, candidateFoodMatches) || extractReplyMacros(reply)
+      : mealSession?.referenceMeal && hasMealMacros(mealSession.referenceMeal)
+        ? {
+            calories: Number(mealSession.referenceMeal.calories),
+            protein_g: Number(mealSession.referenceMeal.protein_g),
+            carbs_g: Number(mealSession.referenceMeal.carbs_g),
+            fat_g: Number(mealSession.referenceMeal.fat_g),
+          }
+        : estimateMealMacros(mealSession, candidateFoodMatches)
 
   if (!macros) return null
 
   return normalizeMealAction({
     type: mealSession.persistedMealId && mealSession.correctionRequested ? "update_meal_log" : "log_meal",
     ...(mealSession.persistedMealId && mealSession.correctionRequested ? { meal_id: mealSession.persistedMealId } : {}),
-    meal_type: explicit?.meal_type || inferMealTypeFromPrompt(prompt),
-    food_name: mealSession.summary,
-    quantity: explicit?.quantity || "1 meal",
+    meal_type: explicit?.meal_type || mealSession?.referenceMeal?.meal_type || inferMealTypeFromPrompt(prompt),
+    food_name: mealSession.summary || mealSession?.referenceMeal?.food_name || "",
+    quantity: explicit?.quantity || mealSession?.referenceMeal?.quantity || "1 meal",
     estimated: explicit?.estimated ?? true,
     nutrition_source: typeof explicit?.nutrition_source === "string" && explicit.nutrition_source.trim()
       ? explicit.nutrition_source.trim()
-      : "Coach estimate from accumulated meal details across chat",
+      : mealSession?.referenceMeal?.nutrition_source || "Coach estimate from accumulated meal details across chat",
     ...macros,
   })
 }
 
 export function buildDeterministicWorkoutAction({ workoutSession, explicitActions = [] }) {
-  if (!workoutSession?.readyToLog || workoutSession?.alreadyLogged) return null
+  if (!workoutSession?.readyToLog || workoutSession?.alreadyLogged || workoutSession?.suppressed) return null
 
   const explicit = firstWorkoutAction(explicitActions)
   const exerciseName = String(workoutSession.exercise_name || explicit?.exercise_name || explicit?.workout_type || "").trim()
@@ -453,4 +466,9 @@ export function buildDeterministicWorkoutAction({ workoutSession, explicitAction
     duration_seconds: Number(workoutSession.duration_seconds || explicit?.duration_seconds || 0),
     distance_km: Number(workoutSession.distance_km || explicit?.distance_km || 0),
   }
+}
+
+export function formatDeterministicMealAnswer(action) {
+  if (!action) return ""
+  return `That comes to about ${Math.round(Number(action.calories) || 0)} kcal, ${Math.round(Number(action.protein_g) || 0)}g protein, ${Math.round(Number(action.carbs_g) || 0)}g carbs, and ${Math.round(Number(action.fat_g) || 0)}g fat. Tell me if you want me to save it.`
 }

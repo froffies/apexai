@@ -55,7 +55,6 @@ export function normalizeCoachResponse(value, context = {}) {
   const deterministicMealAction = buildDeterministicMealAction({
     mealSession: context.mealContext,
     explicitActions,
-    reply: value.reply,
     prompt: context.prompt,
   })
   const deterministicWorkoutAction = buildDeterministicWorkoutAction({

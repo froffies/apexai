@@ -318,6 +318,145 @@ test("coach can save an estimated mixed meal without showing the old skipped war
   await expect(todayMealsSection.getByText(/Coach estimate from user-described ingredients and amounts/i)).toBeVisible()
 })
 
+test("coach nutrition answers do not create a meal log until the user explicitly asks to save it", async ({ page }) => {
+  await seedState(page, {
+    "apexai.profile": onboardedProfile,
+    "apexai.coachMealSession": {
+      active: true,
+      mealConversation: true,
+      readyToLog: true,
+      wantsLogging: true,
+      answerOnly: false,
+      clarificationAttempts: 2,
+      clarificationCounts: { "egg:quantity": 1, "egg:cooking_medium": 1 },
+      summary: "3 fried eggs cooked in 10g butter, plus 250ml Earl Grey tea with no milk and no sugar",
+      clarifyQuestion: "",
+      items: [
+        { base_name: "egg", label: "Eggs", category: "food", quantity: { amount: 3, unit: "egg", text: "3 eggs", modifier: "" }, preparation: ["fried"], exclusions: [], attached_to: null, relation: null },
+        { base_name: "butter", label: "Butter", category: "ingredient", quantity: { amount: 10, unit: "g", text: "10g", modifier: "" }, preparation: [], exclusions: [], attached_to: "egg::fried", relation: "cooked_in" },
+        { base_name: "earl grey tea", label: "Earl Grey tea", category: "drink", quantity: { amount: 250, unit: "ml", text: "250ml", modifier: "" }, preparation: [], exclusions: ["no milk", "no sugar"], attached_to: null, relation: null },
+      ],
+    },
+  })
+
+  await page.route("**/api/coach", async (route) => {
+    const body = route.request().postDataJSON()
+    const message = String(body.message || "").toLowerCase()
+    if (message.includes("how many calories")) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          reply: "That comes to about 510 kcal, 30g protein, 5g carbs, and 35g fat. Tell me if you want me to save it.",
+          actions: [],
+          warnings: [],
+          meal_session: {
+            ...body.mealSession,
+            answerOnly: true,
+          },
+        }),
+      })
+      return
+    }
+
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        reply: "I logged that meal for you.",
+        actions: [
+          {
+            type: "log_meal",
+            food_name: "3 fried eggs cooked in 10g butter, plus 250ml Earl Grey tea with no milk and no sugar",
+            meal_type: "breakfast",
+            quantity: "1 meal",
+            calories: 510,
+            protein_g: 30,
+            carbs_g: 5,
+            fat_g: 35,
+            estimated: true,
+            nutrition_source: "Coach estimate from accumulated meal details across chat",
+          },
+        ],
+        warnings: [],
+        meal_session: body.mealSession,
+      }),
+    })
+  })
+
+  await page.goto("/Coach")
+  const composer = page.getByPlaceholder(/log bench 80kg for 4 sets of 6/i)
+  await composer.fill("how many calories is that?")
+  await page.getByRole("button", { name: /^Send$/i }).click()
+  await expect(page.getByText(/tell me if you want me to save it/i)).toBeVisible()
+
+  await page.goto("/Nutrition")
+  let todayMealsSection = page.locator("section").filter({ has: page.getByRole("heading", { name: /today's meals/i }) })
+  await expect(todayMealsSection.getByText(/3 fried eggs cooked in 10g butter/i)).toHaveCount(0)
+
+  await page.goto("/Coach")
+  await composer.fill("log it")
+  await page.getByRole("button", { name: /^Send$/i }).click()
+  await expect(page.getByText(/saved to today's nutrition: 3 fried eggs cooked in 10g butter/i)).toBeVisible()
+
+  await page.goto("/Nutrition")
+  todayMealsSection = page.locator("section").filter({ has: page.getByRole("heading", { name: /today's meals/i }) })
+  await expect(todayMealsSection.getByText("3 fried eggs cooked in 10g butter, plus 250ml Earl Grey tea with no milk and no sugar")).toBeVisible()
+})
+
+test("coach suppression replies keep nutrition unchanged when the user says not to save it", async ({ page }) => {
+  await seedState(page, {
+    "apexai.profile": onboardedProfile,
+    "apexai.coachMealSession": {
+      active: true,
+      mealConversation: true,
+      readyToLog: true,
+      wantsLogging: true,
+      answerOnly: false,
+      clarificationAttempts: 1,
+      clarificationCounts: { "chicken:quantity": 1, "rice:quantity": 1 },
+      summary: "200g chicken, plus 1 cup rice",
+      clarifyQuestion: "",
+      items: [
+        { base_name: "chicken", label: "Chicken", category: "food", quantity: { amount: 200, unit: "g", text: "200g", modifier: "" }, preparation: [], exclusions: [], attached_to: null, relation: null },
+        { base_name: "rice", label: "Rice", category: "food", quantity: { amount: 1, unit: "cup", text: "1 cup", modifier: "" }, preparation: [], exclusions: [], attached_to: null, relation: null },
+      ],
+    },
+  })
+
+  await page.route("**/api/coach", async (route) => {
+    const body = route.request().postDataJSON()
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        reply: "Okay, I won't save that.",
+        actions: [],
+        warnings: [],
+        meal_session: {
+          ...body.mealSession,
+          suppressed: true,
+          suppressionReply: "Okay, I won't save that.",
+          active: false,
+          mealConversation: false,
+          readyToLog: false,
+          summary: "",
+          items: [],
+        },
+      }),
+    })
+  })
+
+  await page.goto("/Coach")
+  await page.getByPlaceholder(/log bench 80kg for 4 sets of 6/i).fill("don't save that")
+  await page.getByRole("button", { name: /^Send$/i }).click()
+  await expect(page.getByText(/^Okay, I won't save that\.$/i)).toBeVisible()
+
+  await page.goto("/Nutrition")
+  const todayMealsSection = page.locator("section").filter({ has: page.getByRole("heading", { name: /today's meals/i }) })
+  await expect(todayMealsSection.getByText(/200g chicken, plus 1 cup rice/i)).toHaveCount(0)
+})
+
 test("fragmented coach meal logs persist into Nutrition after refresh", async ({ page }) => {
   await seedOnboardedProfile(page)
   await page.route("**/api/coach", async (route) => {

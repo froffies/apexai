@@ -4,7 +4,9 @@ const MEAL_EXPLICIT_START_PATTERN = /^(?:please\s+)?(?:(?:i\s+)?(?:had|ate|drank
 const MEAL_CORRECTION_PATTERN = /\b(?:actually|correction|change(?:\s+that)?|update(?:\s+that)?|make that|not\b|instead|sorry|i meant)\b/i
 const MEAL_FINALISE_PATTERN = /^(?:i just did|i already did|that'?s it|thats it|log it|save it|go ahead|yes|yeah|yep|okay|ok)$/i
 const MEAL_REFERENCE_PATTERN = /\b(?:the eggs?|the tea|the coffee|the toast|the beans?|the chicken|the rice|the butter|the oil)\b/i
-const WORKOUT_START_PATTERN = /\b(?:workout|train(?:ed|ing)?|lift(?:ed|ing)?|exercise|exercises|session|cardio|bench|squat|deadlift|row|press|curls?|pulldown|pull up|push up|lunge|treadmill|bike|run|running|walk|walking|rower|elliptical|stairmaster|km|min|minutes|sets?|reps?|kg)\b/i
+const SUPPRESS_SESSION_PATTERN = /\b(?:don't|dont|do not|stop|no)\s+(?:log|save|track|record|add)\b/i
+const REPEAT_RECENT_MEAL_PATTERN = /\b(?:same as yesterday|same as last time|same as before|repeat that(?: meal)?|same thing as yesterday)\b/i
+const WORKOUT_START_PATTERN = /\b(?:workout|train(?:ed|ing)?|lift(?:ed|ing)?|exercise|exercises|session|cardio|bench|squat|deadlift|row|rows|press|curls?|pulldown|pull ups?|push ups?|lunge|treadmill|bike|run|running|walk|walking|rower|elliptical|stairmaster|km|min|minutes|sets?|reps?|kg)\b/i
 const WORKOUT_CORRECTION_PATTERN = /\b(?:actually|correction|change(?:\s+that)?|update(?:\s+that)?|make that|not\b|instead|sorry|i meant)\b/i
 const WORKOUT_FINALISE_PATTERN = /^(?:i just did|i already did|that'?s it|thats it|log it|save it|go ahead|yes|yeah|yep|okay|ok)$/i
 const WORKOUT_EXERCISES = [
@@ -14,11 +16,14 @@ const WORKOUT_EXERCISES = [
   "shoulder press",
   "dumbbell shoulder press",
   "seated row",
-  "row",
+  "rower",
   "barbell row",
   "bent over row",
+  "row",
   "pull up",
+  "pull ups",
   "push up",
+  "push ups",
   "lat pulldown",
   "deadlift",
   "romanian deadlift",
@@ -117,6 +122,14 @@ function workoutCorrectionRequested(message) {
   return WORKOUT_CORRECTION_PATTERN.test(cleanText(message))
 }
 
+function suppressionRequested(message) {
+  return SUPPRESS_SESSION_PATTERN.test(cleanText(message))
+}
+
+function repeatRecentMealRequested(message) {
+  return REPEAT_RECENT_MEAL_PATTERN.test(cleanText(message))
+}
+
 function isExplicitMealStart(message) {
   return MEAL_EXPLICIT_START_PATTERN.test(String(message || "").trim())
 }
@@ -165,6 +178,9 @@ function seedLegacyMealSession(session) {
     clarifyQuestion: "",
     wantsLogging: Boolean(session.wantsLogging),
     wantsNutrition: Boolean(session.wantsNutrition),
+    answerOnly: Boolean(session.answerOnly),
+    suppressed: Boolean(session.suppressed),
+    suppressionReply: String(session.suppressionReply || ""),
     mealConversation: true,
     lastMainKey: session.lastMainKey || "",
     lastDrinkKey: session.lastDrinkKey || "",
@@ -181,7 +197,46 @@ function persistedMealMarker(session, recentMessages, currentMessage) {
     clarifyQuestion: "",
     alreadyLogged: true,
     correctionRequested: false,
+    answerOnly: false,
+    suppressed: false,
+    suppressionReply: "",
     thread_messages: buildThreadMessages(recentMessages, currentMessage),
+  }
+}
+
+function normalizeReferenceMeal(meal = null) {
+  if (!meal || typeof meal !== "object") return null
+  const foodName = String(meal.food_name || "").trim()
+  if (!foodName) return null
+  const macros = ["calories", "protein_g", "carbs_g", "fat_g"].every((key) => Number.isFinite(Number(meal[key])))
+  if (!macros) return null
+  return {
+    food_name: foodName,
+    meal_type: String(meal.meal_type || "snack").trim() || "snack",
+    quantity: String(meal.quantity || "1 meal").trim() || "1 meal",
+    calories: Number(meal.calories),
+    protein_g: Number(meal.protein_g),
+    carbs_g: Number(meal.carbs_g),
+    fat_g: Number(meal.fat_g),
+    estimated: meal.estimated ?? true,
+    nutrition_source: String(meal.nutrition_source || "Copied from your most recent saved meal").trim() || "Copied from your most recent saved meal",
+  }
+}
+
+function buildRepeatedMealSession(recentMeals = []) {
+  const referenceMeal = normalizeReferenceMeal(Array.isArray(recentMeals) ? recentMeals.slice(0, 12).find(Boolean) : null)
+  if (!referenceMeal) return null
+  return {
+    ...emptyMealSessionState(),
+    active: true,
+    mealConversation: true,
+    readyToLog: true,
+    shouldStopClarifying: true,
+    summary: referenceMeal.food_name,
+    clarifyQuestion: "",
+    wantsLogging: true,
+    wantsNutrition: false,
+    referenceMeal,
   }
 }
 
@@ -189,9 +244,19 @@ function summariesEquivalent(left, right) {
   return cleanText(left) && cleanText(left) === cleanText(right)
 }
 
-function buildMealSessionState(recentMessages = [], currentMessage = "", existingSession = null) {
+function buildMealSessionState(recentMessages = [], currentMessage = "", existingSession = null, recentMeals = []) {
   const prior = normalizeMealSession(existingSession)
   const normalizedCurrent = cleanText(currentMessage)
+
+  if (!prior.active && !prior.persisted && repeatRecentMealRequested(currentMessage)) {
+    const repeated = buildRepeatedMealSession(recentMeals)
+    if (repeated) {
+      return {
+        ...repeated,
+        thread_messages: buildThreadMessages(recentMessages, currentMessage),
+      }
+    }
+  }
 
   if (prior.persisted && isRedundantPersistedMealFollowUp(currentMessage, prior)) {
     return persistedMealMarker(prior, recentMessages, currentMessage)
@@ -303,6 +368,7 @@ function extractWorkoutThread(recentMessages = [], currentMessage = "", existing
   const history = safeRecentMessages(recentMessages, 18)
   const shouldTrack = WORKOUT_START_PATTERN.test(normalizedCurrent)
     || workoutCorrectionRequested(currentMessage)
+    || (suppressionRequested(currentMessage) && (existingSession?.active || existingSession?.persisted))
     || WORKOUT_FINALISE_PATTERN.test(normalizedCurrent)
     || (existingSession?.active && (/\d/.test(normalizedCurrent) || workoutReferenceMessage(normalizedCurrent)))
     || (existingSession?.persisted && !isExplicitMealStart(normalizedCurrent) && (/\d/.test(normalizedCurrent) || workoutReferenceMessage(normalizedCurrent)))
@@ -487,6 +553,7 @@ function buildWorkoutSessionState(recentMessages = [], currentMessage = "", exis
   const prior = normalizeWorkoutSession(existingSession)
   const normalizedCurrent = cleanText(currentMessage)
   const correctionRequested = Boolean(prior.persistedWorkoutId && workoutCorrectionRequested(currentMessage))
+  const suppressed = suppressionRequested(currentMessage)
 
   if (prior.persisted && isRedundantPersistedWorkoutFollowUp(currentMessage, prior)) {
     return {
@@ -517,6 +584,8 @@ function buildWorkoutSessionState(recentMessages = [], currentMessage = "", exis
     active: true,
     workoutConversation: true,
     wantsLogging: true,
+    suppressed,
+    suppressionReply: suppressed ? "Okay, I won't save that." : "",
   }
 
   if ((prior.active || prior.persisted) && !isExplicitMealStart(normalizedCurrent)) {
@@ -542,6 +611,21 @@ function buildWorkoutSessionState(recentMessages = [], currentMessage = "", exis
     ? Boolean(state.exercise_name && (state.duration_seconds > 0 || state.distance_km > 0))
     : Boolean(state.exercise_name && state.reps > 0)
 
+  if (suppressed) {
+    state.readyToLog = false
+    state.clarifyQuestion = ""
+    state.active = false
+    state.workoutConversation = false
+    state.exercise_name = ""
+    state.workout_type = ""
+    state.weight_kg = 0
+    state.sets = 0
+    state.reps = 0
+    state.duration_seconds = 0
+    state.distance_km = 0
+    state.summary = ""
+  }
+
   if (
     prior.persisted
     && !correctionRequested
@@ -564,12 +648,15 @@ function buildWorkoutSessionState(recentMessages = [], currentMessage = "", exis
 export function emptyMealSessionState() {
   return {
     ...emptyLegacyMealSession(),
+    referenceMeal: null,
     persisted: false,
     persistedMealId: "",
     persistedSummary: "",
     persistedAt: "",
     alreadyLogged: false,
     correctionRequested: false,
+    suppressed: false,
+    suppressionReply: "",
     thread_messages: [],
   }
 }
@@ -608,9 +695,10 @@ export function buildCoachSessionState({
   currentMessage = "",
   mealSession = null,
   workoutSession = null,
+  recentMeals = [],
 } = {}) {
   return {
-    mealSession: buildMealSessionState(recentMessages, currentMessage, mealSession),
+    mealSession: buildMealSessionState(recentMessages, currentMessage, mealSession, recentMeals),
     workoutSession: buildWorkoutSessionState(recentMessages, currentMessage, workoutSession),
   }
 }

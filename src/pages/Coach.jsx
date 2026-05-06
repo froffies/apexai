@@ -65,6 +65,10 @@ function createEmptyMealSession() {
     clarifyQuestion: "",
     wantsLogging: false,
     wantsNutrition: false,
+    answerOnly: false,
+    suppressed: false,
+    suppressionReply: "",
+    referenceMeal: null,
     mealConversation: false,
     lastMainKey: "",
     lastDrinkKey: "",
@@ -103,6 +107,8 @@ function createEmptyWorkoutSession() {
     persistedAt: "",
     alreadyLogged: false,
     correctionRequested: false,
+    suppressed: false,
+    suppressionReply: "",
     thread_messages: [],
   }
 }
@@ -206,6 +212,10 @@ function buildPersistedMealSession(session, action, mealId) {
     readyToLog: false,
     shouldStopClarifying: false,
     clarifyQuestion: "",
+    answerOnly: false,
+    suppressed: false,
+    suppressionReply: "",
+    referenceMeal: null,
     persisted: true,
     persistedMealId: mealId,
     persistedSummary: String(action?.food_name || base?.summary || "").trim(),
@@ -230,6 +240,8 @@ function buildPersistedWorkoutSession(session, action, workoutId) {
     readyToLog: false,
     shouldStopClarifying: false,
     clarifyQuestion: "",
+    suppressed: false,
+    suppressionReply: "",
     persisted: true,
     persistedWorkoutId: workoutId,
     persistedSummary: summary,
@@ -1033,7 +1045,7 @@ export default function Coach() {
       <section className="flex h-[65vh] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         {(thinking || aiError) && (
           <div className={`border-b px-4 py-2 text-sm ${aiError ? "border-amber-200 bg-amber-50 text-amber-800" : "border-indigo-100 bg-indigo-50 text-indigo-700"}`}>
-            {thinking ? "Coach is working..." : aiError}
+            {thinking ? "Coach is pulling your latest details together..." : aiError}
           </div>
         )}
         <div className="flex-1 space-y-4 overflow-y-auto p-4">
@@ -1157,13 +1169,13 @@ export default function Coach() {
           </div>
         )}
 
-        <form onSubmit={send} className="flex gap-3 border-t border-slate-200 bg-white p-3" style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}>
+        <form onSubmit={send} aria-busy={thinking} className="flex gap-3 border-t border-slate-200 bg-white p-3" style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}>
           <input ref={inputRef} value={input} onChange={(event) => setInput(event.target.value)} disabled={thinking} placeholder={activeWorkout?.id ? "Set done 6 reps at 80kg..." : "Log bench 80kg for 4 sets of 6..."} className="min-h-11 min-w-0 flex-1 rounded-xl border border-slate-200 px-3 py-3 text-sm text-slate-950 shadow-sm disabled:bg-slate-50 disabled:text-slate-400" />
           <button type="button" onClick={startVoice} disabled={!speechAvailable} className="flex min-h-11 min-w-11 items-center justify-center rounded-xl border border-slate-200 text-slate-700 disabled:opacity-40">
             {listening ? <MicOff size={18} /> : <Mic size={18} />}
           </button>
-          <button type="submit" disabled={thinking} className="flex min-h-11 items-center gap-2 rounded-xl bg-indigo-600 px-4 py-3 font-semibold text-white disabled:opacity-60">
-            <Send size={17} /> {thinking ? "Sending" : "Send"}
+          <button type="submit" disabled={thinking} className="flex min-h-11 min-w-[6.5rem] items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-3 font-semibold text-white disabled:opacity-60">
+            <Send size={17} /> {thinking ? "Working..." : "Send"}
           </button>
         </form>
       </section>

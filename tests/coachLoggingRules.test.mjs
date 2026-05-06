@@ -5,6 +5,7 @@ import {
   buildDeterministicWorkoutAction,
   deterministicAlreadyLoggedReply,
   deterministicClarifyActionFromSession,
+  formatDeterministicMealAnswer,
 } from "../server/coachLoggingRules.mjs"
 
 test("coach logging rules build a deterministic meal action from ready session state and explicit macros", () => {
@@ -113,6 +114,79 @@ test("coach logging rules upgrade deterministic meal actions into updates when c
   assert.ok(action)
   assert.equal(action.type, "update_meal_log")
   assert.equal(action.meal_id, "meal_fix")
+})
+
+test("coach logging rules can build a deterministic macro answer without creating a persistence action", () => {
+  const action = buildDeterministicMealAction({
+    mealSession: {
+      readyToLog: true,
+      alreadyLogged: false,
+      wantsLogging: false,
+      answerOnly: true,
+      summary: "3 fried eggs cooked in 10g butter, plus 250ml Earl Grey tea with no milk and no sugar",
+      items: [
+        {
+          baseName: "egg",
+          label: "Eggs",
+          category: "food",
+          quantity: { amount: 3, unit: "egg", text: "3 eggs" },
+          preparation: ["fried"],
+          exclusions: [],
+        },
+        {
+          baseName: "butter",
+          label: "Butter",
+          category: "ingredient",
+          quantity: { amount: 10, unit: "g", text: "10g" },
+          preparation: [],
+          exclusions: [],
+          attachedTo: "egg::fried",
+          relation: "cooked_in",
+        },
+        {
+          baseName: "earl grey tea",
+          label: "Earl Grey tea",
+          category: "drink",
+          quantity: { amount: 250, unit: "ml", text: "250ml" },
+          preparation: [],
+          exclusions: ["no sugar", "no milk"],
+        },
+      ],
+    },
+    allowAnswerOnly: true,
+    explicitActions: [],
+  })
+
+  assert.ok(action)
+  assert.equal(action.type, "log_meal")
+  assert.match(formatDeterministicMealAnswer(action), /tell me if you want me to save it/i)
+})
+
+test("coach logging rules can repeat a recent meal deterministically", () => {
+  const action = buildDeterministicMealAction({
+    mealSession: {
+      readyToLog: true,
+      alreadyLogged: false,
+      wantsLogging: true,
+      summary: "200g chicken, 1 cup rice, and 1 tbsp olive oil",
+      referenceMeal: {
+        food_name: "200g chicken, 1 cup rice, and 1 tbsp olive oil",
+        meal_type: "lunch",
+        quantity: "1 meal",
+        calories: 640,
+        protein_g: 48,
+        carbs_g: 44,
+        fat_g: 22,
+        nutrition_source: "Saved estimate",
+      },
+    },
+    explicitActions: [],
+  })
+
+  assert.ok(action)
+  assert.equal(action.food_name, "200g chicken, 1 cup rice, and 1 tbsp olive oil")
+  assert.equal(action.meal_type, "lunch")
+  assert.equal(action.calories, 640)
 })
 
 test("coach logging rules build a deterministic workout action from ready workout state", () => {

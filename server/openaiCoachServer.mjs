@@ -10,6 +10,7 @@ import {
   buildDeterministicWorkoutAction,
   deterministicAlreadyLoggedReply,
   deterministicClarifyActionFromSession,
+  formatDeterministicMealAnswer,
   summarizeCoachAction,
 } from "./coachLoggingRules.mjs"
 import { normalizeCoachResponse } from "./normalizeCoachResponse.mjs"
@@ -738,6 +739,7 @@ async function handleCoach(request, response) {
     currentMessage: body.message,
     mealSession: body.mealSession || null,
     workoutSession: body.workoutSession || null,
+    recentMeals: safeArray(body.meals, 12),
   })
   const mealContext = rawMealContext
     && (
@@ -745,6 +747,7 @@ async function handleCoach(request, response) {
       || rawMealContext.readyToLog
       || rawMealContext.alreadyLogged
       || rawMealContext.persisted
+      || rawMealContext.suppressed
       || rawMealContext.clarifyQuestion
     )
     ? rawMealContext
@@ -774,9 +777,31 @@ async function handleCoach(request, response) {
     return
   }
 
+  if (mealContext?.suppressed) {
+    sendJson(response, 200, {
+      reply: mealContext.suppressionReply || "Okay, I won't save that.",
+      actions: [],
+      warnings: [],
+      meal_session: mealContext,
+      workout_session: workoutContext,
+    }, requestResponseOrigin(request))
+    return
+  }
+
   if (workoutContext?.alreadyLogged) {
     sendJson(response, 200, {
       reply: deterministicAlreadyLoggedReply(workoutContext, "workout"),
+      actions: [],
+      warnings: [],
+      meal_session: mealContext,
+      workout_session: workoutContext,
+    }, requestResponseOrigin(request))
+    return
+  }
+
+  if (workoutContext?.suppressed) {
+    sendJson(response, 200, {
+      reply: workoutContext.suppressionReply || "Okay, I won't save that.",
       actions: [],
       warnings: [],
       meal_session: mealContext,
@@ -816,7 +841,18 @@ async function handleCoach(request, response) {
       explicitActions: [],
       prompt: body.message,
       candidateFoodMatches,
+      allowAnswerOnly: mealContext?.answerOnly,
     })
+    if (mealContext?.answerOnly && mealAction) {
+      sendJson(response, 200, {
+        reply: formatDeterministicMealAnswer(mealAction),
+        actions: [],
+        warnings: [],
+        meal_session: mealContext,
+        workout_session: workoutContext,
+      }, requestResponseOrigin(request))
+      return
+    }
     if (mealAction) {
       sendJson(response, 200, {
         reply: summarizeCoachAction(mealAction),

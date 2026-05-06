@@ -79,9 +79,9 @@ const PREPARATION_WORDS = new Set([
   "black",
 ])
 
-const DRINK_KEYWORDS = ["tea", "coffee", "juice", "water", "milk", "smoothie", "shake", "latte", "espresso"]
+const DRINK_KEYWORDS = ["tea", "coffee", "juice", "water", "milk", "smoothie", "shake", "latte", "espresso", "flat white", "long black", "cappuccino"]
 const INGREDIENT_KEYWORDS = ["butter", "oil", "cheese", "sugar", "milk", "cream", "sauce", "dressing", "vegemite", "jam", "honey", "salt"]
-const FOOD_HINT_WORDS = ["egg", "eggs", "chicken", "rice", "beef", "pork", "lamb", "fish", "salmon", "tuna", "toast", "bread", "tea", "coffee", "juice", "milk", "beans", "oats", "yoghurt", "yogurt", "butter", "oil", "cheese", "potato", "salad", "apple", "banana", "celery", "chocolate", "pasta", "vegemite", "berry", "berries"]
+const FOOD_HINT_WORDS = ["egg", "eggs", "chicken", "rice", "beef", "pork", "lamb", "fish", "salmon", "tuna", "toast", "bread", "tea", "coffee", "juice", "milk", "beans", "oats", "yoghurt", "yogurt", "butter", "oil", "cheese", "potato", "salad", "apple", "banana", "celery", "chocolate", "pasta", "vegemite", "berry", "berries", "flat white", "long black", "cappuccino", "latte", "espresso", "whey", "almond milk"]
 const QUANTITY_UNITS = [
   "kg",
   "g",
@@ -131,6 +131,11 @@ const CORRECTION_PREFIX = /^(actually|no\b|nah\b|correction|change that|make tha
 const FINALISE_PATTERN = /^(?:i just did|i already did|that'?s it|thats it|log it|save it|go ahead|that was it)$/i
 const MEAL_REFERENCE_PATTERN = /\b(no sugar|no milk|without sugar|without milk|cooked in|fried in|used to fry|used for|earl grey|the eggs?|the tea|the coffee|the toast|the beans?|the chicken|the rice|the butter|the oil)\b/i
 const ASSISTANT_MEAL_PATTERN = /\b(what type|what kind|how much|how many|milk|sugar|cooked in|fried in|used for|before i can log|need more detail|meal details|calories|protein|carbs|fat|estimate|serving size|amount|quantity)\b/i
+const SUPPRESS_LOG_PATTERN = /\b(?:don't|dont|do not|stop|no)\s+(?:log|save|track|record|add)\b/i
+const NUTRITION_QUESTION_PATTERN = /\b(calories|calorie|macro|macros|protein|carbs|fat|estimate|estimated|calculate)\b/i
+const QUESTION_PREFIX_PATTERN = /^(?:how many|how much|what(?:'s| is)?|can you|could you|please calculate|calculate|estimate)\b/i
+const WORKOUT_ONLY_PATTERN = /\b(bench press|incline bench|overhead press|shoulder press|preacher curl|bicep curl|tricep pushdown|lat pulldown|pull up|push up|squat|deadlift|rdl|lunge|leg press|seated row|barbell row|treadmill|bike|rower|elliptical|stairmaster|sets?|reps?)\b/i
+const REMOVAL_PATTERN = /^(?:actually\s+)?(?:remove|without|skip|delete|drop)\s+(?<item>.+)$|^(?:actually\s+)?no\s+(?<item2>.+)$/i
 const PREPARATION_PATTERNS = [
   ["hard boiled", /\bhard boiled\b/i],
   ["soft boiled", /\bsoft boiled\b/i],
@@ -162,6 +167,10 @@ function titleCase(text) {
   return String(text || "")
     .trim()
     .replace(/\w\S*/g, (word) => word.charAt(0).toUpperCase() + word.slice(1))
+}
+
+function escapeRegex(value) {
+  return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 }
 
 function safeArray(value, limit = 8) {
@@ -215,6 +224,7 @@ function normalizeLabel(label) {
     .replace(/^(?:i had|had|i ate|ate|i drank|drank|log|track|save|add|include)\s+/, "")
     .replace(/\b(?:for breakfast|for lunch|for dinner|as a snack)\b/g, "")
     .replace(/\b(?:please|thanks|thank you)\b/g, "")
+    .replace(/[?!.,]+$/g, "")
     .replace(/\s+/g, " ")
     .trim()
 }
@@ -238,9 +248,31 @@ function looksFoodishPhrase(text) {
   return FOOD_HINT_WORDS.some((word) => new RegExp(`\\b${word}\\b`, "i").test(normalized))
 }
 
+function looksLikeWorkoutOnly(text) {
+  const normalized = cleanText(text)
+  if (!normalized || looksFoodishPhrase(normalized) || MEAL_VERBS.test(normalized)) return false
+  return WORKOUT_ONLY_PATTERN.test(normalized)
+}
+
+function detectSuppressedLogging(text) {
+  return SUPPRESS_LOG_PATTERN.test(cleanText(text))
+}
+
+function detectQuestionOnlyTurn(text) {
+  const raw = String(text || "").trim()
+  const normalized = cleanText(raw)
+  if (!normalized || detectSuppressedLogging(normalized)) return false
+  if (!NUTRITION_QUESTION_PATTERN.test(normalized)) return false
+  if (/\b(log|track|save|add|include)\b/i.test(normalized)) return false
+  return raw.includes("?") || QUESTION_PREFIX_PATTERN.test(normalized)
+}
+
 function looksLikeMealContinuation(text, state, threadHint = false) {
   const normalized = cleanText(text)
   if (!normalized) return false
+  if (detectSuppressedLogging(normalized)) return true
+  if (detectQuestionOnlyTurn(text) && (threadHint || state.items.length)) return true
+  if (looksLikeWorkoutOnly(normalized) && !state.items.length) return false
   if (MEAL_VERBS.test(normalized)) return true
   if (FINALISE_PATTERN.test(normalized) && (threadHint || state.items.length)) return true
   if (CORRECTION_PREFIX.test(normalized) && (threadHint || state.items.length)) return true
@@ -252,6 +284,7 @@ function looksLikeMealContinuation(text, state, threadHint = false) {
 
 function isExplicitMealStart(text) {
   const normalized = cleanText(text)
+  if (detectSuppressedLogging(normalized)) return false
   return /\b(i had|i ate|i drank|had |ate |drank |log |track |save |add |include )\b/i.test(normalized)
 }
 
@@ -282,25 +315,38 @@ function shouldContinueExistingSession(existingSession, currentMessage, recentMe
   const normalized = cleanText(currentMessage)
   if (!normalized) return false
   if (isExplicitMealStart(normalized)) return false
+  if (detectSuppressedLogging(currentMessage)) return true
+  if (detectQuestionOnlyTurn(currentMessage)) return true
   if (hasDigits(normalized) || looksFoodishPhrase(normalized) || MEAL_REFERENCE_PATTERN.test(normalized) || CORRECTION_PREFIX.test(normalized) || FINALISE_PATTERN.test(normalized)) {
     return true
   }
   const lastAssistant = [...recentMessages].reverse().find((message) => message?.role === "assistant")
-  return Boolean(lastAssistant && extractClarificationTargets(String(lastAssistant.content || "")).length)
+  return Boolean(
+    lastAssistant
+    && (
+      extractClarificationTargets(String(lastAssistant.content || "")).length
+      || isMealAssistantMessage(String(lastAssistant.content || ""))
+    )
+  )
 }
 
 function extractMealThread(recentMessages = [], currentMessage = "", existingSession = null) {
   const normalizedCurrent = cleanText(currentMessage)
   const history = Array.isArray(recentMessages) ? recentMessages.filter((entry) => typeof entry?.content === "string") : []
+  const workoutOnly = looksLikeWorkoutOnly(normalizedCurrent)
+  const hasMealHistory = history.some((entry) => (
+    entry?.role === "user"
+    && (isExplicitMealStart(entry.content) || looksFoodishPhrase(entry.content) || MEAL_REFERENCE_PATTERN.test(cleanText(entry.content || "")))
+  ))
   const shouldTrack = isExplicitMealStart(normalizedCurrent)
     || looksFoodishPhrase(normalizedCurrent)
     || hasDigits(normalizedCurrent)
     || MEAL_REFERENCE_PATTERN.test(normalizedCurrent)
-    || CORRECTION_PREFIX.test(normalizedCurrent)
-    || FINALISE_PATTERN.test(normalizedCurrent)
+    || (CORRECTION_PREFIX.test(normalizedCurrent) && (existingSession?.active || existingSession?.persisted || hasMealHistory))
+    || (FINALISE_PATTERN.test(normalizedCurrent) && (existingSession?.active || existingSession?.persisted || hasMealHistory))
     || shouldContinueExistingSession(existingSession, currentMessage, history)
 
-  if (!shouldTrack) return []
+  if (!shouldTrack || (workoutOnly && !existingSession?.active)) return []
 
   const thread = [{ role: "user", content: currentMessage }]
   for (let index = history.length - 1; index >= 0; index -= 1) {
@@ -327,8 +373,8 @@ function extractMealThread(recentMessages = [], currentMessage = "", existingSes
 
 function detectCategory(baseName) {
   const normalized = cleanText(baseName)
-  if (DRINK_KEYWORDS.some((keyword) => normalized.includes(keyword))) return "drink"
-  if (INGREDIENT_KEYWORDS.some((keyword) => normalized.includes(keyword))) return "ingredient"
+  if (DRINK_KEYWORDS.some((keyword) => new RegExp(`\\b${escapeRegex(keyword)}\\b`, "i").test(normalized))) return "drink"
+  if (INGREDIENT_KEYWORDS.some((keyword) => new RegExp(`\\b${escapeRegex(keyword)}\\b`, "i").test(normalized))) return "ingredient"
   return "food"
 }
 
@@ -345,6 +391,13 @@ function deriveBaseName(label, fallback = "") {
   if (/\beggs?\b/.test(normalized)) return "egg"
   if (/\bearl grey\b/.test(normalized) && !/\btea\b/.test(normalized)) return "earl grey tea"
   if (/\btea\b/.test(normalized)) return normalized.includes("earl grey") ? "earl grey tea" : "tea"
+  if (/\balmond milk\b/.test(normalized)) return "almond milk"
+  if (/\bwhey\b/.test(normalized)) return "whey protein"
+  if (/\bflat white\b/.test(normalized)) return "flat white"
+  if (/\blong black\b/.test(normalized)) return "long black"
+  if (/\bcappuccino\b/.test(normalized)) return "cappuccino"
+  if (/\blatte\b/.test(normalized)) return "latte"
+  if (/\bespresso\b/.test(normalized)) return "espresso"
   if (/\bcoffee\b/.test(normalized)) return "coffee"
   if (/\btoast\b/.test(normalized) && /\brye\b/.test(normalized)) return "rye toast"
   if (/\btoast\b/.test(normalized)) return "toast"
@@ -366,6 +419,13 @@ function defaultDisplayLabel(baseName, fallback = "") {
   if (!normalized) return ""
   if (normalized === "egg") return "eggs"
   if (normalized === "earl grey tea") return "Earl Grey tea"
+  if (normalized === "almond milk") return "Almond milk"
+  if (normalized === "whey protein") return "Whey protein"
+  if (normalized === "flat white") return "Flat white"
+  if (normalized === "long black") return "Long black"
+  if (normalized === "cappuccino") return "Cappuccino"
+  if (normalized === "latte") return "Latte"
+  if (normalized === "espresso") return "Espresso"
   return fallback || normalized
 }
 
@@ -521,7 +581,7 @@ function parseQuantityOnly(text) {
 
 function parseDrinkDetailOnly(state, text) {
   const normalized = cleanText(text)
-  if (looksFoodishPhrase(normalized) && !/\b(tea|coffee|milk|sugar|earl grey)\b/.test(normalized)) return false
+  if (looksFoodishPhrase(normalized) && !/\b(tea|coffee|milk|sugar|earl grey|flat white|long black|cappuccino|latte|espresso)\b/.test(normalized)) return false
   const drinkIndex = state.items.findIndex((item) => item.category === "drink" && !item.quantity)
   const fallbackIndex = drinkIndex === -1 ? state.items.findIndex((item) => item.category === "drink") : drinkIndex
   if (fallbackIndex === -1) return false
@@ -532,6 +592,31 @@ function parseDrinkDetailOnly(state, text) {
   if (/\bearl grey\b/.test(normalized)) {
     updates.baseName = "earl grey tea"
     updates.label = "Earl Grey tea"
+    changed = true
+  }
+  if (/\bflat white\b/.test(normalized)) {
+    updates.baseName = "flat white"
+    updates.label = "Flat white"
+    changed = true
+  }
+  if (/\blong black\b/.test(normalized)) {
+    updates.baseName = "long black"
+    updates.label = "Long black"
+    changed = true
+  }
+  if (/\bcappuccino\b/.test(normalized)) {
+    updates.baseName = "cappuccino"
+    updates.label = "Cappuccino"
+    changed = true
+  }
+  if (/\blatte\b/.test(normalized)) {
+    updates.baseName = "latte"
+    updates.label = "Latte"
+    changed = true
+  }
+  if (/\bespresso\b/.test(normalized)) {
+    updates.baseName = "espresso"
+    updates.label = "Espresso"
     changed = true
   }
 
@@ -667,15 +752,16 @@ function parseMeasuredFoodClause(clause) {
   let item = null
   const preparations = extractPreparations(mainText)
   if (countedFoodMatch?.groups && looksFoodishPhrase(countedFoodMatch.groups.food)) {
-    const baseName = deriveBaseName(countedFoodMatch.groups.food.trim())
+    const cleanedFood = countedFoodMatch.groups.food.trim().replace(/\bnot\b.*$/i, "").trim()
+    const baseName = deriveBaseName(cleanedFood)
     const quantity = {
       amount: toAmount(countedFoodMatch.groups.amount) || 1,
       unit: singularize(baseName.split(" ").at(-1) || "serve"),
-      text: `${toAmount(countedFoodMatch.groups.amount) || 1} ${defaultDisplayLabel(baseName, countedFoodMatch.groups.food).toLowerCase()}`.trim(),
+      text: `${toAmount(countedFoodMatch.groups.amount) || 1} ${defaultDisplayLabel(baseName, cleanedFood || countedFoodMatch.groups.food).toLowerCase()}`.trim(),
       modifier: "",
     }
     item = createItem({
-      label: defaultDisplayLabel(baseName, countedFoodMatch.groups.food.trim()),
+      label: defaultDisplayLabel(baseName, cleanedFood || countedFoodMatch.groups.food.trim()),
       baseName,
       quantity,
       preparation: preparations,
@@ -684,7 +770,10 @@ function parseMeasuredFoodClause(clause) {
   } else if (quantityMatch?.groups) {
     const unit = normalizeUnit(quantityMatch.groups.unit)
     const quantity = buildQuantity(quantityMatch.groups.amount, quantityMatch.groups.unit, quantityMatch.groups.intensity)
-    const rest = (quantityMatch.groups.food?.trim() || "").replace(/^not\s+\d+(?:\.\d+)?\b.*$/i, "").trim()
+    const rest = (quantityMatch.groups.food?.trim() || "")
+      .replace(/^not\s+\d+(?:\.\d+)?\b.*$/i, "")
+      .replace(/\bnot\b\s+\d+(?:\.\d+)?(?:\s*(?:kg|g|ml|l|cup|cups|tbsp|tsp|slice|slices|tin|tins|can|cans|block|blocks|bunch|bunches|serve|serves|serving|servings|bowl|bowls|plate|plates|egg|eggs))?\b.*$/i, "")
+      .trim()
     const label = rest || (unit === "egg" ? "eggs" : unit)
     const baseName = deriveBaseName(label || mainText)
     const preparation = [...preparations]
@@ -765,6 +854,32 @@ function attachLooseIngredientsToTarget(state, targetBaseName) {
   return changed
 }
 
+function removeItemsMatchingBaseName(state, baseName) {
+  const target = cleanText(baseName)
+  if (!target) return false
+
+  let changed = false
+  state.items = state.items.filter((item) => {
+    const itemBase = cleanText(item.baseName || item.key || item.label)
+    const itemAttached = cleanText(item.attachedTo || "")
+    const matchesBase = itemBase === target || itemBase.includes(target) || target.includes(itemBase)
+    const matchesAttachment = itemAttached === target || itemAttached.startsWith(`${target}::`)
+    if (matchesBase || matchesAttachment) {
+      changed = true
+      return false
+    }
+    return true
+  })
+
+  if (changed) {
+    const lastPrimary = [...state.items].reverse().find((item) => item.category === "food" && !item.attachedTo)
+    state.lastMainKey = cleanText(lastPrimary?.baseName || "")
+    state.lastMainReference = lastPrimary ? itemReferenceKey(lastPrimary) : ""
+  }
+
+  return changed
+}
+
 function findCookingMediumTarget(state) {
   const primaryFoods = state.items.filter((item) => !item.attachedTo && item.category === "food")
   if (!primaryFoods.length) return null
@@ -780,6 +895,17 @@ function mergeClauseIntoState(state, clause) {
 
   let changed = false
 
+  if (detectSuppressedLogging(normalized)) {
+    state.suppressed = true
+    state.suppressionReply = "Okay, I won't save that."
+    return true
+  }
+
+  if (detectQuestionOnlyTurn(clause) && state.items.length) {
+    state.answerOnly = true
+    return false
+  }
+
   if (/^(?:no sugar|without sugar|no milk|without milk)(?:\s+(?:no milk|without milk|no sugar|without sugar))*$/.test(normalized)) {
     const drink = state.items.find((item) => item.category === "drink") || state.items.find((item) => !item.attachedTo)
     if (drink) {
@@ -789,6 +915,12 @@ function mergeClauseIntoState(state, clause) {
       changed = upsertItem(state, nextDrink) || changed
     }
     return changed
+  }
+
+  const removalMatch = normalized.match(REMOVAL_PATTERN)
+  if (removalMatch?.groups && !/^(?:no sugar|without sugar|no milk|without milk)(?:\s+(?:no milk|without milk|no sugar|without sugar))*$/.test(normalized)) {
+    const removedBase = deriveBaseName(removalMatch.groups.item || removalMatch.groups.item2 || "")
+    if (removedBase) return removeItemsMatchingBaseName(state, removedBase)
   }
 
   if (/^the\s+/.test(normalized)) {
@@ -865,7 +997,9 @@ function describeItem(item, state) {
   if (cleanText(baseLabel) === "eggs" || cleanText(baseLabel) === "egg") baseLabel = "eggs"
   if (cleanText(baseLabel) === "tea" && /\bearl grey\b/.test(mainItem.baseName)) baseLabel = "Earl Grey tea"
 
-  let description = `${quantityText}${baseLabel}`.trim()
+  let description = cleanText(quantityText).endsWith(cleanText(baseLabel))
+    ? quantityText.trim()
+    : `${quantityText}${baseLabel}`.trim()
   if (mainItem.quantity?.unit === "egg" && cleanText(baseLabel) === "eggs") {
     description = mainItem.preparation?.length
       ? `${mainItem.quantity.amount} ${mainItem.preparation.join(" ")} eggs`
@@ -1017,7 +1151,7 @@ function buildClarifyQuestion(state) {
 
 function detectMealIntent(turns = []) {
   return turns.some((turn) => /\b(log|track|save|add|include)\b/i.test(String(turn || "")))
-    || turns.some((turn) => /\b(i had|had|i ate|ate|i drank|drank)\b/i.test(String(turn || "")))
+    || turns.some((turn) => /\b(i had|had|i ate|ate|i drank|drank|breakfast|lunch|dinner|snack)\b/i.test(String(turn || "")))
 }
 
 function detectNutritionQuestion(turns = []) {
@@ -1027,12 +1161,31 @@ function detectNutritionQuestion(turns = []) {
 function seedStateFromExistingSession(state, existingSession) {
   if (!existingSession?.active || !Array.isArray(existingSession.items) || !existingSession.items.length) return
   state.items = existingSession.items.map((item) => toInternalItem(item))
+  const primaryReferences = new Map(
+    state.items
+      .filter((item) => !item.attachedTo && item.category === "food")
+      .map((item) => [cleanText(item.baseName || item.key || ""), itemReferenceKey(item)])
+      .filter(([key, reference]) => key && reference)
+  )
+  state.items = state.items.map((item) => {
+    const attachedTo = cleanText(item.attachedTo || "")
+    if (!attachedTo || attachedTo.includes("::")) return item
+    const normalizedAttachment = primaryReferences.get(attachedTo)
+    return normalizedAttachment
+      ? { ...item, attachedTo: normalizedAttachment }
+      : item
+  })
   state.lastMainKey = cleanText(existingSession.lastMainKey || state.items.findLast?.((item) => item.category !== "ingredient")?.baseName || state.lastMainKey)
   state.lastMainReference = cleanText(existingSession.lastMainReference || itemReferenceKey(state.items.findLast?.((item) => item.category === "food" && !item.attachedTo) || {}) || state.lastMainReference)
   state.lastDrinkKey = cleanText(existingSession.lastDrinkKey || state.items.findLast?.((item) => item.category === "drink")?.baseName || state.lastDrinkKey)
   state.clarificationAttempts = Math.max(0, Number(existingSession.clarificationAttempts) || 0)
   state.clarificationCounts = mergeClarificationCounts(state.clarificationCounts, existingSession.clarificationCounts || {})
   state.mealConversation = true
+  state.wantsLogging = Boolean(existingSession.wantsLogging)
+  state.wantsNutrition = Boolean(existingSession.wantsNutrition)
+  state.answerOnly = Boolean(existingSession.answerOnly)
+  state.suppressed = Boolean(existingSession.suppressed)
+  state.suppressionReply = String(existingSession.suppressionReply || "")
 }
 
 export function emptyMealSession() {
@@ -1047,6 +1200,9 @@ export function emptyMealSession() {
     clarifyQuestion: "",
     wantsLogging: false,
     wantsNutrition: false,
+    answerOnly: false,
+    suppressed: false,
+    suppressionReply: "",
     mealConversation: false,
     lastMainKey: "",
     lastMainReference: "",
@@ -1073,6 +1229,9 @@ export function buildMealStateFromConversation(recentMessages = [], currentMessa
     clarifyQuestion: "",
     wantsLogging: false,
     wantsNutrition: false,
+    answerOnly: false,
+    suppressed: false,
+    suppressionReply: "",
     currentMessage: String(currentMessage || ""),
   }
 
@@ -1084,8 +1243,24 @@ export function buildMealStateFromConversation(recentMessages = [], currentMessa
 
   const userTurns = conversation.filter((entry) => entry?.role === "user").map((entry) => String(entry.content || ""))
   const threadHint = userTurns.some((turn) => MEAL_VERBS.test(turn) || looksFoodishPhrase(turn))
-  state.wantsLogging = detectMealIntent(userTurns)
-  state.wantsNutrition = detectNutritionQuestion(userTurns)
+  const normalizedCurrent = cleanText(currentMessage)
+  const continuedDetailTurn = Boolean(
+    existingSession?.active
+    && !detectSuppressedLogging(currentMessage)
+    && !detectQuestionOnlyTurn(currentMessage)
+    && (
+      hasDigits(normalizedCurrent)
+      || looksFoodishPhrase(normalizedCurrent)
+      || MEAL_REFERENCE_PATTERN.test(normalizedCurrent)
+      || CORRECTION_PREFIX.test(normalizedCurrent)
+      || FINALISE_PATTERN.test(normalizedCurrent)
+    )
+  )
+  state.wantsLogging = Boolean(existingSession?.wantsLogging) || detectMealIntent(userTurns) || continuedDetailTurn
+  state.wantsNutrition = Boolean(existingSession?.wantsNutrition) || detectNutritionQuestion(userTurns)
+  state.answerOnly = detectQuestionOnlyTurn(currentMessage)
+  state.suppressed = detectSuppressedLogging(currentMessage)
+  state.suppressionReply = state.suppressed ? "Okay, I won't save that." : ""
 
   for (const entry of conversation) {
     if (entry?.role !== "user") continue
@@ -1107,7 +1282,16 @@ export function buildMealStateFromConversation(recentMessages = [], currentMessa
   state.readyToLog = state.items.some((item) => !item.attachedTo) && state.missingItems.length === 0
   state.summary = summarizeMeal(state)
   state.clarifyQuestion = state.readyToLog ? "" : buildClarifyQuestion(state)
-  state.active = state.mealConversation
+  if (state.suppressed) {
+    state.items = []
+    state.summary = ""
+    state.readyToLog = false
+    state.clarifyQuestion = ""
+    state.active = false
+    state.mealConversation = false
+  } else {
+    state.active = state.mealConversation
+  }
   state.threadTurns = conversation
   return state
 }
@@ -1118,7 +1302,7 @@ export function mealStateNeedsClarification(mealState) {
 
 export function buildMealContext(recentMessages = [], currentMessage = "", existingSession = null) {
   const mealState = buildMealStateFromConversation(recentMessages, currentMessage, existingSession)
-  if (!mealState.mealConversation) return null
+  if (!mealState.mealConversation && !mealState.suppressed) return null
 
   return {
     ...mealState,
