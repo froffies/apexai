@@ -194,6 +194,52 @@ test("coach session state handles repeated info and out-of-order ingredient deta
   assert.match(mealSession.summary.toLowerCase(), /1 tbsp olive oil/)
 })
 
+test("coach session state keeps persisted meal state isolated from a new fragmented workout thread", () => {
+  const mealConversation = replayCoachConversation([
+    user("i had egg and tea"),
+    assistant("How many eggs did you have?"),
+    user("18 fried eggs"),
+    assistant("What type of tea?"),
+    user("earl grey"),
+    assistant("How much tea did you have and was there any milk or sugar?"),
+    user("250ml no sugar no milk"),
+    assistant("Anything they were cooked in?"),
+    user("cooked in 100g of salted butter"),
+  ])
+
+  const persistedMeal = makePersistedMealSession(mealConversation.mealSession, "meal_isolated")
+  const firstWorkoutTurn = buildCoachSessionState({
+    recentMessages: [
+      ...mealConversation.history,
+      assistant("Updated today's nutrition: 18 fried eggs cooked in 100g salted butter, plus 250ml Earl Grey tea with no milk and no sugar."),
+    ],
+    currentMessage: "i did bench press",
+    mealSession: persistedMeal,
+    workoutSession: emptyWorkoutSessionState(),
+  })
+
+  assert.equal(firstWorkoutTurn.mealSession, null)
+  assert.ok(firstWorkoutTurn.workoutSession)
+  assert.equal(firstWorkoutTurn.workoutSession.exercise_name, "Bench Press")
+
+  const secondWorkoutTurn = buildCoachSessionState({
+    recentMessages: [
+      ...firstWorkoutTurn.workoutSession.thread_messages,
+      assistant("How many reps did you do for Bench Press?"),
+    ],
+    currentMessage: "80kg for 4 sets of 6",
+    mealSession: firstWorkoutTurn.mealSession,
+    workoutSession: firstWorkoutTurn.workoutSession,
+  })
+
+  assert.equal(secondWorkoutTurn.mealSession, null)
+  assert.ok(secondWorkoutTurn.workoutSession)
+  assert.equal(secondWorkoutTurn.workoutSession.exercise_name, "Bench Press")
+  assert.equal(secondWorkoutTurn.workoutSession.weight_kg, 80)
+  assert.equal(secondWorkoutTurn.workoutSession.sets, 4)
+  assert.equal(secondWorkoutTurn.workoutSession.reps, 6)
+})
+
 test("coach session state preserves unusual but valid quantities instead of rejecting them", () => {
   const { mealSession } = replayCoachConversation([
     user("i had 5 tins of heinz baked beans"),

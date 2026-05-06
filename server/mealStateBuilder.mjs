@@ -295,7 +295,7 @@ function looksLikeMealContinuation(text, state, threadHint = false) {
   if (!normalized) return false
   if (detectSuppressedLogging(normalized)) return true
   if (detectQuestionOnlyTurn(text) && (threadHint || state.items.length)) return true
-  if (looksLikeWorkoutOnly(normalized) && !state.items.length) return false
+  if (looksLikeWorkoutOnly(normalized)) return false
   if (MEAL_VERBS.test(normalized)) return true
   if (FINALISE_PATTERN.test(normalized) && (threadHint || state.items.length)) return true
   if (CORRECTION_PREFIX.test(normalized) && (threadHint || state.items.length)) return true
@@ -338,6 +338,7 @@ function shouldContinueExistingSession(existingSession, currentMessage, recentMe
   const normalized = cleanText(currentMessage)
   if (!normalized) return false
   if (isExplicitMealStart(normalized)) return false
+  if (looksLikeWorkoutOnly(normalized)) return false
   if (detectSuppressedLogging(currentMessage)) return true
   if (detectQuestionOnlyTurn(currentMessage)) return true
   if (hasDigits(normalized) || looksFoodishPhrase(normalized) || MEAL_REFERENCE_PATTERN.test(normalized) || CORRECTION_PREFIX.test(normalized) || FINALISE_PATTERN.test(normalized)) {
@@ -1074,6 +1075,7 @@ function clarificationKey(baseName, field) {
 
 function extractClarificationTargets(message) {
   const text = cleanText(message)
+  if (looksLikeWorkoutOnly(text)) return []
   const targets = []
   const quantityTarget = text.match(/\b(?:how much|how many|amount|quantity|serving)\s+([a-z][a-z\s]+?)(?:\s+did you have|\?|$)/i)
   if (quantityTarget?.[1]) targets.push(clarificationKey(deriveBaseName(quantityTarget[1]), "quantity"))

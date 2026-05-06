@@ -376,18 +376,26 @@ function extractWorkoutThread(recentMessages = [], currentMessage = "", existing
   if (!shouldTrack) return []
 
   const thread = [{ role: "user", content: currentMessage }]
+  let workoutAssistantSeen = false
   for (let index = history.length - 1; index >= 0; index -= 1) {
     const entry = history[index]
     const text = String(entry.content || "")
     if (entry.role === "assistant") {
       if (isWorkoutAssistantMessage(text)) {
         thread.unshift(entry)
+        workoutAssistantSeen = true
         continue
       }
       if (thread.length > 1) break
       continue
     }
-    if (WORKOUT_START_PATTERN.test(text) || /\d/.test(text) || workoutReferenceMessage(text) || workoutCorrectionRequested(text)) {
+    const hasWorkoutContext = workoutAssistantSeen || existingSession?.active || existingSession?.persisted
+    if (
+      WORKOUT_START_PATTERN.test(text)
+      || workoutReferenceMessage(text)
+      || (hasWorkoutContext && /\d/.test(text))
+      || (workoutCorrectionRequested(text) && (WORKOUT_START_PATTERN.test(text) || hasWorkoutContext))
+    ) {
       thread.unshift(entry)
       continue
     }
@@ -476,8 +484,9 @@ function parseWorkoutMessage(message) {
   const xPattern = text.match(/(?<exercise>[a-z][a-z\s'/-]+?)\s+(?<weight>\d+(?:\.\d+)?)\s*kg?\s*x\s*(?<reps>\d+)\s*x\s*(?<sets>\d+)/)
   const setsPattern = text.match(/(?<exercise>[a-z][a-z\s'/-]+?)\s+(?<weight>\d+(?:\.\d+)?)\s*kg?\s*(?:for\s*)?(?<sets>\d+)\s*sets?\s*(?:of|x)?\s*(?<reps>\d+)/)
   const simplePattern = text.match(/(?<exercise>[a-z][a-z\s'/-]+?)\s+(?<weight>\d+(?:\.\d+)?)\s*kg?\s*(?:for|x)?\s*(?<reps>\d+)\s*reps?/)
+  const metricsOnlyPattern = text.match(/^(?<weight>\d+(?:\.\d+)?)\s*kg?\s*(?:for\s*)?(?<sets>\d+)\s*sets?\s*(?:of|x)?\s*(?<reps>\d+)\b/)
   const bodyweightPattern = text.match(/(?<exercise>[a-z][a-z\s'/-]+?)\s+(?<sets>\d+)\s*sets?\s*(?:of|x)?\s*(?<reps>\d+)/)
-  const match = xPattern || setsPattern || simplePattern || bodyweightPattern
+  const match = xPattern || setsPattern || simplePattern || metricsOnlyPattern || bodyweightPattern
   if (match?.groups) {
     const exercise = normalizeExerciseName(match.groups.exercise)
     return {
