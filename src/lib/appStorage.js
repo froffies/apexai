@@ -90,7 +90,6 @@ export async function getAppRecord(key, fallbackValue) {
   if (legacy !== undefined) {
     memoryRecords.set(key, legacy)
     await setAppRecord(key, legacy)
-    window.localStorage.removeItem(key)
     return legacy
   }
 
@@ -111,7 +110,7 @@ export async function setAppRecord(key, value) {
   }
 
   await withStore("readwrite", (store) => store.put(value, key))
-  window.localStorage.removeItem(key)
+  window.localStorage.setItem(key, JSON.stringify(value))
 }
 
 export async function removeAppRecord(key) {
