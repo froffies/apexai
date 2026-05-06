@@ -251,6 +251,46 @@ function buildPersistedWorkoutSession(session, action, workoutId) {
   }
 }
 
+function hasMeaningfulMealSession(session) {
+  if (!session || typeof session !== "object") return false
+  return Boolean(
+    session.active
+    || session.readyToLog
+    || session.mealConversation
+    || session.alreadyLogged
+    || session.correctionRequested
+    || session.persisted
+    || session.persistedMealId
+    || session.persistedSummary
+    || session.summary
+    || (Array.isArray(session.items) && session.items.length)
+    || session.clarifyQuestion
+  )
+}
+
+function hasMeaningfulWorkoutSession(session) {
+  if (!session || typeof session !== "object") return false
+  return Boolean(
+    session.active
+    || session.readyToLog
+    || session.workoutConversation
+    || session.alreadyLogged
+    || session.correctionRequested
+    || session.persisted
+    || session.persistedWorkoutId
+    || session.persistedSummary
+    || session.summary
+    || session.clarifyQuestion
+    || session.exercise_name
+    || session.workout_type
+    || Number(session.sets) > 0
+    || Number(session.reps) > 0
+    || Number(session.weight_kg) > 0
+    || Number(session.duration_seconds) > 0
+    || Number(session.distance_km) > 0
+  )
+}
+
 function formatCoachMealConfirmation(prefix, meal) {
   return `${prefix}: ${meal.food_name}. ${Math.round(Number(meal.calories) || 0)} kcal, ${Math.round(Number(meal.protein_g) || 0)}g protein, ${Math.round(Number(meal.carbs_g) || 0)}g carbs, ${Math.round(Number(meal.fat_g) || 0)}g fat.`
 }
@@ -913,8 +953,8 @@ export default function Coach() {
         recoveryLogs: recoveryLogs.slice(0, 6),
         activeWorkout,
         recentMessages: messages.slice(-20),
-        mealSession,
-        workoutSession,
+        mealSession: hasMeaningfulMealSession(mealSession) ? mealSession : null,
+        workoutSession: hasMeaningfulWorkoutSession(workoutSession) ? workoutSession : null,
       })
       if (!coachResponse) {
         const assistantMessage = appendAssistant("I couldn't get a valid response from the live coach, so I didn't log or change anything. Please try again.")

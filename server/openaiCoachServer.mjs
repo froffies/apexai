@@ -810,31 +810,6 @@ async function handleCoach(request, response) {
     return
   }
 
-  const mealClarifyAction = deterministicClarifyActionFromSession(mealContext)
-  if (mealClarifyAction) {
-    const clarifyMessage = mealClarifyAction.message || "I need a bit more detail before I can log that meal."
-    sendJson(response, 200, {
-      reply: clarifyMessage,
-      actions: [mealClarifyAction],
-      warnings: [],
-      meal_session: mealContext,
-      workout_session: workoutContext,
-    }, requestResponseOrigin(request))
-    return
-  }
-
-  const workoutClarifyAction = deterministicClarifyActionFromSession(workoutContext)
-  if (workoutClarifyAction) {
-    sendJson(response, 200, {
-      reply: workoutClarifyAction.message,
-      actions: [workoutClarifyAction],
-      warnings: [],
-      meal_session: mealContext,
-      workout_session: workoutContext,
-    }, requestResponseOrigin(request))
-    return
-  }
-
   if (mealContext?.readyToLog) {
     const mealAction = buildDeterministicMealAction({
       mealSession: mealContext,
@@ -870,6 +845,31 @@ async function handleCoach(request, response) {
     sendJson(response, 200, {
       reply: summarizeCoachAction(workoutAction),
       actions: workoutAction ? [workoutAction] : [],
+      warnings: [],
+      meal_session: mealContext,
+      workout_session: workoutContext,
+    }, requestResponseOrigin(request))
+    return
+  }
+
+  const mealClarifyAction = deterministicClarifyActionFromSession(mealContext)
+  if (mealClarifyAction) {
+    const clarifyMessage = mealClarifyAction.message || "I need a bit more detail before I can log that meal."
+    sendJson(response, 200, {
+      reply: clarifyMessage,
+      actions: [mealClarifyAction],
+      warnings: [],
+      meal_session: mealContext,
+      workout_session: workoutContext,
+    }, requestResponseOrigin(request))
+    return
+  }
+
+  const workoutClarifyAction = deterministicClarifyActionFromSession(workoutContext)
+  if (workoutClarifyAction) {
+    sendJson(response, 200, {
+      reply: workoutClarifyAction.message,
+      actions: [workoutClarifyAction],
       warnings: [],
       meal_session: mealContext,
       workout_session: workoutContext,

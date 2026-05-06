@@ -204,6 +204,106 @@ test("deterministic coach logging still works when OpenAI is unavailable", async
   assert.ok(Number(coach.actions?.[0]?.calories) > 1500)
 })
 
+test("ready meal corrections outrank stray workout clarifications when OpenAI is unavailable", async (t) => {
+  const port = randomPort()
+  const serverProcess = spawn(process.execPath, [serverEntry], {
+    cwd,
+    env: {
+      ...process.env,
+      OPENAI_COACH_PORT: String(port),
+      OPENAI_COACH_REQUIRE_AUTH: "false",
+      OPENAI_COACH_CORS_ORIGIN: "http://127.0.0.1:5173",
+      OPENFOODFACTS_ENABLED: "false",
+      OPENAI_API_KEY: "",
+      NODE_ENV: "production",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  })
+
+  t.after(async () => {
+    serverProcess.kill()
+  })
+
+  await waitForHealth(port)
+
+  const coachResponse = await fetch(`http://127.0.0.1:${port}/api/coach`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Origin: "http://127.0.0.1:5173",
+    },
+    body: JSON.stringify({
+      message: "actually it was 18 fried eggs cooked in 100g of salted butter, plus 250ml Earl Grey tea with no milk and no sugar",
+      mealSession: {
+        active: true,
+        mealConversation: true,
+        readyToLog: true,
+        clarificationAttempts: 8,
+        clarificationCounts: { "egg:quantity": 2, "earl grey tea:quantity": 1, "egg:cooking_medium": 5, "tea:additions": 4 },
+        summary: "18 fried eggs cooked in 100g salted butter, plus 250ml Earl Grey tea with no milk and no sugar",
+        clarifyQuestion: "",
+        persisted: true,
+        persistedMealId: "meal_fix_live",
+        persistedSummary: "17 fried eggs cooked in 100g salted butter, plus 250ml Earl Grey tea with no milk and no sugar",
+        correctionRequested: true,
+        items: [
+          {
+            base_name: "egg",
+            label: "Eggs",
+            category: "food",
+            quantity: { amount: 18, unit: "egg", text: "18 eggs" },
+            preparation: ["fried"],
+            exclusions: [],
+            attached_to: null,
+            relation: null,
+          },
+          {
+            base_name: "earl grey tea",
+            label: "Earl Grey tea",
+            category: "drink",
+            quantity: { amount: 250, unit: "ml", text: "250ml" },
+            preparation: [],
+            exclusions: ["no sugar", "no milk"],
+            attached_to: null,
+            relation: null,
+          },
+          {
+            base_name: "salted butter",
+            label: "Salted Butter",
+            category: "ingredient",
+            quantity: { amount: 100, unit: "g", text: "100g" },
+            preparation: ["salted"],
+            exclusions: [],
+            attached_to: "egg::fried",
+            relation: "cooked_in",
+          },
+        ],
+      },
+      workoutSession: {
+        active: true,
+        workoutConversation: true,
+        wantsLogging: true,
+        readyToLog: false,
+        clarifyQuestion: "What exercise or cardio did you do?",
+        exercise_name: "",
+        workout_type: "",
+        muscle_group: "full_body",
+        sets: 0,
+        reps: 0,
+        weight_kg: 0,
+        duration_seconds: 0,
+        distance_km: 0,
+      },
+    }),
+  })
+  const coach = await coachResponse.json()
+  assert.equal(coachResponse.status, 200)
+  assert.equal(coach.reply, "Updated today's nutrition entry for 18 fried eggs cooked in 100g salted butter, plus 250ml Earl Grey tea with no milk and no sugar.")
+  assert.equal(coach.actions?.[0]?.type, "update_meal_log")
+  assert.equal(coach.actions?.[0]?.meal_id, "meal_fix_live")
+  assert.equal(coach.workout_session?.clarifyQuestion, "What exercise or cardio did you do?")
+})
+
 test("deterministic coach nutrition answers still work when OpenAI is unavailable", async (t) => {
   const port = randomPort()
   const serverProcess = spawn(process.execPath, [serverEntry], {

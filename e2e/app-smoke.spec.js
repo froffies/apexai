@@ -931,12 +931,167 @@ test("coach does not create duplicate meals when a redundant follow-up arrives a
     await page.getByRole("button", { name: /^Send$/i }).click()
   }
 
-  await expect(page.getByText(/already saved 17 fried eggs cooked in 100g salted butter/i)).toBeVisible()
+  await expect(page.getByText(/already saved 17 fried eggs cooked in 100g salted butter/i).first()).toBeVisible()
 
   await page.goto("/Nutrition")
   await page.reload()
   const todayMealsSection = page.locator("section").filter({ has: page.getByRole("heading", { name: /today's meals/i }) })
   await expect(todayMealsSection.getByText("17 fried eggs cooked in 100g salted butter, plus 250ml Earl Grey tea with no milk and no sugar")).toHaveCount(1)
+})
+
+test("coach corrections still update a saved meal after redundant post-save follow-ups", async ({ page }) => {
+  await seedOnboardedProfile(page)
+  await page.route("**/api/coach", async (route) => {
+    const body = route.request().postDataJSON()
+    const message = String(body.message || "").toLowerCase()
+    const mealSession = body.mealSession || null
+    const workoutSession = body.workoutSession || null
+
+    if (message.includes("17 eggs fried in 100g of salted butter")) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          reply: "Saved to today's nutrition: 17 fried eggs cooked in 100g salted butter, plus 250ml Earl Grey tea with no milk and no sugar.",
+          actions: [
+            {
+              type: "log_meal",
+              food_name: "17 fried eggs cooked in 100g salted butter, plus 250ml Earl Grey tea with no milk and no sugar",
+              meal_type: "breakfast",
+              quantity: "1 meal",
+              calories: 2230,
+              protein_g: 164,
+              carbs_g: 47,
+              fat_g: 236,
+              estimated: true,
+              nutrition_source: "Coach estimate from accumulated meal details across chat",
+            },
+          ],
+          warnings: [],
+          meal_session: {
+            ...mealSession,
+            active: true,
+            mealConversation: true,
+            readyToLog: true,
+            summary: "17 fried eggs cooked in 100g salted butter, plus 250ml Earl Grey tea with no milk and no sugar",
+            clarifyQuestion: "",
+          },
+          workout_session: null,
+        }),
+      })
+      return
+    }
+
+    if (message === "the eggs" || message === "i just did") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          reply: "I already saved 17 fried eggs cooked in 100g salted butter, plus 250ml Earl Grey tea with no milk and no sugar in today's nutrition log. If you want to change it, tell me what to update.",
+          actions: [],
+          warnings: [],
+          meal_session: {
+            ...mealSession,
+            alreadyLogged: true,
+            active: false,
+            readyToLog: false,
+            clarifyQuestion: "",
+          },
+          workout_session: null,
+        }),
+      })
+      return
+    }
+
+    if (message.includes("actually it was 18 fried eggs")) {
+      expect(mealSession?.persistedMealId || "").toBeTruthy()
+      expect(mealSession?.persistedSummary || "").toMatch(/17 fried eggs cooked in 100g salted butter/i)
+      expect(workoutSession).toBeNull()
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          reply: "Updated today's nutrition entry for 18 fried eggs cooked in 100g salted butter, plus 250ml Earl Grey tea with no milk and no sugar.",
+          actions: [
+            {
+              type: "update_meal_log",
+              meal_id: mealSession.persistedMealId,
+              food_name: "18 fried eggs cooked in 100g salted butter, plus 250ml Earl Grey tea with no milk and no sugar",
+              meal_type: "breakfast",
+              quantity: "1 meal",
+              calories: 2304,
+              protein_g: 170,
+              carbs_g: 47,
+              fat_g: 241,
+              estimated: true,
+              nutrition_source: "Coach estimate from accumulated meal details across chat",
+            },
+          ],
+          warnings: [],
+          meal_session: {
+            ...mealSession,
+            active: true,
+            readyToLog: true,
+            correctionRequested: true,
+            summary: "18 fried eggs cooked in 100g salted butter, plus 250ml Earl Grey tea with no milk and no sugar",
+            items: [
+              { base_name: "egg", label: "Eggs", category: "food", quantity: { amount: 18, unit: "egg", text: "18 eggs", modifier: "" }, preparation: ["fried"], exclusions: [], attached_to: null, relation: null },
+              { base_name: "earl grey tea", label: "Earl Grey tea", category: "drink", quantity: { amount: 250, unit: "ml", text: "250ml", modifier: "" }, preparation: [], exclusions: ["no sugar", "no milk"], attached_to: null, relation: null },
+              { base_name: "salted butter", label: "Salted Butter", category: "ingredient", quantity: { amount: 100, unit: "g", text: "100g", modifier: "" }, preparation: ["salted"], exclusions: [], attached_to: "egg", relation: "cooked_in" },
+            ],
+          },
+          workout_session: null,
+        }),
+      })
+      return
+    }
+
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        reply: "How many eggs did you have?",
+        actions: [{ type: "clarify", message: "How many eggs did you have?" }],
+        warnings: [],
+        meal_session: {
+          active: true,
+          mealConversation: true,
+          readyToLog: false,
+          clarificationAttempts: 0,
+          clarificationCounts: {},
+          summary: "eggs, plus tea",
+          clarifyQuestion: "How many eggs did you have?",
+          items: [
+            { base_name: "egg", label: "Egg", category: "food", quantity: null, preparation: [], exclusions: [], attached_to: null, relation: null },
+            { base_name: "tea", label: "Tea", category: "drink", quantity: null, preparation: [], exclusions: [], attached_to: null, relation: null },
+          ],
+        },
+        workout_session: null,
+      }),
+    })
+  })
+
+  await page.goto("/Coach")
+  const composer = page.getByPlaceholder(/log bench 80kg for 4 sets of 6/i)
+  for (const message of [
+    "17 eggs fried in 100g of salted butter, plus 250ml Earl Grey tea with no milk and no sugar",
+    "the eggs",
+    "i just did",
+  ]) {
+    await composer.fill(message)
+    await page.getByRole("button", { name: /^Send$/i }).click()
+  }
+
+  await expect(page.getByText(/already saved 17 fried eggs cooked in 100g salted butter/i).first()).toBeVisible()
+
+  await composer.fill("actually it was 18 fried eggs cooked in 100g of salted butter, plus 250ml Earl Grey tea with no milk and no sugar")
+  await page.getByRole("button", { name: /^Send$/i }).click()
+  await expect(page.getByText(/updated today's nutrition: 18 fried eggs cooked in 100g salted butter, plus 250ml earl grey tea with no milk and no sugar\./i)).toBeVisible()
+
+  await page.goto("/Nutrition")
+  const todayMealsSection = page.locator("section").filter({ has: page.getByRole("heading", { name: /today's meals/i }) })
+  await expect(todayMealsSection.getByText("18 fried eggs cooked in 100g salted butter, plus 250ml Earl Grey tea with no milk and no sugar")).toBeVisible()
+  await expect(todayMealsSection.getByText("17 fried eggs cooked in 100g salted butter, plus 250ml Earl Grey tea with no milk and no sugar")).toHaveCount(0)
 })
 
 test("coach sends arbitrary food detail messages to the live coach instead of tripping the local build-block fallback", async ({ page }) => {

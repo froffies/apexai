@@ -373,6 +373,7 @@ function extractWorkoutThread(recentMessages = [], currentMessage = "", existing
   const history = safeRecentMessages(recentMessages, 18)
   const currentParsedWorkout = parseWorkoutMessage(currentMessage)
   const currentLooksMealLike = looksLikeStandaloneMealMessage(currentMessage)
+  const hasExistingWorkoutContext = Boolean(existingSession?.active || existingSession?.persisted)
   const currentLooksWorkoutLike = WORKOUT_START_PATTERN.test(normalizedCurrent)
     || workoutReferenceMessage(normalizedCurrent)
     || Boolean(
@@ -386,7 +387,7 @@ function extractWorkoutThread(recentMessages = [], currentMessage = "", existing
   const shouldTrack = WORKOUT_START_PATTERN.test(normalizedCurrent)
     || (workoutCorrectionRequested(currentMessage) && !currentLooksMealLike && (currentLooksWorkoutLike || existingSession?.active || existingSession?.persisted))
     || (suppressionRequested(currentMessage) && (existingSession?.active || existingSession?.persisted))
-    || WORKOUT_FINALISE_PATTERN.test(normalizedCurrent)
+    || (WORKOUT_FINALISE_PATTERN.test(normalizedCurrent) && hasExistingWorkoutContext)
     || (existingSession?.active && (/\d/.test(normalizedCurrent) || workoutReferenceMessage(normalizedCurrent)))
     || (existingSession?.persisted && !isExplicitMealStart(normalizedCurrent) && (/\d/.test(normalizedCurrent) || workoutReferenceMessage(normalizedCurrent)))
 

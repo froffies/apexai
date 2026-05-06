@@ -173,6 +173,35 @@ test("coach session state replaces persisted meal quantities when a correction r
   assert.equal(next.workoutSession, null)
 })
 
+test("coach session state does not open a stray workout thread from 'i just did' after a persisted meal", () => {
+  const initial = replayCoachConversation([
+    user("i had egg and tea"),
+    assistant("How many eggs did you have?"),
+    user("17 fried eggs"),
+    assistant("What type of tea?"),
+    user("earl grey"),
+    assistant("How much tea did you have and was there any milk or sugar?"),
+    user("250ml no sugar no milk"),
+    assistant("Anything they were cooked in?"),
+    user("cooked in 100g of salted butter"),
+  ])
+
+  const persistedMeal = makePersistedMealSession(initial.mealSession, "meal_after_save")
+  const next = buildCoachSessionState({
+    recentMessages: [
+      ...initial.history,
+      assistant("Saved to today's nutrition: 17 fried eggs cooked in 100g salted butter, plus 250ml Earl Grey tea with no milk and no sugar."),
+    ],
+    currentMessage: "i just did",
+    mealSession: persistedMeal,
+    workoutSession: emptyWorkoutSessionState(),
+  })
+
+  assert.ok(next.mealSession)
+  assert.equal(next.mealSession.alreadyLogged, true)
+  assert.equal(next.workoutSession, null)
+})
+
 test("coach session state handles repeated info and out-of-order ingredient detail without clarification loops", () => {
   const { mealSession } = replayCoachConversation([
     user("200g"),
