@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useState } from "react"
-import { clearAppRecords, getAppRecord, primeAppRecordCache, setAppRecord, writeAppRecordSync } from "@/lib/appStorage"
+import { clearAppRecords, getAppRecord, getCachedAppRecord, primeAppRecordCache, setAppRecord, writeAppRecordSync } from "@/lib/appStorage"
 import { syncKeyToCloud } from "@/lib/cloudSync"
 
 function readLegacyValue(key, initialValue) {
   if (typeof window === "undefined") return initialValue
+
+  const cached = getCachedAppRecord(key)
+  if (cached !== undefined) return cached
 
   try {
     const item = window.localStorage.getItem(key)
