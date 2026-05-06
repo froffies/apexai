@@ -170,6 +170,7 @@ test("coach session state replaces persisted meal quantities when a correction r
   assert.match(next.mealSession.summary, /18 fried eggs/i)
   assert.doesNotMatch(next.mealSession.summary, /17 fried eggs/i)
   assert.equal(next.mealSession.alreadyLogged, false)
+  assert.equal(next.workoutSession, null)
 })
 
 test("coach session state handles repeated info and out-of-order ingredient detail without clarification loops", () => {

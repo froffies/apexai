@@ -363,11 +363,28 @@ function normalizeExerciseName(value) {
   return titleCase(beforeNumber || text)
 }
 
+function looksLikeStandaloneMealMessage(message) {
+  const mealContext = buildLegacyMealContext([], message, emptyLegacyMealSession())
+  return Array.isArray(mealContext?.items) && mealContext.items.length > 0
+}
+
 function extractWorkoutThread(recentMessages = [], currentMessage = "", existingSession = null) {
   const normalizedCurrent = cleanText(currentMessage)
   const history = safeRecentMessages(recentMessages, 18)
+  const currentParsedWorkout = parseWorkoutMessage(currentMessage)
+  const currentLooksMealLike = looksLikeStandaloneMealMessage(currentMessage)
+  const currentLooksWorkoutLike = WORKOUT_START_PATTERN.test(normalizedCurrent)
+    || workoutReferenceMessage(normalizedCurrent)
+    || Boolean(
+      currentParsedWorkout?.exercise_name
+      || currentParsedWorkout?.weight_kg
+      || currentParsedWorkout?.sets
+      || currentParsedWorkout?.reps
+      || currentParsedWorkout?.duration_seconds
+      || currentParsedWorkout?.distance_km
+    )
   const shouldTrack = WORKOUT_START_PATTERN.test(normalizedCurrent)
-    || workoutCorrectionRequested(currentMessage)
+    || (workoutCorrectionRequested(currentMessage) && !currentLooksMealLike && (currentLooksWorkoutLike || existingSession?.active || existingSession?.persisted))
     || (suppressionRequested(currentMessage) && (existingSession?.active || existingSession?.persisted))
     || WORKOUT_FINALISE_PATTERN.test(normalizedCurrent)
     || (existingSession?.active && (/\d/.test(normalizedCurrent) || workoutReferenceMessage(normalizedCurrent)))
@@ -505,7 +522,13 @@ function parseWorkoutMessage(message) {
   const setsOnly = text.match(/(?<sets>\d+)\s*sets?\b/)
   const repsOnly = text.match(/(?<reps>\d+)\s*reps?\b|\bof\s*(?<reps2>\d+)\b/)
   const exerciseOnly = normalizeExerciseName(text)
-  if (weightOnly || setsOnly || repsOnly || exerciseOnly) {
+  const knownExerciseOnly = WORKOUT_EXERCISES.some((exercise) => text.includes(exercise))
+  const genericExerciseOnly = Boolean(
+    exerciseOnly
+    && text.split(/\s+/).filter(Boolean).length <= 4
+    && !looksLikeStandaloneMealMessage(text)
+  )
+  if (weightOnly || setsOnly || repsOnly || knownExerciseOnly || genericExerciseOnly) {
     return {
       exercise_name: exerciseOnly || "",
       workout_type: exerciseOnly || "",
