@@ -138,6 +138,40 @@ test("coach session state reopens a persisted meal for corrections instead of du
   assert.equal(next.mealSession.alreadyLogged, false)
 })
 
+test("coach session state replaces persisted meal quantities when a correction restates the full meal", () => {
+  const initial = replayCoachConversation([
+    user("i had egg and tea"),
+    assistant("How many eggs did you have?"),
+    user("17 fried eggs"),
+    assistant("What type of tea?"),
+    user("earl grey"),
+    assistant("How much tea did you have and was there any milk or sugar?"),
+    user("250ml no sugar no milk"),
+    assistant("Anything they were cooked in?"),
+    user("cooked in 100g of salted butter"),
+  ])
+
+  const persistedMeal = makePersistedMealSession(initial.mealSession, "meal_fix_full")
+  const next = buildCoachSessionState({
+    recentMessages: [
+      ...initial.history,
+      assistant("Saved to today's nutrition: 17 fried eggs cooked in 100g salted butter, plus 250ml Earl Grey tea with no milk and no sugar."),
+      user("i just did"),
+      assistant("I already saved 17 fried eggs cooked in 100g salted butter, plus 250ml Earl Grey tea with no milk and no sugar in today's nutrition log. If you want to change it, tell me what to update."),
+    ],
+    currentMessage: "actually it was 18 fried eggs cooked in 100g of salted butter, plus 250ml Earl Grey tea with no milk and no sugar",
+    mealSession: persistedMeal,
+    workoutSession: emptyWorkoutSessionState(),
+  })
+
+  assert.ok(next.mealSession)
+  assert.equal(next.mealSession.correctionRequested, true)
+  assert.equal(next.mealSession.readyToLog, true)
+  assert.match(next.mealSession.summary, /18 fried eggs/i)
+  assert.doesNotMatch(next.mealSession.summary, /17 fried eggs/i)
+  assert.equal(next.mealSession.alreadyLogged, false)
+})
+
 test("coach session state handles repeated info and out-of-order ingredient detail without clarification loops", () => {
   const { mealSession } = replayCoachConversation([
     user("200g"),

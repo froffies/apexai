@@ -229,6 +229,29 @@ function normalizeLabel(label) {
     .trim()
 }
 
+const CORRECTION_LEAD_PATTERNS = [
+  /^(?:actually|sorry|correction)\s+/i,
+  /^(?:no|nah),?\s+i meant\s+/i,
+  /^(?:i meant|it was|it is)\s+/i,
+  /^(?:make that|change that(?: to)?|update that(?: to)?|instead)\s+/i,
+]
+
+function stripCorrectionLead(text) {
+  let normalized = normalizeLabel(text)
+  let changed = true
+  while (changed && normalized) {
+    changed = false
+    for (const pattern of CORRECTION_LEAD_PATTERNS) {
+      const stripped = normalized.replace(pattern, "").trim()
+      if (stripped !== normalized) {
+        normalized = stripped
+        changed = true
+      }
+    }
+  }
+  return normalized
+}
+
 function hasDigits(text) {
   return /\d/.test(String(text || ""))
 }
@@ -580,7 +603,7 @@ function parseQuantityOnly(text) {
 }
 
 function parseDrinkDetailOnly(state, text) {
-  const normalized = cleanText(text)
+  const normalized = cleanText(stripCorrectionLead(text) || text)
   if (looksFoodishPhrase(normalized) && !/\b(tea|coffee|milk|sugar|earl grey|flat white|long black|cappuccino|latte|espresso)\b/.test(normalized)) return false
   const drinkIndex = state.items.findIndex((item) => item.category === "drink" && !item.quantity)
   const fallbackIndex = drinkIndex === -1 ? state.items.findIndex((item) => item.category === "drink") : drinkIndex
@@ -647,7 +670,7 @@ function parseDrinkDetailOnly(state, text) {
 }
 
 function parseIngredientPhrase(text) {
-  const normalized = normalizeLabel(text).replace(/^also\s+/, "")
+  const normalized = stripCorrectionLead(text).replace(/^also\s+/, "")
   const relation = /\bcooked in\b|\bfried in\b|\bused to fry\b/.test(normalized)
     ? "cooked_in"
     : /\bwith\b|\bplus\b/.test(normalized)
@@ -710,7 +733,7 @@ function findInheritedTarget(state, preparations = []) {
 }
 
 function parseInheritedFoodClause(state, clause) {
-  const normalized = normalizeLabel(clause)
+  const normalized = stripCorrectionLead(clause)
   const referencePreparations = extractPreparations(normalized)
   const quantityReferenceMatch = normalized.match(new RegExp(
     `^(?<amount>\\d+(?:\\.\\d+)?|${[...QUANTITY_WORDS.keys()].join("|")})\\s+(?:(?<reference>that|those|them|ones?)\\s+)?(?:were|was)?\\s*(?<details>.*)$`,
@@ -741,7 +764,7 @@ function parseInheritedFoodClause(state, clause) {
 }
 
 function parseMeasuredFoodClause(clause) {
-  const normalized = normalizeLabel(clause)
+  const normalized = stripCorrectionLead(clause)
   const cookedSplit = normalized.split(/\b(?:cooked in|fried in)\b/)
   const mainText = cookedSplit[0].trim()
   const ingredientText = cookedSplit[1]?.trim() || ""
