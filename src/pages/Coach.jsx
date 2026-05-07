@@ -203,6 +203,25 @@ function resolveMealNutritionSource(action, fallback = "") {
   return "Coach estimate from user-described ingredients and amounts"
 }
 
+function sanitizeMealSummaryText(value) {
+  let next = String(value || "")
+    .replace(/\s+/g, " ")
+    .trim()
+  if (!next) return ""
+
+  const repeatedPhrasePattern = /\b(?<phrase>(?:\d+(?:\.\d+)?\s*[a-z]+\s+)?(?:[a-z]+(?:\s+[a-z]+){0,4}))\s+(?:and|,)\s+\k<phrase>\b/gi
+  let previous = ""
+  while (next !== previous) {
+    previous = next
+    next = next.replace(repeatedPhrasePattern, "$<phrase>")
+      .replace(/\s+,/g, ",")
+      .replace(/,\s*,/g, ", ")
+      .replace(/\s+/g, " ")
+      .trim()
+  }
+  return next
+}
+
 function buildPersistedMealSession(session, action, mealId) {
   const base = session && typeof session === "object" ? session : createEmptyMealSession()
   return {
@@ -218,7 +237,7 @@ function buildPersistedMealSession(session, action, mealId) {
     referenceMeal: null,
     persisted: true,
     persistedMealId: mealId,
-    persistedSummary: String(action?.food_name || base?.summary || "").trim(),
+    persistedSummary: sanitizeMealSummaryText(action?.food_name || base?.summary || ""),
     persistedAt: new Date().toISOString(),
     alreadyLogged: false,
     correctionRequested: false,
@@ -306,8 +325,8 @@ function coachNumberOrZero(value) {
 }
 
 function mealSummariesEquivalent(left, right) {
-  const normalizedLeft = normalizeCoachComparableText(left)
-  const normalizedRight = normalizeCoachComparableText(right)
+  const normalizedLeft = normalizeCoachComparableText(sanitizeMealSummaryText(left))
+  const normalizedRight = normalizeCoachComparableText(sanitizeMealSummaryText(right))
   return Boolean(normalizedLeft && normalizedRight && normalizedLeft === normalizedRight)
 }
 
@@ -321,8 +340,8 @@ function resolvePersistedMealContext(currentSession, nextSession, meals) {
   const next = nextSession && typeof nextSession === "object" ? nextSession : null
   const persistedMealId = String(next?.persistedMealId || current?.persistedMealId || "").trim()
   const persistedMeal = persistedMealId ? meals.find((meal) => meal.id === persistedMealId) || null : null
-  const persistedSummary = String(next?.persistedSummary || current?.persistedSummary || persistedMeal?.food_name || "").trim()
-  const sessionSummary = String(next?.summary || current?.summary || persistedSummary).trim()
+  const persistedSummary = sanitizeMealSummaryText(next?.persistedSummary || current?.persistedSummary || persistedMeal?.food_name || "")
+  const sessionSummary = sanitizeMealSummaryText(next?.summary || current?.summary || persistedSummary)
   return {
     persistedMealId,
     persistedMeal,
@@ -336,10 +355,10 @@ function normalizeMealPersistenceAction(action, currentSession, nextSession, mea
   if (!action || typeof action !== "object") return { action, duplicateSummary: "" }
 
   const context = resolvePersistedMealContext(currentSession, nextSession, meals)
-  const preferredSummary = String(context.sessionSummary || action.food_name || "Estimated mixed meal").trim()
+  const preferredSummary = sanitizeMealSummaryText(context.sessionSummary || action.food_name || "Estimated mixed meal")
   const normalizedAction = {
     ...action,
-    food_name: preferredSummary || action.food_name || "Estimated mixed meal",
+    food_name: preferredSummary || sanitizeMealSummaryText(action.food_name || "Estimated mixed meal"),
     quantity: String(action.quantity || "1 serve"),
     meal_type: action.meal_type || context.persistedMeal?.meal_type || "snack",
   }
