@@ -939,6 +939,63 @@ test("coach does not create duplicate meals when a redundant follow-up arrives a
   await expect(todayMealsSection.getByText("17 fried eggs cooked in 100g salted butter, plus 250ml Earl Grey tea with no milk and no sugar")).toHaveCount(1)
 })
 
+test("coach ignores rapid duplicate meal submits before they create duplicate requests or logs", async ({ page }) => {
+  await seedOnboardedProfile(page)
+  let coachCalls = 0
+
+  await page.route("**/api/coach", async (route) => {
+    coachCalls += 1
+    await new Promise((resolve) => setTimeout(resolve, 180))
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        reply: "Saved to today's nutrition: Rapid duplicate meal guard test.",
+        actions: [
+          {
+            type: "log_meal",
+            food_name: "Rapid duplicate meal guard test",
+            meal_type: "snack",
+            quantity: "1 meal",
+            calories: 420,
+            protein_g: 24,
+            carbs_g: 18,
+            fat_g: 24,
+            estimated: true,
+            nutrition_source: "Coach estimate from accumulated meal details across chat",
+          },
+        ],
+        warnings: [],
+        meal_session: {
+          active: true,
+          mealConversation: true,
+          readyToLog: true,
+          clarificationAttempts: 0,
+          clarificationCounts: {},
+          summary: "Rapid duplicate meal guard test",
+          clarifyQuestion: "",
+          items: [],
+        },
+        workout_session: {},
+      }),
+    })
+  })
+
+  await page.goto("/Coach")
+  const composer = page.getByPlaceholder(/log bench 80kg for 4 sets of 6/i)
+  await composer.fill("rapid duplicate meal guard test")
+  await page.getByRole("button", { name: /^Send$/i }).dblclick()
+
+  await expect(page.getByText(/saved to today's nutrition: rapid duplicate meal guard test\./i)).toBeVisible()
+  await expect.poll(() => coachCalls).toBe(1)
+  await expect(page.getByText("rapid duplicate meal guard test", { exact: true })).toHaveCount(1)
+
+  await page.goto("/Nutrition")
+  await page.reload()
+  const todayMealsSection = page.locator("section").filter({ has: page.getByRole("heading", { name: /today's meals/i }) })
+  await expect(todayMealsSection.getByText("Rapid duplicate meal guard test")).toHaveCount(1)
+})
+
 test("coach corrections still update a saved meal after redundant post-save follow-ups", async ({ page }) => {
   await seedOnboardedProfile(page)
   await page.route("**/api/coach", async (route) => {
@@ -1597,6 +1654,68 @@ test("coach reconciles stale workout log actions into one corrected saved workou
   await expect(page.getByText(/4 structured sets logged so far\./i).first()).toBeVisible()
   await expect(page.getByText(/1,?600kg/).first()).toBeVisible()
   await expect(page.getByText(/1,?920kg/)).toHaveCount(0)
+})
+
+test("coach ignores rapid duplicate workout submits before they create duplicate requests or logs", async ({ page }) => {
+  await seedOnboardedProfile(page)
+  let coachCalls = 0
+
+  await page.route("**/api/coach", async (route) => {
+    coachCalls += 1
+    await new Promise((resolve) => setTimeout(resolve, 180))
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        reply: "Saved to Workouts: Bench Press 80kg for 4 sets of 6.",
+        actions: [
+          {
+            type: "log_workout",
+            exercise_name: "Bench Press",
+            workout_type: "Bench Press",
+            muscle_group: "chest",
+            sets: 4,
+            reps: 6,
+            weight_kg: 80,
+            duration_seconds: 0,
+          },
+        ],
+        warnings: [],
+        workout_session: {
+          active: true,
+          workoutConversation: true,
+          readyToLog: true,
+          clarificationAttempts: 0,
+          clarificationCounts: {},
+          summary: "Bench Press 80kg for 4 sets of 6",
+          clarifyQuestion: "",
+          exercise_name: "Bench Press",
+          workout_type: "Bench Press",
+          muscle_group: "chest",
+          sets: 4,
+          reps: 6,
+          weight_kg: 80,
+          duration_seconds: 0,
+        },
+        meal_session: {},
+      }),
+    })
+  })
+
+  await page.goto("/Coach")
+  const composer = page.getByPlaceholder(/log bench 80kg for 4 sets of 6/i)
+  await composer.fill("bench press 80kg for 4 sets of 6")
+  await page.getByRole("button", { name: /^Send$/i }).dblclick()
+
+  await expect(page.getByText(/saved to workouts: bench press for 4 sets of 6 at 80kg\./i)).toBeVisible()
+  await expect.poll(() => coachCalls).toBe(1)
+  await expect(page.getByText("bench press 80kg for 4 sets of 6", { exact: true })).toHaveCount(1)
+
+  await page.goto("/Workouts")
+  await page.reload()
+  await expect(page.getByText(/4 structured sets logged so far\./i).first()).toBeVisible()
+  await expect(page.getByText(/1,?920kg/).first()).toBeVisible()
+  await expect(page.getByText(/3,?840kg/)).toHaveCount(0)
 })
 
 test("logged workouts can be edited in place from Workouts and update volume", async ({ page }) => {

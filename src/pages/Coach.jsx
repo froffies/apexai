@@ -113,6 +113,50 @@ function createEmptyWorkoutSession() {
   }
 }
 
+const SUBMIT_DEDUPE_WINDOW_MS = 1200
+
+function normalizeSubmitContent(content) {
+  return String(content || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+}
+
+function createSubmitGuardState() {
+  return {
+    inFlight: false,
+    currentKey: "",
+    lastCompletedKey: "",
+    lastCompletedAt: 0,
+  }
+}
+
+function acquireSubmitGuard(guard, content) {
+  const key = normalizeSubmitContent(content)
+  if (!key) return null
+  if (guard.inFlight) return null
+  if (guard.lastCompletedKey === key && (Date.now() - guard.lastCompletedAt) < SUBMIT_DEDUPE_WINDOW_MS) {
+    return null
+  }
+  guard.inFlight = true
+  guard.currentKey = key
+  return key
+}
+
+function releaseSubmitGuard(guard, key, remember = false) {
+  if (guard.currentKey === key) {
+    guard.inFlight = false
+    guard.currentKey = ""
+  } else {
+    guard.inFlight = false
+  }
+
+  if (remember) {
+    guard.lastCompletedKey = key
+    guard.lastCompletedAt = Date.now()
+  }
+}
+
 const promptCards = [
   { title: "Plan today", description: "Choose whether to build, view, start, or edit today's workout.", action: "today" },
   { title: "Plan the week", description: "Pick the exact kind of weekly planning you want.", action: "schedule" },
@@ -607,6 +651,7 @@ export default function Coach() {
   const [quickAction, setQuickAction] = useState(null)
   const inputRef = useRef(null)
   const bottomRef = useRef(null)
+  const submitGuardRef = useRef(createSubmitGuardState())
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages, thinking])
@@ -1162,26 +1207,35 @@ export default function Coach() {
   const submitCoachPrompt = async (rawContent) => {
     const content = String(rawContent || "").trim()
     if (!content || thinking) return
+
+    const guardKey = acquireSubmitGuard(submitGuardRef.current, content)
+    if (!guardKey) return
+
+    let rememberSubmit = false
+    let startedThinking = false
     const userMessage = { id: uid("chat"), role: "user", content, timestamp: new Date().toISOString() }
-    setInput("")
-    setQuickAction(null)
-    setAiError("")
-    setMessages((current) => [...current, userMessage])
-
-    const workoutFollowUp = incompleteWorkoutPrompt(content, activeWorkout)
-    if (workoutFollowUp) {
-      setMessages((current) => [...current, appendAssistant(workoutFollowUp)])
-      return
-    }
-
-    if (isLogLocationQuestion(content) || shouldUseLocalCoach(content, { activeWorkout, todaysPlan })) {
-      const assistantMessage = runLocalCoachAction(content)
-      setMessages((current) => [...current, assistantMessage])
-      return
-    }
-
-    setThinking(true)
     try {
+      setInput("")
+      setQuickAction(null)
+      setAiError("")
+      setMessages((current) => [...current, userMessage])
+
+      const workoutFollowUp = incompleteWorkoutPrompt(content, activeWorkout)
+      if (workoutFollowUp) {
+        setMessages((current) => [...current, appendAssistant(workoutFollowUp)])
+        rememberSubmit = true
+        return
+      }
+
+      if (isLogLocationQuestion(content) || shouldUseLocalCoach(content, { activeWorkout, todaysPlan })) {
+        const assistantMessage = runLocalCoachAction(content)
+        setMessages((current) => [...current, assistantMessage])
+        rememberSubmit = true
+        return
+      }
+
+      setThinking(true)
+      startedThinking = true
       const coachResponse = await requestOpenAICoach({
         message: content,
         profile,
@@ -1204,6 +1258,7 @@ export default function Coach() {
       }
       const assistantMessage = applyOpenAICoachResponse(coachResponse)
       setMessages((current) => [...current, assistantMessage])
+      rememberSubmit = true
     } catch (error) {
       setAiError(error instanceof Error ? error.message : "Live coach unavailable.")
       setMessages((current) => [
@@ -1211,7 +1266,10 @@ export default function Coach() {
         appendAssistant("I couldn't reach the live coach just now, so I didn't log or change anything. Please retry in a moment."),
       ])
     } finally {
-      setThinking(false)
+      if (startedThinking) {
+        setThinking(false)
+      }
+      releaseSubmitGuard(submitGuardRef.current, guardKey, rememberSubmit)
     }
   }
 
