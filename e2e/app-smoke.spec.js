@@ -1443,6 +1443,162 @@ test("fragmented coach workout logs persist into Workouts after refresh", async 
   await expect(page.getByText(/1,?920kg/).first()).toBeVisible()
 })
 
+test("coach reconciles stale workout log actions into one corrected saved workout", async ({ page }) => {
+  await seedOnboardedProfile(page)
+  await page.route("**/api/coach", async (route) => {
+    const body = route.request().postDataJSON()
+    const message = String(body.message || "").toLowerCase()
+    const workoutSession = body.workoutSession || null
+
+    if (message.includes("bench press 80kg for 4 sets of 6")) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          reply: "I logged bench press 80kg for 4 sets of 6.",
+          actions: [
+            {
+              type: "log_workout",
+              exercise_name: "Bench Press",
+              workout_type: "Bench Press",
+              muscle_group: "chest",
+              sets: 4,
+              reps: 6,
+              weight_kg: 80,
+              duration_seconds: 0,
+            },
+          ],
+          warnings: [],
+          workout_session: {
+            ...workoutSession,
+            active: true,
+            workoutConversation: true,
+            readyToLog: true,
+            summary: "Bench Press 80kg for 4 sets of 6",
+            clarifyQuestion: "",
+          },
+          meal_session: {},
+        }),
+      })
+      return
+    }
+
+    if (message === "that workout" || message === "i just did") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          reply: "I logged bench press 80kg for 4 sets of 6.",
+          actions: [
+            {
+              type: "log_workout",
+              exercise_name: "Bench Press",
+              workout_type: "Bench Press",
+              muscle_group: "chest",
+              sets: 4,
+              reps: 6,
+              weight_kg: 80,
+              duration_seconds: 0,
+            },
+          ],
+          warnings: [],
+          workout_session: {
+            ...workoutSession,
+            alreadyLogged: true,
+            active: false,
+            readyToLog: false,
+            clarifyQuestion: "",
+          },
+          meal_session: {},
+        }),
+      })
+      return
+    }
+
+    if (message.includes("actually it was 5 reps")) {
+      expect(workoutSession?.persistedWorkoutId || "").toBeTruthy()
+      expect(workoutSession?.persistedSummary || "").toMatch(/bench press 80kg for 4 sets of 6/i)
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          reply: "I logged bench press 80kg for 4 sets of 5.",
+          actions: [
+            {
+              type: "log_workout",
+              exercise_name: "Bench Press",
+              workout_type: "Bench Press",
+              muscle_group: "chest",
+              sets: 4,
+              reps: 5,
+              weight_kg: 80,
+              duration_seconds: 0,
+            },
+          ],
+          warnings: [],
+          workout_session: {
+            ...workoutSession,
+            active: true,
+            readyToLog: true,
+            correctionRequested: true,
+            summary: "Bench Press 80kg for 4 sets of 5",
+            reps: 5,
+            clarifyQuestion: "",
+          },
+          meal_session: {},
+        }),
+      })
+      return
+    }
+
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        reply: "What exercise did you do?",
+        actions: [{ type: "clarify", message: "What exercise did you do?" }],
+        warnings: [],
+        workout_session: {
+          active: true,
+          workoutConversation: true,
+          readyToLog: false,
+          clarificationAttempts: 0,
+          clarificationCounts: {},
+          clarifyQuestion: "What exercise did you do?",
+          summary: "",
+          wantsLogging: true,
+        },
+        meal_session: {},
+      }),
+    })
+  })
+
+  await page.goto("/Coach")
+  const composer = page.getByPlaceholder(/log bench 80kg for 4 sets of 6/i)
+  for (const message of [
+    "bench press 80kg for 4 sets of 6",
+    "that workout",
+    "i just did",
+  ]) {
+    await composer.fill(message)
+    await page.getByRole("button", { name: /^Send$/i }).click()
+  }
+
+  await expect(page.getByText(/i already saved bench press 80kg for 4 sets of 6 in workouts/i).first()).toBeVisible()
+
+  await composer.fill("actually it was 5 reps")
+  await page.getByRole("button", { name: /^Send$/i }).click()
+  await expect(page.getByText(/updated your workout log: bench press for 4 sets of 5 at 80kg\./i)).toBeVisible()
+
+  await page.goto("/Workouts")
+  await page.reload()
+  const recentSessionsSection = page.locator("section").filter({ has: page.getByRole("heading", { name: /recent sessions/i }) }).first()
+  await expect(recentSessionsSection.getByText(/bench press/i).first()).toBeVisible()
+  await expect(page.getByText(/4 structured sets logged so far\./i).first()).toBeVisible()
+  await expect(page.getByText(/1,?600kg/).first()).toBeVisible()
+  await expect(page.getByText(/1,?920kg/)).toHaveCount(0)
+})
+
 test("logged workouts can be edited in place from Workouts and update volume", async ({ page }) => {
   const today = new Date().toISOString().slice(0, 10)
   await seedState(page, {

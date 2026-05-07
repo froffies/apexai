@@ -335,6 +335,50 @@ function mealMacrosMatch(left, right) {
   return ["calories", "protein_g", "carbs_g", "fat_g"].every((key) => Math.abs(coachNumberOrZero(left[key]) - coachNumberOrZero(right[key])) <= 1)
 }
 
+function buildWorkoutActionSummary(action, fallbackSummary = "") {
+  const label = String(action?.exercise_name || action?.workout_type || "").trim()
+  if (!label) return String(fallbackSummary || "").trim()
+  const durationMinutes = Math.round(coachNumberOrZero(action?.duration_seconds) / 60)
+  if (durationMinutes > 0) return `${durationMinutes} min ${label}`.trim()
+  const parts = [label]
+  if (coachNumberOrZero(action?.weight_kg) > 0) parts.push(`${coachNumberOrZero(action.weight_kg)}kg`)
+  const sets = Math.max(1, Math.round(coachNumberOrZero(action?.sets) || 1))
+  if (coachNumberOrZero(action?.reps) > 0) parts.push(`for ${sets} set${sets === 1 ? "" : "s"} of ${Math.round(coachNumberOrZero(action.reps))}`)
+  return parts.join(" ").trim()
+}
+
+function workoutSummariesEquivalent(left, right) {
+  const normalizedLeft = normalizeCoachComparableText(left)
+  const normalizedRight = normalizeCoachComparableText(right)
+  return Boolean(
+    normalizedLeft
+    && normalizedRight
+    && (
+      normalizedLeft === normalizedRight
+      || normalizedLeft.includes(normalizedRight)
+      || normalizedRight.includes(normalizedLeft)
+    )
+  )
+}
+
+function workoutMetricsMatch(persistedSets, action) {
+  const durationSeconds = coachNumberOrZero(action?.duration_seconds)
+  if (durationSeconds > 0) {
+    const persistedDuration = persistedSets.reduce((total, set) => total + coachNumberOrZero(set.duration_seconds), 0)
+    return Math.abs(persistedDuration - durationSeconds) <= 5
+  }
+
+  if (!Array.isArray(persistedSets) || !persistedSets.length) return false
+  const expectedSets = Math.max(1, Math.round(coachNumberOrZero(action?.sets) || 1))
+  const expectedReps = Math.round(coachNumberOrZero(action?.reps))
+  const expectedWeight = coachNumberOrZero(action?.weight_kg)
+  if (persistedSets.length !== expectedSets) return false
+  return persistedSets.every((set) =>
+    Math.round(coachNumberOrZero(set.reps)) === expectedReps
+    && Math.abs(coachNumberOrZero(set.weight_kg) - expectedWeight) <= 0.1
+  )
+}
+
 function resolvePersistedMealContext(currentSession, nextSession, meals) {
   const current = currentSession && typeof currentSession === "object" ? currentSession : null
   const next = nextSession && typeof nextSession === "object" ? nextSession : null
@@ -394,6 +438,74 @@ function normalizeMealPersistenceAction(action, currentSession, nextSession, mea
       ...normalizedAction,
       type: "update_meal_log",
       meal_id: context.persistedMealId,
+    },
+    duplicateSummary: "",
+  }
+}
+
+function resolvePersistedWorkoutContext(currentSession, nextSession, workouts, workoutSets) {
+  const current = currentSession && typeof currentSession === "object" ? currentSession : null
+  const next = nextSession && typeof nextSession === "object" ? nextSession : null
+  const persistedWorkoutId = String(next?.persistedWorkoutId || current?.persistedWorkoutId || "").trim()
+  const persistedWorkout = persistedWorkoutId ? workouts.find((workout) => workout.id === persistedWorkoutId) || null : null
+  const persistedWorkoutSets = persistedWorkoutId
+    ? workoutSets.filter((set) => set.session_id === persistedWorkoutId)
+    : []
+  const persistedSummary = String(next?.persistedSummary || current?.persistedSummary || persistedWorkout?.workout_type || "").trim()
+  const sessionSummary = String(next?.summary || current?.summary || persistedSummary).trim()
+  return {
+    persistedWorkoutId,
+    persistedWorkout,
+    persistedWorkoutSets,
+    persistedSummary,
+    sessionSummary,
+    correctionRequested: Boolean(next?.correctionRequested || current?.correctionRequested),
+  }
+}
+
+function normalizeWorkoutPersistenceAction(action, currentSession, nextSession, workouts, workoutSets) {
+  if (!action || typeof action !== "object") return { action, duplicateSummary: "" }
+
+  const context = resolvePersistedWorkoutContext(currentSession, nextSession, workouts, workoutSets)
+  const summary = buildWorkoutActionSummary(action, context.sessionSummary)
+  const label = String(action.exercise_name || action.workout_type || context.persistedWorkout?.workout_type || "").trim()
+  const normalizedAction = {
+    ...action,
+    exercise_name: label || action.exercise_name || action.workout_type || "Workout",
+    workout_type: label || action.workout_type || action.exercise_name || "Workout",
+  }
+
+  if (normalizedAction.type === "update_workout_log" && !normalizedAction.workout_id && context.persistedWorkoutId) {
+    return {
+      action: {
+        ...normalizedAction,
+        workout_id: context.persistedWorkoutId,
+      },
+      duplicateSummary: "",
+    }
+  }
+
+  if (normalizedAction.type !== "log_workout" || !context.persistedWorkoutId) {
+    return { action: normalizedAction, duplicateSummary: "" }
+  }
+
+  const sameSummaryAsPersisted = workoutSummariesEquivalent(summary, context.persistedSummary)
+  const sameMetricsAsPersisted = workoutMetricsMatch(context.persistedWorkoutSets, normalizedAction)
+  const shouldTreatAsExistingWorkout = context.correctionRequested || sameSummaryAsPersisted
+
+  if (!shouldTreatAsExistingWorkout) {
+    return { action: normalizedAction, duplicateSummary: "" }
+  }
+
+  if (!context.correctionRequested && sameSummaryAsPersisted && sameMetricsAsPersisted) {
+    return { action: null, duplicateSummary: context.persistedSummary || summary || normalizedAction.workout_type }
+  }
+
+  return {
+    action: {
+      ...normalizedAction,
+      type: "update_workout_log",
+      workout_id: context.persistedWorkoutId,
     },
     duplicateSummary: "",
   }
@@ -778,6 +890,7 @@ export default function Coach() {
     let latestLoggedWorkoutAction = null
     let latestUpdatedWorkoutAction = null
     let duplicateMealSummary = ""
+    let duplicateWorkoutSummary = ""
     const nextMealSession = coachResponse?.meal_session && typeof coachResponse.meal_session === "object"
       ? coachResponse.meal_session
       : null
@@ -788,10 +901,18 @@ export default function Coach() {
     const requestedWorkoutPersistence = (coachResponse.actions || []).some((action) => action?.type === "log_workout" || action?.type === "update_workout_log")
 
     for (const rawAction of coachResponse.actions || []) {
-      const { action, duplicateSummary } = rawAction?.type === "log_meal" || rawAction?.type === "update_meal_log"
+      const normalizedResult = rawAction?.type === "log_meal" || rawAction?.type === "update_meal_log"
         ? normalizeMealPersistenceAction(rawAction, mealSession, nextMealSession, meals)
-        : { action: rawAction, duplicateSummary: "" }
-      if (duplicateSummary && !duplicateMealSummary) duplicateMealSummary = duplicateSummary
+        : rawAction?.type === "log_workout" || rawAction?.type === "update_workout_log"
+          ? normalizeWorkoutPersistenceAction(rawAction, workoutSession, nextWorkoutSession, workouts, workoutSets)
+          : { action: rawAction, duplicateSummary: "" }
+      const { action, duplicateSummary } = normalizedResult
+      if ((rawAction?.type === "log_meal" || rawAction?.type === "update_meal_log") && duplicateSummary && !duplicateMealSummary) {
+        duplicateMealSummary = duplicateSummary
+      }
+      if ((rawAction?.type === "log_workout" || rawAction?.type === "update_workout_log") && duplicateSummary && !duplicateWorkoutSummary) {
+        duplicateWorkoutSummary = duplicateSummary
+      }
       if (!action) continue
 
       if (action.type === "update_targets") {
@@ -1014,6 +1135,8 @@ export default function Coach() {
     let replyText = coachResponse.reply
     if (duplicateMealSummary && !mealSaveSucceeded) {
       replyText = `I already saved ${duplicateMealSummary} in today's nutrition log. If you want to change it, tell me what to update.`
+    } else if (duplicateWorkoutSummary && !workoutSaveSucceeded) {
+      replyText = `I already saved ${duplicateWorkoutSummary} in Workouts. If you want to change it, tell me what to update.`
     } else if (requestedMealPersistence && !mealSaveSucceeded) {
       replyText = "I have the meal details, but I couldn't save it just now."
     } else if (requestedWorkoutPersistence && !workoutSaveSucceeded) {
