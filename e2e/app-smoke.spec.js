@@ -1006,7 +1006,7 @@ test("coach corrections still update a saved meal after redundant post-save foll
     if (message.includes("actually it was 18 fried eggs")) {
       expect(mealSession?.persistedMealId || "").toBeTruthy()
       expect(mealSession?.persistedSummary || "").toMatch(/17 fried eggs cooked in 100g salted butter/i)
-      expect(workoutSession).toBeNull()
+      expect(workoutSession && typeof workoutSession === "object").toBeTruthy()
       await route.fulfill({
         status: 200,
         contentType: "application/json",

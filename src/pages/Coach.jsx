@@ -1051,8 +1051,8 @@ export default function Coach() {
         recoveryLogs: recoveryLogs.slice(0, 6),
         activeWorkout,
         recentMessages: messages.slice(-20),
-        mealSession: hasMeaningfulMealSession(mealSession) ? mealSession : null,
-        workoutSession: hasMeaningfulWorkoutSession(workoutSession) ? workoutSession : null,
+        mealSession: hasMeaningfulMealSession(mealSession) ? mealSession : {},
+        workoutSession: hasMeaningfulWorkoutSession(workoutSession) ? workoutSession : {},
       })
       if (!coachResponse) {
         const assistantMessage = appendAssistant("I couldn't get a valid response from the live coach, so I didn't log or change anything. Please try again.")
