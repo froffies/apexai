@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react"
-import { clearAppRecords, getAppRecord, getCachedAppRecord, primeAppRecordCache, setAppRecord, writeAppRecordSync } from "@/lib/appStorage"
+import { clearAppRecords, getAppRecord, getCachedAppRecord, invalidateAppRecordCache, primeAppRecordCache, setAppRecord, writeAppRecordSync } from "@/lib/appStorage"
 import { syncKeyToCloud } from "@/lib/cloudSync"
 
 function readLegacyValue(key, initialValue) {
@@ -50,13 +50,19 @@ export function useLocalStorage(key, initialValue) {
       const storedValue = await getAppRecord(key, initialValue)
       if (!cancelled) setValue(storedValue)
     }
+    const handleStorageEvent = (event) => {
+      const changedKey = event?.detail?.key || event?.key || "*"
+      if (changedKey !== "*" && changedKey !== key) return
+      invalidateAppRecordCache(changedKey)
+      void syncValue()
+    }
     void syncValue()
-    window.addEventListener("storage", syncValue)
-    window.addEventListener("apexai-storage", syncValue)
+    window.addEventListener("storage", handleStorageEvent)
+    window.addEventListener("apexai-storage", handleStorageEvent)
     return () => {
       cancelled = true
-      window.removeEventListener("storage", syncValue)
-      window.removeEventListener("apexai-storage", syncValue)
+      window.removeEventListener("storage", handleStorageEvent)
+      window.removeEventListener("apexai-storage", handleStorageEvent)
     }
   }, [initialValue, key])
 

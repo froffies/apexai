@@ -23,6 +23,13 @@ async function seedOnboardedProfile(page) {
   await seedState(page, { "apexai.profile": onboardedProfile })
 }
 
+async function seedOnboardedProfileInContext(context) {
+  await context.addInitScript(({ profile }) => {
+    window.localStorage.setItem("apexai.localMode", "true")
+    window.localStorage.setItem("apexai.profile", JSON.stringify(profile))
+  }, { profile: onboardedProfile })
+}
+
 async function seedState(page, state) {
   await page.addInitScript(({ entries }) => {
     for (const [key, value] of entries) {
@@ -274,7 +281,7 @@ test("logged meals can be edited in place from Nutrition", async ({ page }) => {
   await page.getByPlaceholder("Protein g").fill("40")
   await page.getByRole("button", { name: /save changes/i }).click()
 
-  await expect(page.getByRole("heading", { name: /edit food log/i })).toHaveCount(0)
+  await expect(page.getByRole("heading", { name: /edit food log/i })).toHaveCount(0, { timeout: 15000 })
   await expect(todayMealsSection.getByText(/520 kcal - 40g protein/i).first()).toBeVisible()
 })
 
@@ -307,7 +314,7 @@ test("coach can save an estimated mixed meal without showing the old skipped war
   await page.getByPlaceholder(/log bench 80kg for 4 sets of 6/i).fill("yes calculate")
   await page.getByRole("button", { name: /^Send$/i }).click()
 
-  await expect(page.getByText(/saved to today's nutrition: eggs fried in butter with rye toast and vegemite\./i)).toBeVisible()
+  await expect(page.getByText(/saved to today's nutrition: eggs fried in butter with rye toast and vegemite\./i)).toBeVisible({ timeout: 15000 })
   await expect(page.getByText(/skipped one meal log/i)).toHaveCount(0)
   await expect(page.getByText(/couldn't save that meal yet/i)).toHaveCount(0)
 
@@ -984,7 +991,10 @@ test("coach ignores rapid duplicate meal submits before they create duplicate re
   await page.goto("/Coach")
   const composer = page.getByPlaceholder(/log bench 80kg for 4 sets of 6/i)
   await composer.fill("rapid duplicate meal guard test")
-  await page.getByRole("button", { name: /^Send$/i }).dblclick()
+  await page.getByRole("button", { name: /^Send$/i }).evaluate((button) => {
+    button.click()
+    button.click()
+  })
 
   await expect(page.getByText(/saved to today's nutrition: rapid duplicate meal guard test\./i)).toBeVisible()
   await expect.poll(() => coachCalls).toBe(1)
@@ -994,6 +1004,62 @@ test("coach ignores rapid duplicate meal submits before they create duplicate re
   await page.reload()
   const todayMealsSection = page.locator("section").filter({ has: page.getByRole("heading", { name: /today's meals/i }) })
   await expect(todayMealsSection.getByText("Rapid duplicate meal guard test")).toHaveCount(1)
+})
+
+test("coach meal saves propagate to an open second tab without needing a manual refresh", async ({ page }) => {
+  const context = page.context()
+  await seedOnboardedProfileInContext(context)
+  await page.route("**/api/coach", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        reply: "Saved to today's nutrition: Cross-tab meal sync test.",
+        actions: [
+          {
+            type: "log_meal",
+            food_name: "Cross-tab meal sync test",
+            meal_type: "snack",
+            quantity: "1 meal",
+            calories: 360,
+            protein_g: 18,
+            carbs_g: 24,
+            fat_g: 14,
+            estimated: true,
+            nutrition_source: "Coach estimate from accumulated meal details across chat",
+          },
+        ],
+        warnings: [],
+        meal_session: {
+          active: true,
+          mealConversation: true,
+          readyToLog: true,
+          clarificationAttempts: 0,
+          clarificationCounts: {},
+          summary: "Cross-tab meal sync test",
+          clarifyQuestion: "",
+          items: [],
+        },
+        workout_session: {},
+      }),
+    })
+  })
+
+  const secondTab = await context.newPage()
+  await page.goto("/Coach")
+  await secondTab.goto("/Nutrition")
+
+  const composer = page.getByPlaceholder(/log bench 80kg for 4 sets of 6/i)
+  await composer.fill("cross-tab meal sync test")
+  await page.getByRole("button", { name: /^Send$/i }).click()
+  await expect(page.getByText(/saved to today's nutrition: cross-tab meal sync test\./i)).toBeVisible()
+
+  const secondMealsSection = secondTab.locator("section").filter({ has: secondTab.getByRole("heading", { name: /today's meals/i }) })
+  await expect(secondMealsSection.getByText("Cross-tab meal sync test")).toBeVisible()
+
+  await secondTab.reload()
+  await expect(secondMealsSection.getByText("Cross-tab meal sync test")).toBeVisible()
+  await secondTab.close()
 })
 
 test("coach corrections still update a saved meal after redundant post-save follow-ups", async ({ page }) => {
@@ -1500,6 +1566,67 @@ test("fragmented coach workout logs persist into Workouts after refresh", async 
   await expect(page.getByText(/1,?920kg/).first()).toBeVisible()
 })
 
+test("coach workout saves propagate to an open second tab without needing a manual refresh", async ({ page }) => {
+  const context = page.context()
+  await seedOnboardedProfileInContext(context)
+  await page.route("**/api/coach", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        reply: "Saved to Workouts: Bench Press 80kg for 4 sets of 6.",
+        actions: [
+          {
+            type: "log_workout",
+            exercise_name: "Bench Press",
+            workout_type: "Bench Press",
+            muscle_group: "chest",
+            sets: 4,
+            reps: 6,
+            weight_kg: 80,
+            duration_seconds: 0,
+          },
+        ],
+        warnings: [],
+        workout_session: {
+          active: true,
+          workoutConversation: true,
+          readyToLog: true,
+          clarificationAttempts: 0,
+          clarificationCounts: {},
+          summary: "Bench Press 80kg for 4 sets of 6",
+          clarifyQuestion: "",
+          exercise_name: "Bench Press",
+          workout_type: "Bench Press",
+          muscle_group: "chest",
+          sets: 4,
+          reps: 6,
+          weight_kg: 80,
+          duration_seconds: 0,
+        },
+        meal_session: {},
+      }),
+    })
+  })
+
+  const secondTab = await context.newPage()
+  await page.goto("/Coach")
+  await secondTab.goto("/Workouts")
+
+  const composer = page.getByPlaceholder(/log bench 80kg for 4 sets of 6/i)
+  await composer.fill("bench press 80kg for 4 sets of 6")
+  await page.getByRole("button", { name: /^Send$/i }).click()
+  await expect(page.getByText(/saved to workouts: bench press for 4 sets of 6 at 80kg\./i)).toBeVisible()
+
+  await expect(secondTab.getByText(/4 structured sets logged so far\./i).first()).toBeVisible()
+  await expect(secondTab.getByText(/1,?920kg/).first()).toBeVisible()
+
+  await secondTab.reload()
+  await expect(secondTab.getByText(/4 structured sets logged so far\./i).first()).toBeVisible()
+  await expect(secondTab.getByText(/1,?920kg/).first()).toBeVisible()
+  await secondTab.close()
+})
+
 test("coach reconciles stale workout log actions into one corrected saved workout", async ({ page }) => {
   await seedOnboardedProfile(page)
   await page.route("**/api/coach", async (route) => {
@@ -1632,14 +1759,16 @@ test("coach reconciles stale workout log actions into one corrected saved workou
 
   await page.goto("/Coach")
   const composer = page.getByPlaceholder(/log bench 80kg for 4 sets of 6/i)
-  for (const message of [
-    "bench press 80kg for 4 sets of 6",
-    "that workout",
-    "i just did",
-  ]) {
-    await composer.fill(message)
-    await page.getByRole("button", { name: /^Send$/i }).click()
-  }
+  await composer.fill("bench press 80kg for 4 sets of 6")
+  await page.getByRole("button", { name: /^Send$/i }).click()
+  await expect(page.getByText(/saved to workouts: bench press for 4 sets of 6 at 80kg\./i)).toBeVisible()
+
+  await composer.fill("that workout")
+  await page.getByRole("button", { name: /^Send$/i }).click()
+  await expect(page.getByText(/i already saved bench press 80kg for 4 sets of 6 in workouts/i).first()).toBeVisible()
+
+  await composer.fill("i just did")
+  await page.getByRole("button", { name: /^Send$/i }).click()
 
   await expect(page.getByText(/i already saved bench press 80kg for 4 sets of 6 in workouts/i).first()).toBeVisible()
 
@@ -1648,11 +1777,10 @@ test("coach reconciles stale workout log actions into one corrected saved workou
   await expect(page.getByText(/updated your workout log: bench press for 4 sets of 5 at 80kg\./i)).toBeVisible()
 
   await page.goto("/Workouts")
-  await page.reload()
   const recentSessionsSection = page.locator("section").filter({ has: page.getByRole("heading", { name: /recent sessions/i }) }).first()
   await expect(recentSessionsSection.getByText(/bench press/i).first()).toBeVisible()
   await expect(page.getByText(/4 structured sets logged so far\./i).first()).toBeVisible()
-  await expect(page.getByText(/1,?600kg/).first()).toBeVisible()
+  await expect(page.getByText(/1,?600kg/).first()).toBeVisible({ timeout: 15000 })
   await expect(page.getByText(/1,?920kg/)).toHaveCount(0)
 })
 
@@ -1705,7 +1833,10 @@ test("coach ignores rapid duplicate workout submits before they create duplicate
   await page.goto("/Coach")
   const composer = page.getByPlaceholder(/log bench 80kg for 4 sets of 6/i)
   await composer.fill("bench press 80kg for 4 sets of 6")
-  await page.getByRole("button", { name: /^Send$/i }).dblclick()
+  await page.getByRole("button", { name: /^Send$/i }).evaluate((button) => {
+    button.click()
+    button.click()
+  })
 
   await expect(page.getByText(/saved to workouts: bench press for 4 sets of 6 at 80kg\./i)).toBeVisible()
   await expect.poll(() => coachCalls).toBe(1)

@@ -18,6 +18,14 @@ export function getCachedAppRecord(key) {
   return memoryRecords.get(key)
 }
 
+export function invalidateAppRecordCache(key = "*") {
+  if (!key || key === "*") {
+    memoryRecords.clear()
+    return
+  }
+  memoryRecords.delete(key)
+}
+
 function canUseIndexedDb() {
   return typeof window !== "undefined" && "indexedDB" in window
 }
