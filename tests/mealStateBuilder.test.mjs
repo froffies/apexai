@@ -223,3 +223,61 @@ test("meal session logs mixed same-food preparations without inventing bogus wat
   assert.equal(session.items.filter((item) => !item.attached_to).length, 2)
   assert.equal(session.items.filter((item) => item.base_name === "water").length, 0)
 })
+
+test("meal session keeps grouped totals, split preparations, and targeted cooking additions together", () => {
+  const conversation = [
+    user("i had egg"),
+    assistant("How many eggs did you have?"),
+    user("18 total, 12 fried eggs, 4 hardboiled eggs and 2 raw"),
+    assistant("What were the eggs cooked in?"),
+    user("the fried eggs were cooking in 100g of unsalted butter"),
+    assistant("What were the eggs cooked in?"),
+    user("i told you"),
+  ]
+
+  const { snapshots, session } = replayMealConversation(conversation)
+
+  assert.equal(snapshots[1].session.clarifyQuestion, "What were the eggs cooked in?")
+  assert.equal(snapshots[2].session.readyToLog, true)
+  assert.equal(snapshots[2].session.clarifyQuestion, "")
+  assert.equal(session.summary, "12 fried eggs cooked in 100g unsalted butter, plus 4 hard boiled eggs, plus 2 raw eggs")
+  assert.equal(session.items.filter((item) => !item.attached_to).length, 3)
+  assert.equal(session.items.filter((item) => item.base_name === "unsalted butter").length, 1)
+  assert.equal(session.items.find((item) => item.base_name === "unsalted butter")?.attached_to, "egg::fried")
+  assert.equal(session.declaredTotals.length, 1)
+  assert.doesNotMatch(session.summary, /\b1l\b/i)
+})
+
+test("meal session supports grouped quantity splits for another food with preparation-specific oil", () => {
+  const { session } = replayMealConversation([
+    user("I had 500g chicken total, 300g grilled, 200g fried in 20g olive oil"),
+  ])
+
+  assert.ok(session)
+  assert.equal(session.readyToLog, true)
+  assert.equal(session.summary, "300g grilled chicken, plus 200g fried chicken cooked in 20g olive oil")
+  assert.equal(session.items.filter((item) => !item.attached_to).length, 2)
+  assert.equal(session.items.find((item) => item.base_name === "olive oil")?.attached_to, "chicken::fried")
+})
+
+test("meal session supports grouped split carbs without collapsing fried and plain servings together", () => {
+  const { session } = replayMealConversation([
+    user("I had 2 cups rice total, 1 cup plain, 1 cup fried with 10g oil"),
+  ])
+
+  assert.ok(session)
+  assert.equal(session.readyToLog, true)
+  assert.equal(session.summary, "1 cup plain rice, plus 1 cup fried rice cooked in 10g oil")
+  assert.equal(session.items.filter((item) => !item.attached_to).length, 2)
+  assert.equal(session.items.find((item) => item.base_name === "oil")?.attached_to, "rice::fried")
+})
+
+test("meal session asks one useful clarification when grouped totals do not add up", () => {
+  const { session } = replayMealConversation([
+    user("I had 18 eggs total, 12 fried eggs and 4 hardboiled eggs"),
+  ])
+
+  assert.ok(session)
+  assert.equal(session.readyToLog, false)
+  assert.equal(session.clarifyQuestion, "You said 18 eggs total, but I only have 16 eggs accounted for. What should the split be?")
+})

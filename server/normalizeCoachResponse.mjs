@@ -106,7 +106,7 @@ export function normalizeCoachResponse(value, context = {}) {
     forcedReply ||
     originalReply ||
     summarizeCoachAction(actions[0]) ||
-    "I'm here. Tell me what you want to log or plan next."
+    "Tell me what happened or what you want to change, and I'll help you sort the next move."
 
   if (replyClaimsPersistence(reply) && !hasPersistenceAction && !alreadyLoggedReply) {
     reply = "I have the details, but I couldn't save it just now."

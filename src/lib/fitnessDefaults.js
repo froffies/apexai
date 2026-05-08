@@ -184,20 +184,20 @@ export function coachReply(message, { profile, totals, todaysWorkouts }) {
   const text = message.toLowerCase()
   if (/^(hi|hello|hey|good morning|good afternoon|good evening)\b/.test(text)) {
     const name = profile?.name?.trim() || "there"
-    return `Hey ${name}. I can sort today's workout, build a meal plan, check recovery, or map your week.`
+    return `Hey ${name}. What do you want to sort out first today?`
   }
   if (text.includes("protein") || text.includes("macro")) {
     const remaining = Math.max(0, numberValue(profile.protein_g) - totals.protein_g)
-    return `You have ${remaining}g protein left today. A simple next meal: lean meat or tofu, rice or potatoes, and a vegetable you actually like.`
+    return `You’ve got about ${remaining}g of protein left today. The simplest fix is one solid serve of lean protein plus an easy carb you’ll actually eat.`
   }
   if (text.includes("workout") || text.includes("train")) {
-    if (todaysWorkouts.length) return "You already logged training today. Keep any extra work light: walking, mobility, or easy zone 2."
-    return `For your ${goalLabel(profile.goal).toLowerCase()} goal, start with 3 compound lifts, 2 accessories, and stop 1-2 reps before failure.`
+    if (todaysWorkouts.length) return "You’ve already logged training today. If you want extra work, keep it light and easy to recover from."
+    return `For your ${goalLabel(profile.goal).toLowerCase()} goal, I’d keep today simple: a few big lifts, a bit of accessory work, and leave a rep or two in reserve.`
   }
   if (text.includes("weight") || text.includes("progress")) {
-    return "Use a 7-day trend, not one weigh-in. Log weight, waist, and a short note so we can separate water swings from actual progress."
+    return "Judge progress from the weekly trend, not one weigh-in. Weight, waist, and a short note give you a much cleaner read than scale noise alone."
   }
-  return "Tell me one concrete thing to do next: build today's workout, create today's meal plan, log a meal, log a workout, or plan the week."
+  return "Give me the one thing you want to sort out first, and I’ll help you work through it."
 }
 
 export function weeklyWorkoutCount(workouts) {

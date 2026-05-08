@@ -11,7 +11,6 @@ import {
   buildRecoveryAdjustedWorkoutPlan,
   buildWeeklyTrainingPlan,
   isMealPlanRequest,
-  isProgressionQuestion,
   isShowMealPlanRequest,
   isShowWorkoutRequest,
   isWorkoutPlanRequest,
@@ -48,7 +47,7 @@ function createStarterMessage() {
   return {
     id: "chat_welcome",
     role: "assistant",
-    content: "Tell me what you did or what you need. I can log completed meals and workouts, build or edit today's plan, guide an active session, update targets, and answer coaching questions.",
+    content: "Tell me what happened today, what you ate, what you trained, or what you want to change, and I'll help you sort the next move.",
     timestamp: new Date().toISOString(),
   }
 }
@@ -212,6 +211,108 @@ function formatMealPlanReply(plan) {
   const lines = plan.meals.map((meal) => `${mealTypeLabel(meal.meal_type)}: ${meal.food_name} (${meal.quantity})`)
   const calories = plan.meals.reduce((total, meal) => total + Number(meal.calories || 0), 0)
   return `Here’s your meal plan for ${plan.date || "today"}.\n${lines.join("\n")}\n\nTotal calories: ${Math.round(calories)}.`
+}
+
+function buildCoachContextPayload({
+  today,
+  profile,
+  totals,
+  todaysWorkouts,
+  todaysPlan,
+  todaysMealPlan,
+  activeWorkout,
+  currentActiveExercise,
+  activeSummary,
+  latestRecovery,
+  readiness,
+  progressionBlock,
+}) {
+  const remainingCalories = Math.max(0, Math.round(Number(profile?.daily_calories || 0) - Number(totals?.calories || 0)))
+  const remainingProtein = Math.max(0, Math.round(Number(profile?.protein_g || 0) - Number(totals?.protein_g || 0)))
+  const remainingCarbs = Math.max(0, Math.round(Number(profile?.carbs_g || 0) - Number(totals?.carbs_g || 0)))
+  const remainingFat = Math.max(0, Math.round(Number(profile?.fat_g || 0) - Number(totals?.fat_g || 0)))
+
+  return {
+    today,
+    profile: {
+      name: profile?.name || "",
+      goal: profile?.goal || "",
+      split_type: profile?.split_type || "",
+      locale: profile?.locale || "AU",
+      training_days_per_week: Number(profile?.training_days_per_week || 0),
+      target_weight_kg: Number(profile?.target_weight_kg || 0),
+      daily_calories: Math.round(Number(profile?.daily_calories || 0)),
+      protein_g: Math.round(Number(profile?.protein_g || 0)),
+      carbs_g: Math.round(Number(profile?.carbs_g || 0)),
+      fat_g: Math.round(Number(profile?.fat_g || 0)),
+    },
+    nutrition_today: {
+      calories_logged: Math.round(Number(totals?.calories || 0)),
+      protein_g_logged: Math.round(Number(totals?.protein_g || 0)),
+      carbs_g_logged: Math.round(Number(totals?.carbs_g || 0)),
+      fat_g_logged: Math.round(Number(totals?.fat_g || 0)),
+      calories_remaining: remainingCalories,
+      protein_g_remaining: remainingProtein,
+      carbs_g_remaining: remainingCarbs,
+      fat_g_remaining: remainingFat,
+    },
+    workout_today: {
+      sessions_logged: todaysWorkouts.length,
+      latest_session_title: todaysWorkouts[0]?.workout_type || "",
+      active_session: activeWorkout?.id ? {
+        name: activeWorkout.name,
+        completed_sets: activeSummary.completedSets,
+        total_sets: activeSummary.totalSets,
+        current_exercise: currentActiveExercise?.name || "",
+        current_target: currentActiveExercise?.setsReps || "",
+      } : null,
+    },
+    current_workout_plan: todaysPlan ? {
+      title: todaysPlan.title,
+      status: todaysPlan.status || "planned",
+      exercises: (todaysPlan.exercises || []).slice(0, 8).map((exercise) => ({
+        name: exercise.name,
+        muscle: exercise.muscle || "",
+        setsReps: exercise.setsReps || "",
+      })),
+    } : null,
+    current_meal_plan: todaysMealPlan ? {
+      title: todaysMealPlan.title,
+      meals: (todaysMealPlan.meals || []).slice(0, 6).map((meal) => ({
+        meal_type: meal.meal_type,
+        food_name: meal.food_name,
+        quantity: meal.quantity,
+        calories: Math.round(Number(meal.calories || 0)),
+      })),
+    } : null,
+    recovery: latestRecovery ? {
+      readiness: latestRecovery.readiness || "",
+      sleep_hours: Number(latestRecovery.sleep_hours || 0),
+      soreness: Number(latestRecovery.soreness || 0),
+      energy: Number(latestRecovery.energy || 0),
+      stress: Number(latestRecovery.stress || 0),
+      summary: readiness?.text || "",
+    } : null,
+    progression: progressionBlock ? {
+      title: progressionBlock.title || "",
+      summary: progressionBlock.summary || "",
+      adjustments: Array.isArray(progressionBlock.adjustments) ? progressionBlock.adjustments.slice(0, 2) : [],
+    } : null,
+  }
+}
+
+function formatCoachRequestError(error) {
+  const message = String(error instanceof Error ? error.message : error || "").toLowerCase()
+  if (message.includes("authorization") || message.includes("token")) {
+    return "Your session has expired. Sign in again and I'll pick this back up."
+  }
+  if (message.includes("timed out") || message.includes("abort")) {
+    return "The live coach took too long to reply, so I left your data alone. Try that again in a moment."
+  }
+  if (message.includes("unavailable") || message.includes("503")) {
+    return "The live coach is unavailable right now, so I left your data alone. Try again shortly."
+  }
+  return "I couldn't reach the live coach just now, so I left your data alone. Try again in a moment."
 }
 
 function renderMessageLine(line, lineIndex) {
@@ -819,23 +920,16 @@ export default function Coach() {
       const weeklyPlan = buildWeeklyTrainingPlan(profile, workoutSets, workouts, exercises, workoutPlans, recoveryLogs)
       setWorkoutPlans((current) => mergeWeeklyTrainingPlan(current, weeklyPlan.plans))
       const summary = weeklyPlan.plans.map((plan) => `${plan.date}: ${plan.title}`).join("\n")
-      return appendAssistant(`I rebuilt your next 7 days of training.${weeklyPlan.missedCount ? ` Reshuffled ${weeklyPlan.missedCount} missed session${weeklyPlan.missedCount === 1 ? "" : "s"}.` : ""}\n\n${summary}`, { plan: weeklyPlan.plans[0] || null })
-    }
-
-    if (isProgressionQuestion(content)) {
-      const plateauSummary = progressionBlock.plateaus.length
-        ? ` Plateau watch: ${progressionBlock.plateaus.map((item) => item.exerciseName).join(", ")}.`
-        : ""
-      return appendAssistant(`${progressionBlock.title}: ${progressionBlock.summary}${plateauSummary} Next move: ${progressionBlock.adjustments[0]}`)
+      return appendAssistant(`I rebuilt the next 7 days around what you've already done.${weeklyPlan.missedCount ? ` I also reshuffled ${weeklyPlan.missedCount} missed session${weeklyPlan.missedCount === 1 ? "" : "s"}.` : ""}\n\n${summary}`, { plan: weeklyPlan.plans[0] || null })
     }
 
     if (isShowWorkoutRequest(content)) {
-      if (!todaysPlan) return appendAssistant("I don't have a workout planned yet. Ask me to build today's workout and I'll create one.")
-      return appendAssistant(`Here’s your workout for ${todaysPlan.date || "today"}. You can review it below or start it when you're ready.`, { plan: todaysPlan })
+      if (!todaysPlan) return appendAssistant("I haven't mapped today's workout yet. Ask me to build it and I'll sort it out.")
+      return appendAssistant(`Here’s the workout I’ve got for ${todaysPlan.date || "today"}. Review it below or start when you're ready.`, { plan: todaysPlan })
     }
 
     if (isShowMealPlanRequest(content)) {
-      if (!todaysMealPlan) return appendAssistant("I don't have a meal plan ready yet. Ask me to create today's meal plan and I'll sort it out.")
+      if (!todaysMealPlan) return appendAssistant("I haven't mapped today's meals yet. Ask me to build today's meal plan and I'll put one together.")
       return appendAssistant(formatMealPlanReply(todaysMealPlan))
     }
 
@@ -847,7 +941,7 @@ export default function Coach() {
     }
 
     if (/(begin|start).*(workout|session)|let'?s start/.test(lower)) {
-      if (!todaysPlan) return appendAssistant("I don't have a workout ready yet. Ask me to build today's workout first.")
+      if (!todaysPlan) return appendAssistant("I don't have a workout ready to start yet. Ask me to build one first and I'll line it up.")
       const session = startPlannedWorkout(todaysPlan)
       if (!session) return appendAssistant("I found the workout shell, but it has no exercises yet. I'll rebuild it if you ask for today's workout again.")
       const nextExercise = session.exercises[0]
@@ -864,13 +958,13 @@ export default function Coach() {
     if (isWorkoutPlanRequest(content)) {
       const plan = buildRecoveryAdjustedWorkoutPlan(profile, workoutSets, workouts, exercises, latestRecovery, progress, recoveryLogs)
       setWorkoutPlans((current) => upsertWorkoutPlan(current, plan))
-      return appendAssistant("I built today's workout and added it to Workouts. You can edit it below or begin when you're ready.", { plan })
+      return appendAssistant("I built today's workout and added it to Workouts. You can tweak it below or start when you're ready.", { plan })
     }
 
     if (isMealPlanRequest(content)) {
       const plan = buildMealPlan(profile)
       setMealPlans((current) => upsertMealPlan(current, plan))
-      return appendAssistant(`I created today's meal plan from the verified Australian catalogue.\n\n${formatMealPlanReply(plan)}`)
+      return appendAssistant(`I mapped out today's meals from the verified Australian catalogue.\n\n${formatMealPlanReply(plan)}`)
     }
 
     const workoutLog = parseWorkoutLog(content)
@@ -1239,6 +1333,20 @@ export default function Coach() {
       const coachResponse = await requestOpenAICoach({
         message: content,
         profile,
+        coachContext: buildCoachContextPayload({
+          today,
+          profile,
+          totals,
+          todaysWorkouts,
+          todaysPlan,
+          todaysMealPlan,
+          activeWorkout,
+          currentActiveExercise,
+          activeSummary,
+          latestRecovery,
+          readiness,
+          progressionBlock,
+        }),
         meals: meals.slice(0, 12),
         workouts: workouts.slice(0, 12),
         workoutSets: workoutSets.slice(0, 24),
@@ -1251,8 +1359,8 @@ export default function Coach() {
         workoutSession: hasMeaningfulWorkoutSession(workoutSession) ? workoutSession : {},
       })
       if (!coachResponse) {
-        const assistantMessage = appendAssistant("I couldn't get a valid response from the live coach, so I didn't log or change anything. Please try again.")
-        setAiError("Live coach returned an invalid response.")
+        const assistantMessage = appendAssistant("I couldn't get a clean answer from the live coach, so I left your data alone. Please try that again.")
+        setAiError("The live coach sent back something unusable, so nothing changed.")
         setInput(content)
         setMessages((current) => [...current, assistantMessage])
         return
@@ -1261,11 +1369,11 @@ export default function Coach() {
       setMessages((current) => [...current, assistantMessage])
       rememberSubmit = true
     } catch (error) {
-      setAiError(error instanceof Error ? error.message : "Live coach unavailable.")
+      setAiError(formatCoachRequestError(error))
       setInput(content)
       setMessages((current) => [
         ...current,
-        appendAssistant("I couldn't reach the live coach just now, so I didn't log or change anything. Please retry in a moment."),
+        appendAssistant("I couldn't reach the live coach just now, so I left your data alone. Please retry in a moment."),
       ])
     } finally {
       if (startedThinking) {
@@ -1354,7 +1462,7 @@ export default function Coach() {
       <PageHeader
         eyebrow="Coach"
         title="Your training coach"
-        subtitle="Plan training, log completed work, adjust nutrition, and guide sessions from one conversation."
+        subtitle="Talk through training, meals, recovery, and corrections in one place without losing the saved details."
         action={messages.length > 1 ? (
           <button type="button" onClick={clearConversation} className="flex min-h-11 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700">
             <RotateCcw size={16} /> Clear chat
@@ -1365,7 +1473,7 @@ export default function Coach() {
       <SectionCard
         tone="subtle"
         title="Start with a clean prompt"
-        description="The coach works best when you tell it what happened or what you want changed. Tap a card, then choose the exact action."
+        description="Tell it what happened, what feels off, or what you want to change. Use a card if you want a fast starting point."
       >
         <div className="grid gap-3 md:grid-cols-2">
           {promptCards.map((card) => (
@@ -1385,7 +1493,7 @@ export default function Coach() {
       <section className="flex h-[65vh] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         {(thinking || aiError) && (
           <div className={`border-b px-4 py-2 text-sm ${aiError ? "border-amber-200 bg-amber-50 text-amber-800" : "border-indigo-100 bg-indigo-50 text-indigo-700"}`}>
-            {thinking ? "Coach is pulling your latest details together..." : aiError}
+            {thinking ? "Coach is thinking through that..." : aiError}
           </div>
         )}
         <div className="flex-1 space-y-4 overflow-y-auto p-4">

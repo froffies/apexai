@@ -300,11 +300,11 @@ export function summarizeCoachAction(action) {
   if (!action || typeof action !== "object") return ""
 
   if (action.type === "create_workout_plan") {
-    return `I mapped out ${String(action.title || "your workout").trim()} and attached it below.`
+    return `I mapped out ${String(action.title || "your workout").trim()} and added it below.`
   }
 
   if (action.type === "create_meal_plan") {
-    return "I put together a meal plan and saved it for today."
+    return "I mapped out today's meals and saved the plan for you."
   }
 
   if (action.type === "log_workout") {
@@ -470,5 +470,5 @@ export function buildDeterministicWorkoutAction({ workoutSession, explicitAction
 
 export function formatDeterministicMealAnswer(action) {
   if (!action) return ""
-  return `That comes to about ${Math.round(Number(action.calories) || 0)} kcal, ${Math.round(Number(action.protein_g) || 0)}g protein, ${Math.round(Number(action.carbs_g) || 0)}g carbs, and ${Math.round(Number(action.fat_g) || 0)}g fat. Tell me if you want me to save it.`
+  return `That comes to about ${Math.round(Number(action.calories) || 0)} kcal, ${Math.round(Number(action.protein_g) || 0)}g protein, ${Math.round(Number(action.carbs_g) || 0)}g carbs, and ${Math.round(Number(action.fat_g) || 0)}g fat. If you want it saved, tell me to log it.`
 }

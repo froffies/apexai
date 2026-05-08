@@ -74,6 +74,9 @@ function normalizeMealSession(session = {}) {
     ...emptyMealSessionState(),
     ...session,
     clarificationCounts: { ...(session?.clarificationCounts || {}) },
+    declaredTotals: Array.isArray(session?.declaredTotals)
+      ? session.declaredTotals.map((entry) => ({ ...entry }))
+      : [],
     items: Array.isArray(session?.items) ? session.items.map((item) => ({
       ...item,
       quantity: item?.quantity ? { ...item.quantity } : null,
@@ -184,6 +187,7 @@ function seedLegacyMealSession(session) {
     mealConversation: true,
     lastMainKey: session.lastMainKey || "",
     lastDrinkKey: session.lastDrinkKey || "",
+    declaredTotals: Array.isArray(session.declaredTotals) ? session.declaredTotals.map((entry) => ({ ...entry })) : [],
   }
 }
 

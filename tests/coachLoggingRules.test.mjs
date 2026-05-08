@@ -89,6 +89,64 @@ test("coach logging rules can estimate a deterministic meal action from session 
   assert.ok(action.fat_g > 150)
 })
 
+test("coach logging rules preserve grouped same-food preparations and all related macros", () => {
+  const action = buildDeterministicMealAction({
+    mealSession: {
+      readyToLog: true,
+      alreadyLogged: false,
+      summary: "12 fried eggs cooked in 100g unsalted butter, plus 4 hard boiled eggs, plus 2 raw eggs",
+      persistedMealId: "",
+      correctionRequested: false,
+      items: [
+        {
+          baseName: "egg",
+          label: "Eggs",
+          category: "food",
+          quantity: { amount: 12, unit: "egg", text: "12 eggs" },
+          preparation: ["fried"],
+          exclusions: [],
+        },
+        {
+          baseName: "egg",
+          label: "Eggs",
+          category: "food",
+          quantity: { amount: 4, unit: "egg", text: "4 eggs" },
+          preparation: ["hard boiled"],
+          exclusions: [],
+        },
+        {
+          baseName: "egg",
+          label: "Eggs",
+          category: "food",
+          quantity: { amount: 2, unit: "egg", text: "2 eggs" },
+          preparation: ["raw"],
+          exclusions: [],
+        },
+        {
+          baseName: "unsalted butter",
+          label: "Unsalted Butter",
+          category: "ingredient",
+          quantity: { amount: 100, unit: "g", text: "100g" },
+          preparation: ["unsalted"],
+          exclusions: [],
+          attachedTo: "egg::fried",
+          relation: "cooked_in",
+        },
+      ],
+    },
+    explicitActions: [],
+    reply: "",
+    prompt: "i had egg",
+  })
+
+  assert.ok(action)
+  assert.equal(action.type, "log_meal")
+  assert.equal(action.food_name, "12 fried eggs cooked in 100g unsalted butter, plus 4 hard boiled eggs, plus 2 raw eggs")
+  assert.ok(action.calories > 1900)
+  assert.ok(action.protein_g > 110)
+  assert.ok(action.fat_g > 160)
+})
+
 test("coach logging rules upgrade deterministic meal actions into updates when correcting a persisted meal", () => {
   const action = buildDeterministicMealAction({
     mealSession: {
@@ -159,7 +217,7 @@ test("coach logging rules can build a deterministic macro answer without creatin
 
   assert.ok(action)
   assert.equal(action.type, "log_meal")
-  assert.match(formatDeterministicMealAnswer(action), /tell me if you want me to save it/i)
+  assert.match(formatDeterministicMealAnswer(action), /if you want it saved, tell me to log it/i)
 })
 
 test("coach logging rules can repeat a recent meal deterministically", () => {

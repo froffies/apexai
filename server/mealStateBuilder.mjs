@@ -64,11 +64,17 @@ const PREPARATION_WORDS = new Set([
   "grilled",
   "baked",
   "boiled",
+  "hardboiled",
+  "hard-boiled",
+  "softboiled",
+  "soft-boiled",
   "poached",
   "scrambled",
   "toasted",
   "roasted",
   "steamed",
+  "raw",
+  "plain",
   "fresh",
   "squeezed",
   "salted",
@@ -138,7 +144,9 @@ const WORKOUT_ONLY_PATTERN = /\b(bench press|incline bench|overhead press|should
 const REMOVAL_PATTERN = /^(?:actually\s+)?(?:remove|without|skip|delete|drop)\s+(?<item>.+)$|^(?:actually\s+)?no\s+(?<item2>.+)$/i
 const PREPARATION_PATTERNS = [
   ["hard boiled", /\bhard boiled\b/i],
+  ["hard boiled", /\bhardboiled\b/i],
   ["soft boiled", /\bsoft boiled\b/i],
+  ["soft boiled", /\bsoftboiled\b/i],
   ["fried", /\bfried\b/i],
   ["boiled", /\bboiled\b/i],
   ["poached", /\bpoached\b/i],
@@ -148,10 +156,24 @@ const PREPARATION_PATTERNS = [
   ["toasted", /\btoasted\b/i],
   ["roasted", /\broasted\b/i],
   ["steamed", /\bsteamed\b/i],
+  ["raw", /\braw\b/i],
+  ["plain", /\bplain\b/i],
 ]
 
 const QUANTITY_PATTERN = new RegExp(
   `(?<amount>\\d+(?:\\.\\d+)?|${[...QUANTITY_WORDS.keys()].join("|")})\\s*(?:(?<intensity>whole|entire)\\s+)?(?<unit>${QUANTITY_UNITS.join("|")})\\b(?:\\s+of)?\\s*(?<food>.*)$`,
+  "i"
+)
+const TOTAL_ONLY_PATTERN = new RegExp(
+  `^(?<amount>\\d+(?:\\.\\d+)?|${[...QUANTITY_WORDS.keys()].join("|")})\\s+total$`,
+  "i"
+)
+const GROUP_TOTAL_PATTERN = new RegExp(
+  `^(?<amount>\\d+(?:\\.\\d+)?|${[...QUANTITY_WORDS.keys()].join("|")})\\s*(?<unit>${QUANTITY_UNITS.join("|")})?\\s*(?<food>[a-z][a-z\\s%-]+?)?\\s+total$`,
+  "i"
+)
+const INHERITED_GROUP_PATTERN = new RegExp(
+  `^(?<amount>\\d+(?:\\.\\d+)?|${[...QUANTITY_WORDS.keys()].join("|")})\\s*(?<unit>${QUANTITY_UNITS.join("|")})?\\s*(?<details>(?:hard\\s*boiled|soft\\s*boiled|hardboiled|softboiled|fried|boiled|poached|scrambled|grilled|baked|toasted|roasted|steamed|raw|plain)(?:\\s+[a-z]+)*)$`,
   "i"
 )
 
@@ -427,7 +449,7 @@ function deriveBaseName(label, fallback = "") {
   if (/\btoast\b/.test(normalized)) return "toast"
   if (/\bapple juice\b/.test(normalized)) return "apple juice"
   if (/\bvegemite\b/.test(normalized)) return "vegemite"
-  if (/\bbutter\b/.test(normalized)) return normalized.includes("salted") ? "salted butter" : normalized.includes("unsalted") ? "unsalted butter" : "butter"
+  if (/\bbutter\b/.test(normalized)) return normalized.includes("unsalted") ? "unsalted butter" : normalized.includes("salted") ? "salted butter" : "butter"
 
   const words = normalized
     .split(" ")
@@ -463,6 +485,83 @@ function buildQuantity(amount, unit, modifier = "") {
     text: `${numericAmount}${normalizedUnit === "g" || normalizedUnit === "kg" || normalizedUnit === "ml" || normalizedUnit === "l" ? normalizedUnit : ` ${normalizedUnit}${numericAmount === 1 ? "" : normalizedUnit === "egg" ? "s" : normalizedUnit === "slice" ? "s" : normalizedUnit === "tin" ? "s" : normalizedUnit === "cup" ? "s" : normalizedUnit === "tbsp" ? "" : normalizedUnit === "tsp" ? "" : normalizedUnit === "serve" ? "" : normalizedUnit === "bowl" ? "s" : normalizedUnit === "plate" ? "s" : normalizedUnit === "block" ? "s" : normalizedUnit === "bunch" ? "es" : ""}`}`.trim(),
     modifier: cleanText(modifier),
   }
+}
+
+function parseDeclaredTotalClause(clause) {
+  const normalized = stripCorrectionLead(clause)
+  const match = normalized.match(GROUP_TOTAL_PATTERN) || normalized.match(TOTAL_ONLY_PATTERN)
+  if (!match?.groups) return null
+  const amount = toAmount(match.groups.amount)
+  if (!amount) return null
+  const baseName = deriveBaseName(match.groups.food || "")
+  return {
+    amount,
+    unit: normalizeUnit(match.groups.unit || ""),
+    baseName,
+  }
+}
+
+function rememberGroupedBase(state, baseName = "") {
+  const normalized = cleanText(baseName)
+  if (!normalized) return
+  state.lastGroupedBaseName = normalized
+  const pending = state.declaredTotals.find((entry) => !entry.baseName)
+  if (pending) pending.baseName = normalized
+}
+
+function recordDeclaredTotal(state, entry) {
+  if (!entry?.amount) return false
+  const nextEntry = {
+    amount: entry.amount,
+    unit: entry.unit || "",
+    baseName: cleanText(entry.baseName || "") || "",
+  }
+  const duplicate = state.declaredTotals.some((existing) => (
+    Number(existing.amount) === Number(nextEntry.amount)
+    && normalizeUnit(existing.unit || "") === normalizeUnit(nextEntry.unit || "")
+    && cleanText(existing.baseName || "") === cleanText(nextEntry.baseName || "")
+  ))
+  if (duplicate) return false
+  state.declaredTotals.push(nextEntry)
+  if (entry.baseName) rememberGroupedBase(state, entry.baseName)
+  return true
+}
+
+function quantityForComparison(quantity, declaredUnit = "") {
+  if (!quantity || !Number.isFinite(Number(quantity.amount))) return null
+  const unit = normalizeUnit(quantity.unit || declaredUnit || "")
+  if (!unit) return null
+  return { amount: Number(quantity.amount), unit }
+}
+
+function findDeclaredTotalMismatch(state) {
+  for (const declared of state.declaredTotals) {
+    const baseName = cleanText(declared.baseName || state.lastGroupedBaseName || state.lastMainKey || "")
+    if (!baseName) continue
+
+    const relatedItems = state.items.filter((item) => !item.attachedTo && cleanText(item.baseName || item.key || "") === baseName)
+    if (!relatedItems.length) continue
+
+    const comparable = relatedItems
+      .map((item) => quantityForComparison(item.quantity, declared.unit))
+      .filter(Boolean)
+
+    if (!comparable.length || comparable.length !== relatedItems.length) continue
+
+    const comparisonUnit = declared.unit || comparable[0].unit
+    if (!comparisonUnit || comparable.some((entry) => entry.unit !== comparisonUnit)) continue
+
+    const actualAmount = comparable.reduce((total, entry) => total + entry.amount, 0)
+    if (actualAmount !== declared.amount) {
+      return {
+        baseName,
+        declaredAmount: declared.amount,
+        declaredUnit: comparisonUnit,
+        actualAmount,
+      }
+    }
+  }
+  return null
 }
 
 function cloneItem(item) {
@@ -557,6 +656,7 @@ function upsertItem(state, nextItem, { preferLast = true } = {}) {
     if (nextItem.category === "food") {
       state.lastMainKey = key
       state.lastMainReference = itemReferenceKey(inserted)
+      rememberGroupedBase(state, key)
     }
     if (nextItem.category === "drink") state.lastDrinkKey = key
     return true
@@ -580,6 +680,7 @@ function upsertItem(state, nextItem, { preferLast = true } = {}) {
   if (merged.category === "food") {
     state.lastMainKey = key
     state.lastMainReference = itemReferenceKey(merged)
+    rememberGroupedBase(state, key)
   }
   if (merged.category === "drink") state.lastDrinkKey = key
   return true
@@ -698,7 +799,7 @@ function parseIngredientPhrase(text) {
       baseName,
       quantity: buildQuantity(match.groups.amount, match.groups.unit, match.groups.intensity),
       category: "ingredient",
-      preparation: source.includes("salted") ? ["salted"] : source.includes("unsalted") ? ["unsalted"] : [],
+      preparation: source.includes("unsalted") ? ["unsalted"] : source.includes("salted") ? ["salted"] : [],
       relation,
       sourceMessage: text,
     })
@@ -722,6 +823,20 @@ function findInheritedTarget(state, preparations = []) {
   const normalizedPreparations = preparations.map((entry) => cleanText(entry)).filter(Boolean)
   const primaryItems = state.items.filter((item) => !item.attachedTo && item.category === "food")
   if (!primaryItems.length) return null
+  const groupedBase = cleanText(state.lastGroupedBaseName || "")
+  if (groupedBase) {
+    const groupedPrimaryItems = primaryItems.filter((item) => cleanText(item.baseName || item.key || "") === groupedBase)
+    if (groupedPrimaryItems.length) {
+      const exactGrouped = normalizedPreparations.length
+        ? [...groupedPrimaryItems].reverse().find((item) => {
+            const itemPreparations = safeArray(item.preparation, 8).map((entry) => cleanText(entry))
+            return normalizedPreparations.every((entry) => itemPreparations.includes(entry))
+          })
+        : null
+      if (exactGrouped) return exactGrouped
+      if (!normalizedPreparations.length) return groupedPrimaryItems.at(-1)
+    }
+  }
   if (normalizedPreparations.length) {
     const exact = [...primaryItems].reverse().find((item) => {
       const itemPreparations = safeArray(item.preparation, 8).map((entry) => cleanText(entry))
@@ -744,27 +859,108 @@ function parseInheritedFoodClause(state, clause) {
   const preparationReferenceMatch = !hasInheritedReference
     ? normalized.match(/^(?<details>(?:hard|soft)\s+boiled|fried|boiled|poached|scrambled|grilled|baked|toasted|roasted|steamed)(?:\s+eggs?)?\s+(?:were|was)\b/i)
     : null
+  const groupedPreparationMatch = !hasInheritedReference && !preparationReferenceMatch
+    ? normalized.match(INHERITED_GROUP_PATTERN)
+    : null
 
-  if (!hasInheritedReference && !preparationReferenceMatch) return null
+  if (!hasInheritedReference && !preparationReferenceMatch && !groupedPreparationMatch) return null
 
-  const target = findInheritedTarget(state, referencePreparations)
+  const target = findInheritedTarget(
+    state,
+    groupedPreparationMatch ? extractPreparations(groupedPreparationMatch.groups.details || normalized) : referencePreparations
+  )
   if (!target) return null
 
+  const inheritedUnit = groupedPreparationMatch?.groups?.unit
+    || target.quantity?.unit
+    || (/\begg\b/.test(target.baseName) ? "egg" : "serve")
   const quantity = hasInheritedReference
-    ? buildQuantity(quantityReferenceMatch.groups.amount, target.quantity?.unit || (/\begg\b/.test(target.baseName) ? "egg" : "serve"))
-    : target.quantity || null
+    ? buildQuantity(quantityReferenceMatch.groups.amount, inheritedUnit)
+    : groupedPreparationMatch
+      ? buildQuantity(groupedPreparationMatch.groups.amount, inheritedUnit)
+      : target.quantity || null
 
   return createItem({
     label: defaultDisplayLabel(target.baseName, target.label),
     baseName: target.baseName,
     quantity,
     category: target.category,
-    preparation: referencePreparations.length ? referencePreparations : safeArray(target.preparation, 8),
+    preparation: groupedPreparationMatch
+      ? extractPreparations(groupedPreparationMatch.groups.details || normalized)
+      : referencePreparations.length
+        ? referencePreparations
+        : safeArray(target.preparation, 8),
     sourceMessage: clause,
   })
 }
 
-function parseMeasuredFoodClause(clause) {
+function findCookingAttachmentTarget(state, subjectText = "") {
+  const subject = stripCorrectionLead(subjectText)
+    .replace(/^the\s+/, "")
+    .replace(/\beggs?\b$/i, "eggs")
+    .trim()
+  const preparations = extractPreparations(subject)
+  const subjectBaseName = deriveBaseName(subject, state.lastGroupedBaseName || state.lastMainKey || "")
+  const primaryItems = state.items.filter((item) => !item.attachedTo && item.category === "food")
+  if (!primaryItems.length) return null
+
+  const matchingBase = [...primaryItems].reverse().filter((item) => cleanText(item.baseName || item.key || "") === cleanText(subjectBaseName))
+  if (!matchingBase.length) return findCookingMediumTarget(state)
+  if (!preparations.length) return matchingBase[0]
+
+  return matchingBase.find((item) => {
+    const itemPreparations = safeArray(item.preparation, 8).map((entry) => cleanText(entry))
+    return preparations.every((entry) => itemPreparations.includes(entry))
+  }) || matchingBase[0]
+}
+
+function parseCookingAttachmentClause(state, clause) {
+  const normalized = cleanText(clause)
+  const subjectMatch = normalized.match(/^(?<subject>.+?)\s+(?:were|was)?\s*(?:cooking|cooked|fried)\s+in\s+(?<ingredient>.+)$/i)
+  if (!subjectMatch?.groups) return null
+  const normalizedSubject = stripCorrectionLead(subjectMatch.groups.subject)
+  if (normalizedSubject.match(new RegExp(`^(?:\\d+(?:\\.\\d+)?|${[...QUANTITY_WORDS.keys()].join("|")})\\s*(?:${QUANTITY_UNITS.join("|")})?\\b`, "i"))) {
+    return null
+  }
+  const ingredient = parseIngredientPhrase(`cooked in ${subjectMatch.groups.ingredient}`)
+  if (!ingredient) return null
+  const target = findCookingAttachmentTarget(state, subjectMatch.groups.subject)
+  const attachedTo = target ? itemReferenceKey(target) : state.lastMainReference || state.lastMainKey || ""
+  return attachedTo
+    ? { ...ingredient, attachedTo, relation: ingredient.relation || "cooked_in" }
+    : null
+}
+
+function parseGroupedPreparationAttachmentClause(state, clause) {
+  const normalized = cleanText(clause)
+  const attachmentMatch = normalized.match(/^(?<lead>.+?)\s+(?<connector>in|with)\s+(?<ingredient>.+)$/i)
+  if (!attachmentMatch?.groups) return null
+  const leadMatch = stripCorrectionLead(attachmentMatch.groups.lead).match(INHERITED_GROUP_PATTERN)
+  if (!leadMatch?.groups) return null
+
+  const preparations = extractPreparations(leadMatch.groups.details || "")
+  const target = findInheritedTarget(state, preparations)
+  const baseName = cleanText(target?.baseName || state.lastGroupedBaseName || state.lastMainKey || "")
+  if (!baseName) return null
+
+  const inheritedUnit = leadMatch.groups.unit
+    || target?.quantity?.unit
+    || (/\begg\b/.test(baseName) ? "egg" : "serve")
+
+  const item = createItem({
+    label: defaultDisplayLabel(baseName, target?.label || baseName),
+    baseName,
+    quantity: buildQuantity(leadMatch.groups.amount, inheritedUnit),
+    category: target?.category || detectCategory(baseName),
+    preparation: preparations,
+    sourceMessage: clause,
+  })
+
+  const ingredient = parseIngredientPhrase(`${attachmentMatch.groups.connector} ${attachmentMatch.groups.ingredient}`)
+  return { item, ingredient }
+}
+
+function parseMeasuredFoodClause(clause, state = null) {
   const normalized = stripCorrectionLead(clause)
   const cookedSplit = normalized.split(/\b(?:cooked in|fried in)\b/)
   const mainText = cookedSplit[0].trim()
@@ -799,12 +995,19 @@ function parseMeasuredFoodClause(clause) {
       .replace(/\bnot\b\s+\d+(?:\.\d+)?(?:\s*(?:kg|g|ml|l|cup|cups|tbsp|tsp|slice|slices|tin|tins|can|cans|block|blocks|bunch|bunches|serve|serves|serving|servings|bowl|bowls|plate|plates|egg|eggs))?\b.*$/i, "")
       .trim()
     const label = rest || (unit === "egg" ? "eggs" : unit)
-    const baseName = deriveBaseName(label || mainText)
-    const preparation = [...preparations]
+    const inheritedBaseName = cleanText(state?.lastGroupedBaseName || state?.lastMainKey || "")
+    const preparationOnly = Boolean(extractPreparations(rest).length) && !looksFoodishPhrase(rest)
+    const baseName = inheritedBaseName && (preparationOnly || !rest)
+      ? inheritedBaseName
+      : deriveBaseName(label || mainText)
+    const preparation = [...new Set([
+      ...preparations,
+      ...(cookedSplit[1] ? extractPreparations(normalized) : []),
+    ])]
     if (/\bwholemeal\b/.test(normalized)) preparation.push("wholemeal")
     if (/\brye\b/.test(normalized)) preparation.push("rye")
     item = createItem({
-      label: defaultDisplayLabel(baseName, label || mainText),
+      label: defaultDisplayLabel(baseName, (inheritedBaseName && (preparationOnly || !rest)) ? baseName : (label || mainText)),
       baseName,
       quantity,
       preparation,
@@ -947,10 +1150,44 @@ function mergeClauseIntoState(state, clause) {
     if (removedBase) return removeItemsMatchingBaseName(state, removedBase)
   }
 
+  const declaredTotal = parseDeclaredTotalClause(clause)
+  if (declaredTotal) {
+    if (!declaredTotal.baseName) {
+      declaredTotal.baseName = cleanText(state.lastGroupedBaseName || state.lastMainKey || "")
+    }
+    return recordDeclaredTotal(state, declaredTotal)
+  }
+
+  const explicitCookingAttachment = parseCookingAttachmentClause(state, clause)
+  if (explicitCookingAttachment) {
+    return upsertItem(state, explicitCookingAttachment, { preferLast: true })
+  }
+
+  const groupedAttachment = parseGroupedPreparationAttachmentClause(state, clause)
+  if (groupedAttachment?.item) {
+    changed = upsertItem(state, groupedAttachment.item, { preferLast: true }) || changed
+    if (groupedAttachment.ingredient) {
+      const attachedRelation = groupedAttachment.ingredient.relation === "with" && groupedAttachment.item.preparation?.length
+        ? "cooked_in"
+        : groupedAttachment.ingredient.relation || "cooked_in"
+      changed = upsertItem(
+        state,
+        {
+          ...groupedAttachment.ingredient,
+          attachedTo: state.lastMainReference || itemReferenceKey(groupedAttachment.item),
+          relation: attachedRelation,
+        },
+        { preferLast: true }
+      ) || changed
+    }
+    return changed
+  }
+
   if (/^the\s+/.test(normalized)) {
     const baseName = deriveBaseName(normalized.replace(/^the\s+/, ""))
     if (baseName) {
       state.lastMainKey = baseName
+      state.lastGroupedBaseName = baseName
       changed = attachLooseIngredientsToTarget(state, baseName) || changed
     }
     return changed
@@ -960,6 +1197,7 @@ function mergeClauseIntoState(state, clause) {
     const baseName = deriveBaseName(normalized.replace(/^(?:used to fry|used for|for)\s+the\s+/, ""))
     if (baseName) {
       state.lastMainKey = baseName
+      state.lastGroupedBaseName = baseName
       changed = attachLooseIngredientsToTarget(state, baseName) || changed
     }
     return changed
@@ -987,7 +1225,7 @@ function mergeClauseIntoState(state, clause) {
     }
   }
 
-  const { item, attachedIngredient } = parseMeasuredFoodClause(clause)
+  const { item, attachedIngredient } = parseMeasuredFoodClause(clause, state)
   let nextItem = null
   if (item) {
     nextItem = applyPendingQuantity(state, item)
@@ -1136,6 +1374,11 @@ function cookingMediumShouldStopClarifying(item, state) {
 
 function identifyMissingDetails(state) {
   const missing = []
+  const declaredTotalMismatch = findDeclaredTotalMismatch(state)
+  if (declaredTotalMismatch) {
+    missing.push({ type: "declared_total_mismatch", mismatch: declaredTotalMismatch })
+    return missing
+  }
   for (const item of state.items.filter((entry) => !entry.attachedTo)) {
     if (!item.quantity && !itemShouldUseDefault(item, state)) {
       missing.push({ type: "quantity", item })
@@ -1154,6 +1397,19 @@ function identifyMissingDetails(state) {
 function buildClarifyQuestion(state) {
   const missing = identifyMissingDetails(state)
   if (!missing.length) return ""
+  if (missing[0]?.type === "declared_total_mismatch") {
+    const mismatch = missing[0].mismatch
+    const unit = mismatch.declaredUnit === "egg"
+      ? mismatch.declaredAmount === 1 ? "egg" : "eggs"
+      : mismatch.declaredUnit
+    const actualUnit = mismatch.declaredUnit === "egg"
+      ? mismatch.actualAmount === 1 ? "egg" : "eggs"
+      : mismatch.declaredUnit
+    return `You said ${mismatch.declaredAmount}${mismatch.declaredUnit === "egg" ? "" : " "} ${unit} total, but I only have ${mismatch.actualAmount}${mismatch.declaredUnit === "egg" ? "" : " "} ${actualUnit} accounted for. What should the split be?`
+      .replace(/\s+/g, " ")
+      .replace(/ (\?|,)/g, "$1")
+      .trim()
+  }
   const currentBaseName = deriveBaseName(state.currentMessage)
   const lastAssistantTargets = [...(state.threadTurns || [])]
     .reverse()
@@ -1203,6 +1459,12 @@ function seedStateFromExistingSession(state, existingSession) {
   state.lastMainKey = cleanText(existingSession.lastMainKey || state.items.findLast?.((item) => item.category !== "ingredient")?.baseName || state.lastMainKey)
   state.lastMainReference = cleanText(existingSession.lastMainReference || itemReferenceKey(state.items.findLast?.((item) => item.category === "food" && !item.attachedTo) || {}) || state.lastMainReference)
   state.lastDrinkKey = cleanText(existingSession.lastDrinkKey || state.items.findLast?.((item) => item.category === "drink")?.baseName || state.lastDrinkKey)
+  state.lastGroupedBaseName = cleanText(existingSession.lastGroupedBaseName || state.lastMainKey || state.lastGroupedBaseName)
+  state.declaredTotals = safeArray(existingSession.declaredTotals, 8).map((entry) => ({
+    amount: Number(entry?.amount) || 0,
+    unit: normalizeUnit(entry?.unit || ""),
+    baseName: cleanText(entry?.baseName || entry?.base_name || ""),
+  })).filter((entry) => entry.amount > 0)
   state.clarificationAttempts = Math.max(0, Number(existingSession.clarificationAttempts) || 0)
   state.clarificationCounts = mergeClarificationCounts(state.clarificationCounts, existingSession.clarificationCounts || {})
   state.mealConversation = true
@@ -1231,7 +1493,9 @@ export function emptyMealSession() {
     mealConversation: false,
     lastMainKey: "",
     lastMainReference: "",
+    lastGroupedBaseName: "",
     lastDrinkKey: "",
+    declaredTotals: [],
   }
 }
 
@@ -1243,8 +1507,10 @@ export function buildMealStateFromConversation(recentMessages = [], currentMessa
     pendingQuantities: [],
     clarificationAttempts: clarificationStats.total,
     clarificationCounts: clarificationStats.counts,
+    declaredTotals: [],
     lastMainKey: "",
     lastMainReference: "",
+    lastGroupedBaseName: "",
     lastDrinkKey: "",
     mealConversation: false,
     shouldStopClarifying: false,
@@ -1343,5 +1609,6 @@ export function buildMealContext(recentMessages = [], currentMessage = "", exist
     })),
     lastMainReference: mealState.lastMainReference,
     thread_messages: mealState.threadTurns?.map((entry) => ({ role: entry.role, content: String(entry.content || "") })) || [],
+    declaredTotals: mealState.declaredTotals.map((entry) => ({ ...entry })),
   }
 }

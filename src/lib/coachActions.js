@@ -400,7 +400,6 @@ export function shouldUseLocalCoach(message, { activeWorkout = null, todaysPlan 
     || parseRecoveryCheckIn(message)
     || parseActiveWorkoutUpdate(message, activeWorkout)
     || shouldBuildWeeklySchedule(message)
-    || isProgressionQuestion(message)
     || (todaysPlan && parseWorkoutPlanEdit(message, todaysPlan))
     || (activeWorkout?.id && /\b(what'?s next|next set|next exercise|where am i up to)\b/.test(text))
     || isShowWorkoutRequest(message)

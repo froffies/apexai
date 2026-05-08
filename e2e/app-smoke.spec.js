@@ -343,9 +343,8 @@ test("coach request failures keep the draft available and do not create ghost nu
   await composer.fill(failedPrompt)
   await page.getByRole("button", { name: /^Send$/i }).click()
 
-  await expect(page.getByText(/i couldn't reach the live coach just now, so i didn't log or change anything\./i)).toBeVisible({ timeout: 15000 })
+  await expect(page.getByText(/i couldn't reach the live coach just now, so i left your data alone\. please retry in a moment\./i)).toBeVisible({ timeout: 15000 })
   await expect(composer).toHaveValue(failedPrompt)
-  await expect(page.getByText(/live coach is unavailable right now\./i)).toBeVisible()
 
   await page.goto("/Nutrition")
   const todayMealsSection = page.locator("section").filter({ has: page.getByRole("heading", { name: /today's meals/i }) })
@@ -1926,7 +1925,7 @@ test("coach chat can be cleared back to the single starter message", async ({ pa
       {
         id: "chat_welcome",
         role: "assistant",
-        content: "Tell me what you did or what you need. I can log completed meals and workouts, build or edit today's plan, guide an active session, update targets, and answer coaching questions.",
+        content: "Tell me what happened today, what you ate, what you trained, or what you want to change, and I'll help you sort the next move.",
         timestamp: new Date().toISOString(),
       },
       {
@@ -1949,7 +1948,7 @@ test("coach chat can be cleared back to the single starter message", async ({ pa
   await page.getByRole("button", { name: /clear chat/i }).click()
 
   await expect(page.getByText(/here is a saved response to clear/i)).toHaveCount(0)
-  await expect(page.getByText(/tell me what you did or what you need/i)).toHaveCount(1)
+  await expect(page.getByText(/tell me what happened today, what you ate, what you trained/i)).toHaveCount(1)
 })
 
 test("recipes can be edited in place and persist the new title", async ({ page }) => {

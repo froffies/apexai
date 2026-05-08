@@ -384,7 +384,7 @@ test("deterministic coach nutrition answers still work when OpenAI is unavailabl
   assert.equal(Array.isArray(coach.actions), true)
   assert.equal(coach.actions.length, 0)
   assert.match(coach.reply, /that comes to about/i)
-  assert.match(coach.reply, /tell me if you want me to save it/i)
+  assert.match(coach.reply, /if you want it saved, tell me to log it/i)
 })
 
 test("deterministic coach repeat-meal logging works when OpenAI is unavailable", async (t) => {
