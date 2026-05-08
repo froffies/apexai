@@ -138,6 +138,40 @@ test("coach session state reopens a persisted meal for corrections instead of du
   assert.equal(next.mealSession.alreadyLogged, false)
 })
 
+test("coach session state treats additive follow-ups on a persisted meal as updates", () => {
+  const initial = replayCoachConversation([
+    user("i had chips"),
+    assistant("How much chips did you have?"),
+    user("1 bowl"),
+  ])
+
+  const persistedMeal = makePersistedMealSession(initial.mealSession, "meal_chips")
+  const next = buildCoachSessionState({
+    recentMessages: initial.history,
+    currentMessage: "with gravy",
+    mealSession: persistedMeal,
+    workoutSession: emptyWorkoutSessionState(),
+  })
+
+  assert.ok(next.mealSession)
+  assert.equal(next.mealSession.correctionRequested, true)
+  assert.equal(next.mealSession.readyToLog, true)
+  assert.equal(next.mealSession.alreadyLogged, false)
+  assert.match(next.mealSession.summary, /chips with gravy/i)
+})
+
+test("pure nutrition questions do not open a meal logging clarification flow", () => {
+  const next = buildCoachSessionState({
+    recentMessages: [],
+    currentMessage: "how much protein is usually in a small latte?",
+    mealSession: emptyMealSessionState(),
+    workoutSession: emptyWorkoutSessionState(),
+  })
+
+  assert.equal(next.mealSession, null)
+  assert.equal(next.workoutSession, null)
+})
+
 test("coach session state replaces persisted meal quantities when a correction restates the full meal", () => {
   const initial = replayCoachConversation([
     user("i had egg and tea"),

@@ -1243,6 +1243,32 @@ test("coach corrections still update a saved meal after redundant post-save foll
   await expect(todayMealsSection.getByText("17 fried eggs cooked in 100g salted butter, plus 250ml Earl Grey tea with no milk and no sugar")).toHaveCount(0)
 })
 
+test("coach additive follow-ups update a saved meal instead of creating a duplicate", async ({ page }) => {
+  await seedOnboardedProfile(page)
+  await page.goto("/Coach")
+
+  const composer = page.getByPlaceholder(/log bench 80kg for 4 sets of 6/i)
+  await composer.fill("i had chips")
+  await page.getByRole("button", { name: /^Send$/i }).click()
+  await expect(page.getByText(/how much chips did you have\?/i)).toBeVisible()
+
+  await composer.fill("1 bowl")
+  await page.getByRole("button", { name: /^Send$/i }).click()
+  await expect(page.getByText(/saved to today's nutrition: 1 bowl chips\./i)).toBeVisible()
+
+  await composer.fill("with gravy")
+  await page.getByRole("button", { name: /^Send$/i }).click()
+  await expect(page.getByText(/updated today's nutrition: 1 bowl chips with gravy\./i)).toBeVisible()
+
+  await page.goto("/Nutrition")
+  const todayMealsSection = page.locator("section").filter({ has: page.getByRole("heading", { name: /today's meals/i }) })
+  await expect(todayMealsSection.getByText("1 bowl chips with gravy")).toBeVisible()
+  await expect(todayMealsSection.getByText(/^1 bowl chips$/)).toHaveCount(0)
+  await page.reload()
+  await expect(todayMealsSection.getByText("1 bowl chips with gravy")).toBeVisible()
+  await expect(todayMealsSection.getByText(/^1 bowl chips$/)).toHaveCount(0)
+})
+
 test("coach reconciles stale meal log actions into one corrected saved meal", async ({ page }) => {
   await seedOnboardedProfile(page)
   await page.route("**/api/coach", async (route) => {

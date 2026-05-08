@@ -1,4 +1,4 @@
-import { buildMealContext as buildLegacyMealContext, emptyMealSession as emptyLegacyMealSession } from "./mealStateBuilder.mjs"
+import { buildMealContext as buildLegacyMealContext, detectQuestionOnlyTurn, emptyMealSession as emptyLegacyMealSession } from "./mealStateBuilder.mjs"
 
 const MEAL_EXPLICIT_START_PATTERN = /^(?:please\s+)?(?:(?:i\s+)?(?:had|ate|drank)|log|track|save|add|include)\b/i
 const MEAL_CORRECTION_PATTERN = /\b(?:actually|correction|change(?:\s+that)?|update(?:\s+that)?|make that|not\b|instead|sorry|i meant)\b/i
@@ -176,6 +176,24 @@ function isRedundantPersistedMealFollowUp(message, session) {
   return referencesKnownItems
 }
 
+function persistedMealFollowUpLooksLikeUpdate(message, session, nextSummary = "") {
+  const normalized = cleanText(message)
+  if (!session?.persisted || !normalized) return false
+  if (isExplicitMealStart(message) || suppressionRequested(message) || detectQuestionOnlyTurn(message) || MEAL_FINALISE_PATTERN.test(normalized)) {
+    return false
+  }
+  if (mealCorrectionRequested(message)) return true
+  if (!cleanText(nextSummary) || summariesEquivalent(nextSummary, session.persistedSummary || session.summary || "")) return false
+
+  return Boolean(
+    /\b(?:with|without|extra|hold|remove|swap|instead|plus|mixed with|topped with|covered in)\b/i.test(normalized)
+    || /^the\s+/i.test(normalized)
+    || /^(?:used to fry|used for|for)\s+the\s+/i.test(normalized)
+    || MEAL_REFERENCE_PATTERN.test(normalized)
+    || /\d/.test(normalized)
+  )
+}
+
 function seedLegacyMealSession(session) {
   if (!session?.items?.length) return null
   return {
@@ -298,6 +316,12 @@ function buildMealSessionState(recentMessages = [], currentMessage = "", existin
   if (!next) return null
 
   const correctionRequested = Boolean(prior.persistedMealId && mealCorrectionRequested(currentMessage))
+  const impliedCorrectionRequested = Boolean(
+    prior.persistedMealId
+    && !startedNewMeal
+    && !correctionRequested
+    && persistedMealFollowUpLooksLikeUpdate(currentMessage, prior, next.summary)
+  )
   const merged = {
     ...emptyMealSessionState(),
     ...next,
@@ -305,7 +329,7 @@ function buildMealSessionState(recentMessages = [], currentMessage = "", existin
     persistedMealId: startedNewMeal ? "" : String(prior.persistedMealId || ""),
     persistedSummary: startedNewMeal ? "" : String(prior.persistedSummary || ""),
     persistedAt: startedNewMeal ? "" : String(prior.persistedAt || ""),
-    correctionRequested,
+    correctionRequested: correctionRequested || impliedCorrectionRequested,
     alreadyLogged: false,
   }
 

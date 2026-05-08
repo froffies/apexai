@@ -304,6 +304,91 @@ test("ready meal corrections outrank stray workout clarifications when OpenAI is
   assert.equal(coach.workout_session?.clarifyQuestion, "What exercise or cardio did you do?")
 })
 
+test("additive meal follow-ups update the persisted meal instead of creating a duplicate", async (t) => {
+  const port = randomPort()
+  const serverProcess = spawn(process.execPath, [serverEntry], {
+    cwd,
+    env: {
+      ...process.env,
+      OPENAI_COACH_PORT: String(port),
+      OPENAI_COACH_REQUIRE_AUTH: "false",
+      OPENAI_COACH_CORS_ORIGIN: "http://127.0.0.1:5173",
+      OPENFOODFACTS_ENABLED: "false",
+      OPENAI_API_KEY: "",
+      NODE_ENV: "production",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  })
+
+  t.after(async () => {
+    serverProcess.kill()
+  })
+
+  await waitForHealth(port)
+
+  const coachResponse = await fetch(`http://127.0.0.1:${port}/api/coach`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Origin: "http://127.0.0.1:5173",
+    },
+    body: JSON.stringify({
+      message: "with gravy",
+      recentMessages: [
+        { role: "user", content: "i had chips" },
+        { role: "assistant", content: "How much chips did you have?" },
+        { role: "user", content: "1 bowl" },
+        { role: "assistant", content: "Saved to today's nutrition: 1 bowl chips. 180 kcal, 12g protein, 18g carbs, 6g fat." },
+      ],
+      meals: [
+        {
+          id: "meal_chips_live",
+          date: "2026-05-08",
+          meal_type: "snack",
+          food_name: "1 bowl chips",
+          quantity: "1 meal",
+          calories: 180,
+          protein_g: 12,
+          carbs_g: 18,
+          fat_g: 6,
+          estimated: true,
+          nutrition_source: "Coach estimate from accumulated meal details across chat",
+        },
+      ],
+      mealSession: {
+        active: false,
+        mealConversation: true,
+        readyToLog: false,
+        wantsLogging: true,
+        clarificationAttempts: 1,
+        clarificationCounts: { "chip:quantity": 1 },
+        summary: "1 bowl chips",
+        clarifyQuestion: "",
+        persisted: true,
+        persistedMealId: "meal_chips_live",
+        persistedSummary: "1 bowl chips",
+        items: [
+          {
+            base_name: "chip",
+            label: "Chips",
+            category: "food",
+            quantity: { amount: 1, unit: "bowl", text: "1 bowl" },
+            preparation: [],
+            exclusions: [],
+            attached_to: null,
+            relation: null,
+          },
+        ],
+      },
+    }),
+  })
+  const coach = await coachResponse.json()
+  assert.equal(coachResponse.status, 200)
+  assert.equal(coach.actions?.[0]?.type, "update_meal_log")
+  assert.equal(coach.actions?.[0]?.meal_id, "meal_chips_live")
+  assert.match(coach.actions?.[0]?.food_name || "", /chips with gravy/i)
+})
+
 test("deterministic coach nutrition answers still work when OpenAI is unavailable", async (t) => {
   const port = randomPort()
   const serverProcess = spawn(process.execPath, [serverEntry], {

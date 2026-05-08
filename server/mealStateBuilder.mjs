@@ -441,7 +441,7 @@ function detectSuppressedLogging(text) {
   return SUPPRESS_LOG_PATTERN.test(cleanText(text))
 }
 
-function detectQuestionOnlyTurn(text) {
+export function detectQuestionOnlyTurn(text) {
   const raw = String(text || "").trim()
   const normalized = cleanText(raw)
   if (!normalized || detectSuppressedLogging(normalized)) return false
@@ -522,8 +522,10 @@ function shouldContinueExistingSession(existingSession, currentMessage, recentMe
 
 function extractMealThread(recentMessages = [], currentMessage = "", existingSession = null) {
   const normalizedCurrent = cleanText(currentMessage)
+  const questionOnlyCurrent = detectQuestionOnlyTurn(currentMessage)
   const history = Array.isArray(recentMessages) ? recentMessages.filter((entry) => typeof entry?.content === "string") : []
   const workoutOnly = looksLikeWorkoutOnly(normalizedCurrent)
+  if (questionOnlyCurrent && !existingSession?.active && !existingSession?.persisted) return []
   const hasMealHistory = history.some((entry) => (
     entry?.role === "user"
     && (isExplicitMealStart(entry.content) || looksFoodishPhrase(entry.content) || MEAL_REFERENCE_PATTERN.test(cleanText(entry.content || "")))
