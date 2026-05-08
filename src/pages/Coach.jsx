@@ -1253,6 +1253,7 @@ export default function Coach() {
       if (!coachResponse) {
         const assistantMessage = appendAssistant("I couldn't get a valid response from the live coach, so I didn't log or change anything. Please try again.")
         setAiError("Live coach returned an invalid response.")
+        setInput(content)
         setMessages((current) => [...current, assistantMessage])
         return
       }
@@ -1261,6 +1262,7 @@ export default function Coach() {
       rememberSubmit = true
     } catch (error) {
       setAiError(error instanceof Error ? error.message : "Live coach unavailable.")
+      setInput(content)
       setMessages((current) => [
         ...current,
         appendAssistant("I couldn't reach the live coach just now, so I didn't log or change anything. Please retry in a moment."),

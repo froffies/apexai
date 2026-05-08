@@ -325,6 +325,33 @@ test("coach can save an estimated mixed meal without showing the old skipped war
   await expect(todayMealsSection.getByText(/Coach estimate from user-described ingredients and amounts/i)).toBeVisible()
 })
 
+test("coach request failures keep the draft available and do not create ghost nutrition logs", async ({ page }) => {
+  await seedOnboardedProfile(page)
+  await page.route("**/api/coach", async (route) => {
+    await route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({
+        error: "Live coach is unavailable right now.",
+      }),
+    })
+  })
+
+  await page.goto("/Coach")
+  const composer = page.getByPlaceholder(/log bench 80kg for 4 sets of 6/i)
+  const failedPrompt = "i had eggs on toast with butter"
+  await composer.fill(failedPrompt)
+  await page.getByRole("button", { name: /^Send$/i }).click()
+
+  await expect(page.getByText(/i couldn't reach the live coach just now, so i didn't log or change anything\./i)).toBeVisible({ timeout: 15000 })
+  await expect(composer).toHaveValue(failedPrompt)
+  await expect(page.getByText(/live coach is unavailable right now\./i)).toBeVisible()
+
+  await page.goto("/Nutrition")
+  const todayMealsSection = page.locator("section").filter({ has: page.getByRole("heading", { name: /today's meals/i }) })
+  await expect(todayMealsSection.getByText(/eggs on toast with butter/i)).toHaveCount(0)
+})
+
 test("coach nutrition answers do not create a meal log until the user explicitly asks to save it", async ({ page }) => {
   await seedState(page, {
     "apexai.profile": onboardedProfile,
