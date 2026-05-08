@@ -77,10 +77,28 @@ function normalizeMealSession(session = {}) {
     declaredTotals: Array.isArray(session?.declaredTotals)
       ? session.declaredTotals.map((entry) => ({ ...entry }))
       : [],
+    pendingAttachments: Array.isArray(session?.pendingAttachments)
+      ? session.pendingAttachments.map((entry) => ({
+          ...entry,
+          ingredient: entry?.ingredient && typeof entry.ingredient === "object"
+            ? {
+                ...entry.ingredient,
+                quantity: entry.ingredient?.quantity ? { ...entry.ingredient.quantity } : null,
+                preparation: Array.isArray(entry.ingredient?.preparation) ? [...entry.ingredient.preparation] : [],
+                modifiers: Array.isArray(entry.ingredient?.modifiers) ? [...entry.ingredient.modifiers] : [],
+                exclusions: Array.isArray(entry.ingredient?.exclusions) ? [...entry.ingredient.exclusions] : [],
+              }
+            : null,
+        }))
+      : [],
+    pendingQuantities: Array.isArray(session?.pendingQuantities)
+      ? session.pendingQuantities.map((entry) => (entry ? { ...entry } : null)).filter(Boolean)
+      : [],
     items: Array.isArray(session?.items) ? session.items.map((item) => ({
       ...item,
       quantity: item?.quantity ? { ...item.quantity } : null,
       preparation: Array.isArray(item?.preparation) ? [...item.preparation] : [],
+      modifiers: Array.isArray(item?.modifiers) ? [...item.modifiers] : [],
       exclusions: Array.isArray(item?.exclusions) ? [...item.exclusions] : [],
     })) : [],
   }
@@ -169,9 +187,11 @@ function seedLegacyMealSession(session) {
       category: item.category || "food",
       quantity: item.quantity ? { ...item.quantity } : null,
       preparation: Array.isArray(item.preparation) ? [...item.preparation] : [],
+      modifiers: Array.isArray(item.modifiers) ? [...item.modifiers] : [],
       exclusions: Array.isArray(item.exclusions) ? [...item.exclusions] : [],
       attached_to: item.attached_to || item.attachedTo || null,
       relation: item.relation || null,
+      variant_key: item.variant_key || item.variantKey || "",
     })),
     clarificationAttempts: Number(session.clarificationAttempts) || 0,
     clarificationCounts: { ...(session.clarificationCounts || {}) },
@@ -186,8 +206,12 @@ function seedLegacyMealSession(session) {
     suppressionReply: String(session.suppressionReply || ""),
     mealConversation: true,
     lastMainKey: session.lastMainKey || "",
+    lastMainReference: session.lastMainReference || "",
+    lastGroupedBaseName: session.lastGroupedBaseName || "",
     lastDrinkKey: session.lastDrinkKey || "",
     declaredTotals: Array.isArray(session.declaredTotals) ? session.declaredTotals.map((entry) => ({ ...entry })) : [],
+    pendingAttachments: Array.isArray(session.pendingAttachments) ? session.pendingAttachments.map((entry) => ({ ...entry })) : [],
+    pendingQuantities: Array.isArray(session.pendingQuantities) ? session.pendingQuantities.map((entry) => ({ ...entry })) : [],
   }
 }
 
