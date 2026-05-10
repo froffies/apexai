@@ -86,6 +86,19 @@ const PREPARATION_WORDS = new Set([
   "black",
 ])
 
+const COOKING_PREPARATION_WORDS = new Set([
+  "fried",
+  "grilled",
+  "baked",
+  "boiled",
+  "hard boiled",
+  "soft boiled",
+  "poached",
+  "scrambled",
+  "roasted",
+  "steamed",
+])
+
 const DESCRIPTOR_WORDS = new Set([
   "black",
   "white",
@@ -276,6 +289,18 @@ function normalizeUnit(unit) {
   return text
 }
 
+function pluralizeCountUnit(unit, amount) {
+  const normalized = normalizeUnit(unit)
+  if (!normalized || Number(amount) === 1) return normalized
+  if (["g", "kg", "ml", "l", "tbsp", "tsp"].includes(normalized)) return normalized
+  if (normalized.endsWith("ch") || normalized.endsWith("sh") || normalized.endsWith("x") || normalized.endsWith("z")) {
+    return `${normalized}es`
+  }
+  if (normalized.endsWith("y") && !/[aeiou]y$/.test(normalized)) return `${normalized.slice(0, -1)}ies`
+  if (normalized.endsWith("s")) return normalized
+  return `${normalized}s`
+}
+
 function normalizeVariantKey(value = "") {
   return cleanText(value)
     .replace(/\b(?:were|was|with|in|cooked|fried|mixed|covered|topped|the|a|an)\b/g, " ")
@@ -360,6 +385,20 @@ function splitRelationTail(text = "") {
   return {
     lead,
     attachments: [{ relation: relationMatch.relation, ingredientText }],
+  }
+}
+
+function hasCookingPreparation(preparations = []) {
+  return preparations.some((entry) => COOKING_PREPARATION_WORDS.has(cleanText(entry)))
+}
+
+function splitInlineCookingTail(text = "", preparations = []) {
+  if (!hasCookingPreparation(preparations)) return null
+  const match = String(text || "").match(/^(?<lead>.+?)\s+in\s+(?<ingredient>.+)$/i)
+  if (!match?.groups?.lead || !match?.groups?.ingredient) return null
+  return {
+    lead: match.groups.lead.trim(),
+    attachments: [{ relation: "cooked_in", ingredientText: match.groups.ingredient.trim() }],
   }
 }
 
@@ -643,7 +682,7 @@ function buildQuantity(amount, unit, modifier = "") {
   return {
     amount: numericAmount,
     unit: normalizedUnit,
-    text: `${numericAmount}${normalizedUnit === "g" || normalizedUnit === "kg" || normalizedUnit === "ml" || normalizedUnit === "l" ? normalizedUnit : ` ${normalizedUnit}${numericAmount === 1 ? "" : normalizedUnit === "egg" ? "s" : normalizedUnit === "slice" ? "s" : normalizedUnit === "tin" ? "s" : normalizedUnit === "cup" ? "s" : normalizedUnit === "tbsp" ? "" : normalizedUnit === "tsp" ? "" : normalizedUnit === "serve" ? "" : normalizedUnit === "bowl" ? "s" : normalizedUnit === "plate" ? "s" : normalizedUnit === "block" ? "s" : normalizedUnit === "bunch" ? "es" : ""}`}`.trim(),
+    text: `${numericAmount}${normalizedUnit === "g" || normalizedUnit === "kg" || normalizedUnit === "ml" || normalizedUnit === "l" ? normalizedUnit : ` ${pluralizeCountUnit(normalizedUnit, numericAmount)}`}`.trim(),
     modifier: cleanText(modifier),
   }
 }
@@ -1064,6 +1103,32 @@ function parseIngredientPhrase(text) {
   return buildIngredientItem(source, relation, text)
 }
 
+function parseLeadingHostVariantPhrase(text = "") {
+  const normalized = stripExclusionPhrases(stripCorrectionLead(text))
+  const words = normalized.split(" ").filter(Boolean)
+  if (words.length < 2) return null
+
+  const hostWordRaw = words[0]
+  const hostBase = singularize(hostWordRaw)
+  if (!hostBase || hostWordRaw === hostBase || STOPWORDS.has(hostBase) || DESCRIPTOR_WORDS.has(hostBase) || PREPARATION_WORDS.has(hostBase)) {
+    return null
+  }
+
+  const detailText = words.slice(1).join(" ").trim()
+  if (!detailText) return null
+
+  const preparations = extractPreparations(detailText)
+  const modifiers = extractItemQualifiers(detailText, hostBase, preparations)
+  if (!modifiers.length && !looksFoodishPhrase(detailText)) return null
+
+  return {
+    baseName: hostBase,
+    label: titleCase(hostWordRaw),
+    preparations,
+    modifiers,
+  }
+}
+
 function findInheritedTarget(state, preparations = []) {
   const normalizedPreparations = preparations.map((entry) => cleanText(entry)).filter(Boolean)
   const primaryItems = state.items.filter((item) => !item.attachedTo && item.category !== "ingredient")
@@ -1116,6 +1181,15 @@ function hasGroupedContextForTarget(state, target) {
   const baseName = cleanText(target?.baseName || target?.key || "")
   if (!baseName) return false
   if (state.declaredTotals.some((entry) => cleanText(entry.baseName || "") === baseName)) return true
+  const targetCountUnit = singularize(baseName.split(" ").at(-1) || "")
+  const variantDrivenGrouping = state.items.some((item) => (
+    !item.attachedTo
+    && cleanText(item.baseName || item.key || "") === baseName
+    && item.quantity
+    && normalizeUnit(item.quantity.unit || "") === targetCountUnit
+    && (preparationKey(item) || modifierKey(item) || cleanText(item.variantKey || ""))
+  ))
+  if (variantDrivenGrouping) return true
   return state.items.some((item) => (
     !item.attachedTo
     && cleanText(item.baseName || item.key || "") === baseName
@@ -1280,9 +1354,14 @@ function parseInheritedFoodClause(state, clause) {
   if (generalizedQuantityMatch) {
     const explicitBase = cleanText(deriveBaseName(generalizedQuantityMatch.groups.details || ""))
     const targetBase = cleanText(target.baseName || target.key || "")
+    const explicitUnit = normalizeUnit(generalizedQuantityMatch.groups.unit || "")
+    const targetUnit = normalizeUnit(target?.quantity?.unit || "")
     const explicitPreparations = extractPreparations(generalizedQuantityMatch.groups.details || "")
     const relationHint = firstRelationMatch(generalizedQuantityMatch.groups.details || "")
     if (explicitBase && explicitBase === targetBase && !explicitPreparations.length && !relationHint) {
+      return null
+    }
+    if (explicitUnit && targetUnit && explicitUnit !== targetUnit && explicitBase && explicitBase !== targetBase) {
       return null
     }
   }
@@ -1454,7 +1533,10 @@ function parseGroupedPreparationAttachmentClause(state, clause) {
 
 function parseMeasuredFoodClause(clause, state = null) {
   const normalized = stripCorrectionLead(clause)
-  const relationTail = splitRelationTail(normalized)
+  const normalizedPreparations = extractPreparations(normalized)
+  const relationTail = splitRelationTail(normalized).attachments.length
+    ? splitRelationTail(normalized)
+    : splitInlineCookingTail(normalized, normalizedPreparations) || splitRelationTail(normalized)
   const mainText = relationTail.lead.trim()
 
   const quantityMatch = mainText.match(QUANTITY_PATTERN)
@@ -1467,23 +1549,27 @@ function parseMeasuredFoodClause(clause, state = null) {
   ])
   if (countedFoodMatch?.groups && deriveBaseName(countedFoodMatch.groups.food || "")) {
     const cleanedFood = stripExclusionPhrases(countedFoodMatch.groups.food.trim().replace(/\bnot\b.*$/i, "").trim())
-    const baseName = deriveBaseName(cleanedFood)
-    const modifiers = extractItemQualifiers(cleanedFood, baseName, preparations)
+    const hostVariant = parseLeadingHostVariantPhrase(cleanedFood)
+    const baseName = hostVariant?.baseName || deriveBaseName(cleanedFood)
+    const variantPreparations = hostVariant?.preparations?.length ? hostVariant.preparations : preparations
+    const modifiers = hostVariant?.modifiers?.length
+      ? hostVariant.modifiers
+      : extractItemQualifiers(cleanedFood, baseName, variantPreparations)
     const quantity = {
       amount: toAmount(countedFoodMatch.groups.amount) || 1,
       unit: singularize(baseName.split(" ").at(-1) || "serve"),
-      text: `${toAmount(countedFoodMatch.groups.amount) || 1} ${defaultDisplayLabel(baseName, cleanedFood || countedFoodMatch.groups.food).toLowerCase()}`.trim(),
+      text: `${toAmount(countedFoodMatch.groups.amount) || 1} ${pluralizeCountUnit(hostVariant?.baseName || singularize(baseName.split(" ").at(-1) || "serve"), toAmount(countedFoodMatch.groups.amount) || 1)}`.trim(),
       modifier: "",
     }
     item = createItem({
-      label: defaultDisplayLabel(baseName, cleanedFood || countedFoodMatch.groups.food.trim()),
+      label: hostVariant?.label || defaultDisplayLabel(baseName, cleanedFood || countedFoodMatch.groups.food.trim()),
       baseName,
       quantity,
-      preparation: preparations,
+      preparation: variantPreparations,
       modifiers,
       exclusions,
       sourceMessage: clause,
-      variantKey: buildVariantSignature({ preparations, modifiers }),
+      variantKey: buildVariantSignature({ preparations: variantPreparations, modifiers }),
     })
   } else if (quantityMatch?.groups) {
     const unit = normalizeUnit(quantityMatch.groups.unit)
@@ -1882,10 +1968,18 @@ function describeItem(item, state) {
       ? `${mainItem.quantity.amount} ${mainItem.preparation.join(" ")} eggs`
       : `${mainItem.quantity.amount} eggs`
   } else {
+    if (baseNameTail && quantityUnit && baseNameTail === quantityUnit && baseNameTail !== "egg") {
+      baseLabel = Number(mainItem.quantity?.amount || 0) === 1 ? baseNameTail : pluralizeCountUnit(baseNameTail, mainItem.quantity?.amount || 0)
+      description = cleanText(quantityText).endsWith(cleanText(baseLabel))
+        ? quantityText.trim()
+        : `${quantityText}${baseLabel}`.trim()
+    }
     const qualifiers = uniqueNormalizedValues([
       ...(mainItem.preparation || []),
       ...(mainItem.modifiers || []),
-    ]).filter((word) => !description.toLowerCase().includes(cleanText(word)))
+    ])
+      .map((word) => cleanText(word))
+      .filter((word) => !description.toLowerCase().includes(cleanText(word)))
     if (qualifiers.length) {
       const displayName = baseLabel.toLowerCase() === "eggs" ? "eggs" : baseLabel
       const quantityLead = cleanText(quantityText).endsWith(cleanText(displayName))

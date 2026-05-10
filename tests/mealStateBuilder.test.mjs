@@ -260,6 +260,36 @@ test("meal session supports grouped quantity splits for another food with prepar
   assert.equal(session.items.find((item) => item.base_name === "olive oil")?.attached_to, "chicken::fried")
 })
 
+test("meal session keeps inline cooking-medium clauses attached to the intended measured subgroup", () => {
+  const { session } = replayMealConversation([
+    user("I had 300g fried chicken in 20g oil and 200g rice"),
+  ])
+
+  assert.ok(session)
+  assert.equal(session.readyToLog, true)
+  assert.equal(session.summary, "300g fried chicken cooked in 20g oil, plus 200g rice")
+  assert.equal(session.items.filter((item) => !item.attached_to).length, 2)
+  const oil = session.items.find((item) => item.base_name === "oil")
+  assert.ok(oil)
+  assert.equal(oil.attached_to, "chicken::fried")
+  assert.equal(session.clarifyQuestion, "")
+})
+
+test("meal session supports host-variant splits like tacos without collapsing the filling into the base item", () => {
+  const { session } = replayMealConversation([
+    user("I had tacos"),
+    assistant("How many tacos did you have?"),
+    user("2 tacos beef, 1 chicken"),
+  ])
+
+  assert.ok(session)
+  assert.equal(session.readyToLog, true)
+  assert.equal(session.summary, "2 beef tacos, plus 1 chicken taco")
+  assert.equal(session.items.filter((item) => !item.attached_to).length, 2)
+  assert.equal(session.items.filter((item) => item.base_name === "taco").length, 2)
+  assert.doesNotMatch(session.summary, /\btaco beef\b|\bbeef total\b/i)
+})
+
 test("meal session supports grouped split carbs without collapsing fried and plain servings together", () => {
   const { session } = replayMealConversation([
     user("I had 2 cups rice total, 1 cup plain, 1 cup fried with 10g oil"),
@@ -447,6 +477,16 @@ test("meal session handles grouped totals and cooking additions across two hundr
       ],
       expect: [
         /1 bowl chips with gravy/i,
+      ],
+    },
+    {
+      name: "inline measured cooking clause",
+      conversation: [
+        user("300g fried chicken in 20g oil and 200g rice"),
+      ],
+      expect: [
+        /300g fried chicken cooked in 20g oil/i,
+        /200g rice/i,
       ],
     },
   ]
