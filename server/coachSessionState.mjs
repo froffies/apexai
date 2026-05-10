@@ -73,6 +73,9 @@ function normalizeMealSession(session = {}) {
   return {
     ...emptyMealSessionState(),
     ...session,
+    pendingClarification: session?.pendingClarification && typeof session.pendingClarification === "object"
+      ? { ...session.pendingClarification }
+      : null,
     clarificationCounts: { ...(session?.clarificationCounts || {}) },
     declaredTotals: Array.isArray(session?.declaredTotals)
       ? session.declaredTotals.map((entry) => ({ ...entry }))
@@ -93,6 +96,9 @@ function normalizeMealSession(session = {}) {
       : [],
     pendingQuantities: Array.isArray(session?.pendingQuantities)
       ? session.pendingQuantities.map((entry) => (entry ? { ...entry } : null)).filter(Boolean)
+      : [],
+    structuralIssues: Array.isArray(session?.structuralIssues)
+      ? session.structuralIssues.map((entry) => ({ ...entry }))
       : [],
     items: Array.isArray(session?.items) ? session.items.map((item) => ({
       ...item,
@@ -232,6 +238,7 @@ function seedLegacyMealSession(session) {
     declaredTotals: Array.isArray(session.declaredTotals) ? session.declaredTotals.map((entry) => ({ ...entry })) : [],
     pendingAttachments: Array.isArray(session.pendingAttachments) ? session.pendingAttachments.map((entry) => ({ ...entry })) : [],
     pendingQuantities: Array.isArray(session.pendingQuantities) ? session.pendingQuantities.map((entry) => ({ ...entry })) : [],
+    pendingClarification: session.pendingClarification ? { ...session.pendingClarification } : null,
   }
 }
 

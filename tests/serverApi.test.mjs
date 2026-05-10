@@ -204,6 +204,88 @@ test("deterministic coach logging still works when OpenAI is unavailable", async
   assert.ok(Number(coach.actions?.[0]?.calories) > 1500)
 })
 
+test("deterministic coach route will not persist orphan numeric entities when a quantity clarification is still unresolved", async (t) => {
+  const port = randomPort()
+  const serverProcess = spawn(process.execPath, [serverEntry], {
+    cwd,
+    env: {
+      ...process.env,
+      OPENAI_COACH_PORT: String(port),
+      OPENAI_COACH_REQUIRE_AUTH: "false",
+      OPENAI_COACH_CORS_ORIGIN: "http://127.0.0.1:5173",
+      OPENFOODFACTS_ENABLED: "false",
+      OPENAI_API_KEY: "",
+      NODE_ENV: "production",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  })
+
+  t.after(async () => {
+    serverProcess.kill()
+  })
+
+  await waitForHealth(port)
+
+  const coachResponse = await fetch(`http://127.0.0.1:${port}/api/coach`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Origin: "http://127.0.0.1:5173",
+    },
+    body: JSON.stringify({
+      message: "egg",
+      recentMessages: [
+        { role: "user", content: "i had egg and cake" },
+        { role: "assistant", content: "How many eggs did you have?" },
+      ],
+      mealSession: {
+        active: true,
+        mealConversation: true,
+        readyToLog: false,
+        clarificationAttempts: 1,
+        clarificationCounts: { "egg:quantity": 1 },
+        summary: "",
+        clarifyQuestion: "How many eggs did you have?",
+        pendingClarification: {
+          type: "quantity",
+          targetReference: "egg",
+          targetBaseName: "egg",
+          targetLabel: "Eggs",
+          expectedValueType: "number",
+        },
+        items: [
+          {
+            base_name: "egg",
+            label: "Eggs",
+            category: "food",
+            quantity: null,
+            preparation: [],
+            exclusions: [],
+            attached_to: null,
+            relation: null,
+          },
+          {
+            base_name: "cake",
+            label: "Cake",
+            category: "food",
+            quantity: null,
+            preparation: [],
+            exclusions: [],
+            attached_to: null,
+            relation: null,
+          },
+        ],
+      },
+    }),
+  })
+  const coach = await coachResponse.json()
+  assert.equal(coachResponse.status, 200)
+  assert.equal(Array.isArray(coach.actions), true)
+  assert.equal(coach.actions.some((action) => action?.type === "log_meal" || action?.type === "update_meal_log"), false)
+  assert.equal(coach.actions.some((action) => action?.type === "clarify"), true)
+  assert.equal(coach.reply, "I'm asking how many eggs you had.")
+})
+
 test("deterministic coach logging can emit separate breakfast and lunch meal actions when OpenAI is unavailable", async (t) => {
   const port = randomPort()
   const serverProcess = spawn(process.execPath, [serverEntry], {

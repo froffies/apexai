@@ -988,6 +988,35 @@ function parseQuantityOnly(text) {
   return buildQuantity(match.groups.amount, match.groups.unit, match.groups.intensity)
 }
 
+function parseBareNumericAmount(text) {
+  const normalized = cleanText(stripCorrectionLead(text))
+  const match = normalized.match(new RegExp(`^(?<amount>\\d+(?:\\.\\d+)?|${[...QUANTITY_WORDS.keys()].join("|")})$`, "i"))
+  if (!match?.groups?.amount) return null
+  return toAmount(match.groups.amount)
+}
+
+function looksLikeClarificationConfusion(text) {
+  return /^(?:what do you mean|what\?|huh|sorry\?|not sure|confused)$/i.test(cleanText(text))
+}
+
+function isNumericLikeBaseName(value = "") {
+  return /^\d+(?:\.\d+)?$/.test(cleanText(value))
+}
+
+function normalizePendingClarification(pending = null) {
+  if (!pending || typeof pending !== "object") return null
+  return {
+    type: cleanText(pending.type || ""),
+    targetReference: cleanText(pending.targetReference || pending.target_reference || ""),
+    targetBaseName: cleanText(pending.targetBaseName || pending.target_base_name || pending.targetFood || ""),
+    targetLabel: String(pending.targetLabel || pending.target_label || pending.targetFood || "").trim(),
+    targetMealType: normalizeMealType(pending.targetMealType || pending.target_meal_type || ""),
+    expectedValueType: cleanText(pending.expectedValueType || pending.expected_value_type || ""),
+    siblingTargets: safeArray(pending.siblingTargets, 8).map((entry) => cleanText(entry)).filter(Boolean),
+    invalidReply: Boolean(pending.invalidReply),
+  }
+}
+
 function parseDrinkDetailOnly(state, text) {
   const normalized = cleanText(stripCorrectionLead(text) || text)
   if (looksFoodishPhrase(normalized) && !/\b(tea|coffee|milk|sugar|earl grey|flat white|long black|cappuccino|latte|espresso)\b/.test(normalized)) return false
@@ -1754,6 +1783,9 @@ function parseMeasuredFoodClause(clause, state = null, mealType = "") {
       mealType,
     })
   } else {
+    if (!/[a-z]/i.test(mainText) || isNumericLikeBaseName(mainText)) {
+      return { item: null, attachedIngredients: [] }
+    }
     const contentWords = mainText
       .split(" ")
       .filter((word) => word && !STOPWORDS.has(word))
@@ -1804,6 +1836,166 @@ function applyPendingQuantity(state, item) {
     ...item,
     quantity: state.pendingQuantities.shift(),
   }
+}
+
+function findPendingClarificationItem(state, pending) {
+  const normalized = normalizePendingClarification(pending)
+  if (!normalized) return null
+  const primaryItems = state.items.filter((item) => !item.attachedTo)
+  if (normalized.targetReference) {
+    const exactReferenceMatch = primaryItems.find((item) => {
+      const reference = itemReferenceKey(item)
+      return reference === normalized.targetReference
+        || reference.startsWith(`${normalized.targetReference}::`)
+        || normalized.targetReference.startsWith(`${reference}::`)
+    })
+    if (exactReferenceMatch) return exactReferenceMatch
+  }
+  if (normalized.targetBaseName) {
+    return primaryItems.find((item) => cleanText(item.baseName || item.key || "") === normalized.targetBaseName) || null
+  }
+  return null
+}
+
+function unresolvedQuantityItems(state) {
+  return identifyMissingDetails(state)
+    .filter((entry) => entry.type === "quantity" && entry.item)
+    .map((entry) => entry.item)
+}
+
+function shouldClarifyNumericBindingTarget(state, pending, target) {
+  if (!pending || pending.type !== "quantity") return false
+  const siblings = unresolvedQuantityItems(state)
+    .filter((item) => item !== target)
+  if (!siblings.length) return false
+  return siblings.some((item) => item.category === "drink")
+}
+
+function buildPendingQuantity(state, target, amount, rawText = "") {
+  const normalized = cleanText(rawText)
+  const explicitUnitMatch = normalized.match(new RegExp(`^(?:\\d+(?:\\.\\d+)?|${[...QUANTITY_WORDS.keys()].join("|")})\\s*(?<unit>${QUANTITY_UNITS.join("|")})\\b`, "i"))
+  const explicitUnit = normalizeUnit(explicitUnitMatch?.groups?.unit || "")
+  const inferredUnit = explicitUnit || inferTargetQuantityUnit(state, target, /\begg\b/.test(target?.baseName || "") ? "egg" : "serve")
+  return buildQuantity(amount, inferredUnit)
+}
+
+function bindPendingClarificationReply(state, clause) {
+  const pending = normalizePendingClarification(state.pendingClarification)
+  if (!pending) return { handled: false, changed: false }
+
+  const normalized = cleanText(clause)
+  const target = findPendingClarificationItem(state, pending)
+  if (!target && pending.type !== "declared_total_mismatch") {
+    state.pendingClarification = null
+    return { handled: false, changed: false }
+  }
+
+  if (pending.type === "quantity") {
+    if (looksLikeClarificationConfusion(normalized)) {
+      state.pendingClarification = { ...pending, invalidReply: true }
+      return { handled: true, changed: false }
+    }
+    const bareAmount = parseBareNumericAmount(clause)
+    const quantityOnly = parseQuantityOnly(clause)
+    const explicitTargetMatch = normalized.match(new RegExp(`^(?<amount>\\d+(?:\\.\\d+)?|${[...QUANTITY_WORDS.keys()].join("|")})\\s+(?<food>.+)$`, "i"))
+
+    if (bareAmount !== null) {
+      if (shouldClarifyNumericBindingTarget(state, pending, target)) {
+        const options = [pending.targetLabel || titleCase(defaultDisplayLabel(target.baseName || "", target.label || "")), ...pending.siblingTargets.map((entry) => titleCase(defaultDisplayLabel(entry, entry)))]
+        state.pendingClarification = { ...pending, invalidReply: true }
+        state.overrideClarifyQuestion = `I need to know which item the ${bareAmount} applies to: ${options.join(" or ")}?`
+        return { handled: true, changed: false }
+      }
+      const quantity = buildPendingQuantity(state, target, bareAmount, clause)
+      if (!quantity) {
+        state.pendingClarification = { ...pending, invalidReply: true }
+        return { handled: true, changed: false }
+      }
+      state.pendingClarification = null
+      return { handled: true, changed: upsertItem(state, { ...target, quantity }, { preferLast: true }) }
+    }
+
+    if (quantityOnly) {
+      state.pendingClarification = null
+      return { handled: true, changed: upsertItem(state, { ...target, quantity: quantityOnly }, { preferLast: true }) }
+    }
+
+    if (explicitTargetMatch?.groups?.food) {
+      const explicitFoodText = explicitTargetMatch.groups.food
+      const explicitBase = deriveBaseName(explicitFoodText)
+      const explicitPreparations = extractPreparations(explicitFoodText)
+      const explicitRelation = firstRelationMatch(explicitFoodText)
+      const explicitQualifiers = deriveRemainingWords(explicitFoodText, target.baseName || "", explicitPreparations)
+      if (explicitBase && explicitBase !== cleanText(target.baseName || "")) {
+        return { handled: false, changed: false }
+      }
+      if (explicitBase && explicitBase === cleanText(target.baseName || "") && !explicitPreparations.length && !explicitRelation && !explicitQualifiers.length) {
+        const amount = toAmount(explicitTargetMatch.groups.amount)
+        const quantity = buildPendingQuantity(state, target, amount, explicitTargetMatch[0])
+        if (quantity) {
+          state.pendingClarification = null
+          return { handled: true, changed: upsertItem(state, { ...target, quantity }, { preferLast: true }) }
+        }
+      }
+    }
+
+    const explicitBase = deriveBaseName(normalized)
+    const explicitPreparations = extractPreparations(normalized)
+    const explicitRelation = firstRelationMatch(normalized)
+    const explicitQualifiers = deriveRemainingWords(normalized, target.baseName || "", explicitPreparations)
+    if (explicitBase && explicitBase !== cleanText(target.baseName || "")) {
+      return { handled: false, changed: false }
+    }
+    if ((explicitPreparations.length || explicitRelation || explicitQualifiers.length) && explicitBase === cleanText(target.baseName || "")) {
+      return { handled: false, changed: false }
+    }
+    if (looksFoodishPhrase(normalized) && explicitBase === cleanText(target.baseName || "")) {
+      state.pendingClarification = { ...pending, invalidReply: true }
+      return { handled: true, changed: false }
+    }
+    if (/[a-z]/i.test(normalized) && !looksFoodishPhrase(normalized)) {
+      state.pendingClarification = { ...pending, invalidReply: true }
+      return { handled: true, changed: false }
+    }
+    return { handled: false, changed: false }
+  }
+
+  if (pending.type === "cooking_medium") {
+    if (looksLikeClarificationConfusion(normalized)) {
+      state.pendingClarification = { ...pending, invalidReply: true }
+      return { handled: true, changed: false }
+    }
+    const explicitAttachment = parseCookingAttachmentClause(state, clause)
+    const ingredients = explicitAttachment?.ingredients?.length
+      ? explicitAttachment.ingredients
+      : parseIngredientList(
+        normalized
+          .replace(/^(?:cooked|fried|used)\s+(?:in|to fry)\s+/i, "")
+          .replace(/^(?:with|using)\s+/i, ""),
+        "cooked_in",
+        clause,
+      )
+    if (!ingredients.length) {
+      state.pendingClarification = { ...pending, invalidReply: true }
+      return { handled: true, changed: false }
+    }
+    let changed = false
+    for (const ingredient of ingredients) {
+      changed = upsertItem(
+        state,
+        {
+          ...ingredient,
+          attachedTo: itemReferenceKey(target),
+          relation: ingredient.relation || "cooked_in",
+        },
+        { preferLast: true }
+      ) || changed
+    }
+    state.pendingClarification = null
+    return { handled: true, changed }
+  }
+
+  return { handled: false, changed: false }
 }
 
 function attachLooseIngredientsToTarget(state, targetBaseName) {
@@ -1908,6 +2100,9 @@ function mergeClauseIntoState(state, clause) {
     state.answerOnly = true
     return false
   }
+
+  const pendingReply = bindPendingClarificationReply(state, clauseText)
+  if (pendingReply.handled) return pendingReply.changed
 
   const relationOnlySource = splitRelationTail(normalizedWithoutAlso)
   if (!relationOnlySource.lead && relationOnlySource.attachments.length && relationOnlySource.attachments[0].relation !== "cooked_in") {
@@ -2348,10 +2543,61 @@ function identifyMissingDetails(state) {
   return missing
 }
 
+function pickClarificationTarget(state, missing = identifyMissingDetails(state)) {
+  if (!missing.length) return null
+  if (missing[0]?.type === "declared_total_mismatch") return missing[0]
+
+  const currentBaseName = deriveBaseName(state.currentMessage)
+  const lastAssistantTargets = [...(state.threadTurns || [])]
+    .reverse()
+    .find((entry) => entry?.role === "assistant")
+  const lastClarificationTargets = lastAssistantTargets ? extractClarificationTargets(String(lastAssistantTargets.content || "")) : []
+  const currentTarget = currentBaseName
+    ? missing.find((entry) => cleanText(entry.item.baseName) === cleanText(currentBaseName))
+    : null
+  const alternateTarget = missing.find((entry) => !lastClarificationTargets.includes(clarificationKey(entry.item.baseName, entry.type)))
+  return currentTarget || alternateTarget || missing[0]
+}
+
+function buildPendingClarification(state, missing = identifyMissingDetails(state)) {
+  const selected = pickClarificationTarget(state, missing)
+  if (!selected) return null
+  if (selected.type === "declared_total_mismatch") {
+    return {
+      type: "declared_total_mismatch",
+      targetReference: "",
+      targetBaseName: cleanText(selected.mismatch.baseName || ""),
+      targetLabel: titleCase(defaultDisplayLabel(selected.mismatch.baseName || "", selected.mismatch.baseName || "")),
+      targetMealType: "",
+      expectedValueType: "text",
+      siblingTargets: [],
+      invalidReply: false,
+    }
+  }
+
+  const unresolvedSiblings = missing
+    .filter((entry) => entry.type === selected.type && entry.item && entry.item !== selected.item)
+    .map((entry) => cleanText(entry.item.baseName || entry.item.key || entry.item.label))
+    .filter(Boolean)
+
+  return {
+    type: selected.type,
+    targetReference: itemReferenceKey(selected.item),
+    targetBaseName: cleanText(selected.item.baseName || selected.item.key || ""),
+    targetLabel: selected.item.label || titleCase(defaultDisplayLabel(selected.item.baseName || "", selected.item.baseName || "")),
+    targetMealType: normalizeMealType(selected.item.mealType || selected.item.meal_type || ""),
+    expectedValueType: selected.type === "quantity" ? "number" : selected.type === "cooking_medium" ? "ingredient" : "text",
+    siblingTargets: unresolvedSiblings,
+    invalidReply: false,
+  }
+}
+
 function buildClarifyQuestion(state) {
   const missing = identifyMissingDetails(state)
   if (!missing.length) return ""
-  if (missing[0]?.type === "declared_total_mismatch") {
+  if (state.overrideClarifyQuestion) return state.overrideClarifyQuestion
+  const pending = normalizePendingClarification(state.pendingClarification) || buildPendingClarification(state, missing)
+  if (pending?.type === "declared_total_mismatch" && missing[0]?.mismatch) {
     const mismatch = missing[0].mismatch
     const unit = mismatch.declaredUnit === "egg"
       ? mismatch.declaredAmount === 1 ? "egg" : "eggs"
@@ -2364,18 +2610,13 @@ function buildClarifyQuestion(state) {
       .replace(/ (\?|,)/g, "$1")
       .trim()
   }
-  const currentBaseName = deriveBaseName(state.currentMessage)
-  const lastAssistantTargets = [...(state.threadTurns || [])]
-    .reverse()
-    .find((entry) => entry?.role === "assistant")
-  const lastClarificationTargets = lastAssistantTargets ? extractClarificationTargets(String(lastAssistantTargets.content || "")) : []
-  const currentTarget = currentBaseName
-    ? missing.find((entry) => cleanText(entry.item.baseName) === cleanText(currentBaseName))
-    : null
-  const alternateTarget = missing.find((entry) => !lastClarificationTargets.includes(clarificationKey(entry.item.baseName, entry.type)))
-  const firstMissing = currentTarget || alternateTarget || missing[0]
+  const firstMissing = pickClarificationTarget(state, missing)
   const baseName = cleanText(firstMissing.item.baseName || firstMissing.item.label)
   const displayName = titleCase(defaultDisplayLabel(baseName, firstMissing.item.label || firstMissing.item.baseName))
+  if (pending?.invalidReply && pending.type === "quantity") {
+    if (baseName === "egg") return "I'm asking how many eggs you had."
+    return `I'm asking how much ${displayName.toLowerCase()} you had.`
+  }
   if (firstMissing.type === "cooking_medium") {
     const qualifiers = uniqueNormalizedValues([...(firstMissing.item.preparation || []), ...(firstMissing.item.modifiers || [])])
     const cookedLabel = baseName === "egg"
@@ -2385,6 +2626,22 @@ function buildClarifyQuestion(state) {
   }
   if (baseName === "egg") return "How many eggs did you have?"
   return `How much ${displayName.toLowerCase()} did you have?`
+}
+
+function detectStructuralIssues(state) {
+  const issues = []
+  const numericPrimaryItems = state.items.filter((item) => !item.attachedTo && isNumericLikeBaseName(item.baseName || item.label || ""))
+  for (const item of numericPrimaryItems) {
+    issues.push({ type: "numeric_item", item })
+  }
+  if (state.pendingQuantities.length) {
+    issues.push({ type: "orphan_quantity" })
+  }
+  const pending = normalizePendingClarification(state.pendingClarification)
+  if (pending?.type === "quantity" && !findPendingClarificationItem(state, pending)) {
+    issues.push({ type: "stale_pending_clarification", pending })
+  }
+  return issues
 }
 
 function detectMealIntent(turns = []) {
@@ -2446,6 +2703,7 @@ function seedStateFromExistingSession(state, existingSession) {
     targetPreparations: safeArray(entry.targetPreparations, 4).map((value) => cleanText(value)).filter(Boolean),
   }))
   state.pendingQuantities = safeArray(existingSession.pendingQuantities, 4).map((entry) => entry ? { ...entry } : null).filter(Boolean)
+  state.pendingClarification = normalizePendingClarification(existingSession.pendingClarification)
 }
 
 export function emptyMealSession() {
@@ -2473,6 +2731,9 @@ export function emptyMealSession() {
     declaredTotals: [],
     pendingAttachments: [],
     pendingQuantities: [],
+    pendingClarification: null,
+    structuralIssues: [],
+    invalidStructure: false,
   }
 }
 
@@ -2504,6 +2765,10 @@ export function buildMealStateFromConversation(recentMessages = [], currentMessa
     suppressed: false,
     suppressionReply: "",
     currentMessage: String(currentMessage || ""),
+    pendingClarification: null,
+    structuralIssues: [],
+    invalidStructure: false,
+    overrideClarifyQuestion: "",
   }
 
   if (!conversation.length) return state
@@ -2554,7 +2819,19 @@ export function buildMealStateFromConversation(recentMessages = [], currentMessa
     state.items = state.items.map((item) => item.quantity || !itemShouldUseDefault(item, state) ? item : { ...item, quantity: defaultQuantityForItem(item) })
     state.missingItems = identifyMissingDetails(state)
   }
-  state.readyToLog = state.items.some((item) => !item.attachedTo) && state.missingItems.length === 0
+  const nextPendingClarification = buildPendingClarification(state, state.missingItems)
+  if (
+    state.pendingClarification?.invalidReply
+    && nextPendingClarification
+    && nextPendingClarification.type === state.pendingClarification.type
+    && nextPendingClarification.targetReference === state.pendingClarification.targetReference
+  ) {
+    nextPendingClarification.invalidReply = true
+  }
+  state.pendingClarification = nextPendingClarification
+  state.structuralIssues = detectStructuralIssues(state)
+  state.invalidStructure = state.structuralIssues.length > 0
+  state.readyToLog = state.items.some((item) => !item.attachedTo) && state.missingItems.length === 0 && !state.invalidStructure
   state.summary = summarizeMeal(state)
   state.meal_groups = buildMealGroups(state)
   state.clarifyQuestion = state.readyToLog ? "" : buildClarifyQuestion(state)
@@ -2571,6 +2848,7 @@ export function buildMealStateFromConversation(recentMessages = [], currentMessa
       || state.items.length
       || state.pendingQuantities.length
       || state.pendingAttachments.length
+      || Boolean(state.pendingClarification)
     )
   }
   state.threadTurns = conversation
@@ -2617,5 +2895,8 @@ export function buildMealContext(recentMessages = [], currentMessage = "", exist
       targetPreparations: [...entry.targetPreparations],
     })),
     pendingQuantities: mealState.pendingQuantities.map((entry) => ({ ...entry })),
+    pendingClarification: normalizePendingClarification(mealState.pendingClarification),
+    structuralIssues: safeArray(mealState.structuralIssues, 8).map((entry) => ({ ...entry })),
+    invalidStructure: Boolean(mealState.invalidStructure),
   }
 }

@@ -73,6 +73,73 @@ test("meal session clarification flow advances instead of repeating the same mis
   assert.equal(snapshots[3].session.clarifyQuestion, "What were the fried eggs cooked in?")
 })
 
+test("meal session binds standalone numeric replies to the pending food quantity instead of inventing numeric food items", () => {
+  const { session, snapshots } = replayMealConversation([
+    user("i had egg and cake"),
+    assistant("How many eggs did you have?"),
+    user("18.5"),
+  ])
+
+  assert.ok(session)
+  assert.equal(snapshots[1].session.readyToLog, true)
+  assert.equal(snapshots[1].session.summary, "18.5 eggs, plus 1 serve cake")
+  assert.equal(session.items.some((item) => item.base_name === "18.5" || item.base_name === "18"), false)
+  assert.equal(session.invalidStructure, false)
+})
+
+test("meal session preserves quantity clarification context and does not treat a food word as the missing number", () => {
+  const { session, snapshots } = replayMealConversation([
+    user("i had egg and cake"),
+    assistant("How many eggs did you have?"),
+    user("egg"),
+  ])
+
+  assert.ok(session)
+  assert.equal(snapshots[1].session.readyToLog, false)
+  assert.equal(snapshots[1].session.clarifyQuestion, "I'm asking how many eggs you had.")
+  assert.equal(session.items.filter((item) => item.base_name === "egg" && !item.attached_to).length, 1)
+  assert.equal(session.items.some((item) => item.base_name === "18" || item.base_name === "18.5"), false)
+  assert.equal(session.invalidStructure, false)
+})
+
+test("meal session keeps a typed clarification when the reply is unrelated text", () => {
+  const { session } = replayMealConversation([
+    user("i had eggs"),
+    assistant("How many eggs did you have?"),
+    user("blue"),
+  ])
+
+  assert.ok(session)
+  assert.equal(session.readyToLog, false)
+  assert.match(session.clarifyQuestion, /how many eggs/i)
+  assert.equal(session.items.some((item) => item.base_name === "blue"), false)
+})
+
+test("meal session asks which item a bare number belongs to when a drink and another food are both still unresolved", () => {
+  const { session } = replayMealConversation([
+    user("i had eggs and coffees"),
+    assistant("How many eggs did you have?"),
+    user("18"),
+  ])
+
+  assert.ok(session)
+  assert.equal(session.readyToLog, false)
+  assert.match(session.clarifyQuestion, /which item the 18 applies to/i)
+  assert.equal(session.items.some((item) => item.base_name === "18"), false)
+})
+
+test("meal session keeps decimal quantities when the pending clarification expects a number", () => {
+  const { session } = replayMealConversation([
+    user("i had pizza"),
+    assistant("How much pizza did you have?"),
+    user("0.5"),
+  ])
+
+  assert.ok(session)
+  assert.equal(session.readyToLog, true)
+  assert.match(session.summary.toLowerCase(), /0\.5 .*pizza/)
+})
+
 test("meal session survives truncated recent history because the existing session remains the source of truth", () => {
   const conversation = [
     user("i had egg and tea"),
