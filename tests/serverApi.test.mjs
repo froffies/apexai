@@ -471,6 +471,82 @@ test("additive meal follow-ups update the persisted meal instead of creating a d
   assert.match(coach.actions?.[0]?.food_name || "", /chips with gravy/i)
 })
 
+test("deterministic coach logging keeps separate quantified foods and subject-specific additions mapped correctly when OpenAI is unavailable", async (t) => {
+  const port = randomPort()
+  const serverProcess = spawn(process.execPath, [serverEntry], {
+    cwd,
+    env: {
+      ...process.env,
+      OPENAI_COACH_PORT: String(port),
+      OPENAI_COACH_REQUIRE_AUTH: "false",
+      OPENAI_COACH_CORS_ORIGIN: "http://127.0.0.1:5173",
+      OPENFOODFACTS_ENABLED: "false",
+      OPENAI_API_KEY: "",
+      NODE_ENV: "production",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  })
+
+  t.after(async () => {
+    serverProcess.kill()
+  })
+
+  await waitForHealth(port)
+
+  const coachResponse = await fetch(`http://127.0.0.1:${port}/api/coach`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Origin: "http://127.0.0.1:5173",
+    },
+    body: JSON.stringify({
+      message: "the steak had butter",
+      recentMessages: [
+        { role: "user", content: "I had 300g steak" },
+        { role: "assistant", content: "Anything else with it?" },
+        { role: "user", content: "and 2 eggs" },
+      ],
+      mealSession: {
+        active: true,
+        mealConversation: true,
+        readyToLog: true,
+        wantsLogging: true,
+        clarificationAttempts: 0,
+        clarificationCounts: {},
+        summary: "300g steak, plus 2 eggs",
+        clarifyQuestion: "",
+        items: [
+          {
+            base_name: "steak",
+            label: "Steak",
+            category: "food",
+            quantity: { amount: 300, unit: "g", text: "300g" },
+            preparation: [],
+            exclusions: [],
+            attached_to: null,
+            relation: null,
+          },
+          {
+            base_name: "egg",
+            label: "Eggs",
+            category: "food",
+            quantity: { amount: 2, unit: "egg", text: "2 eggs" },
+            preparation: [],
+            exclusions: [],
+            attached_to: null,
+            relation: null,
+          },
+        ],
+      },
+    }),
+  })
+  const coach = await coachResponse.json()
+  assert.equal(coachResponse.status, 200)
+  assert.equal(coach.actions?.[0]?.type, "log_meal")
+  assert.equal(coach.actions?.[0]?.food_name, "300g steak with butter, plus 2 eggs")
+  assert.ok(Number(coach.actions?.[0]?.protein_g) > 0)
+})
+
 test("deterministic coach nutrition answers still work when OpenAI is unavailable", async (t) => {
   const port = randomPort()
   const serverProcess = spawn(process.execPath, [serverEntry], {

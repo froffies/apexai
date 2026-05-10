@@ -126,9 +126,9 @@ const DESCRIPTOR_WORDS = new Set([
   "squeezed",
 ])
 
-const DRINK_KEYWORDS = ["tea", "coffee", "juice", "water", "milk", "smoothie", "shake", "latte", "espresso", "flat white", "long black", "cappuccino"]
+const DRINK_KEYWORDS = ["tea", "coffee", "juice", "water", "milk", "smoothie", "shake", "latte", "espresso", "flat white", "long black", "cappuccino", "beer", "wine", "soda", "cola"]
 const INGREDIENT_KEYWORDS = ["butter", "oil", "cheese", "sugar", "milk", "cream", "sauce", "gravy", "dressing", "vegemite", "jam", "honey", "salt", "pesto", "mayo"]
-const FOOD_HINT_WORDS = ["egg", "eggs", "chicken", "rice", "beef", "pork", "lamb", "fish", "salmon", "tuna", "toast", "bread", "tea", "coffee", "juice", "milk", "beans", "oats", "yoghurt", "yogurt", "butter", "oil", "cheese", "potato", "salad", "apple", "banana", "celery", "chocolate", "pasta", "chips", "fries", "burger", "taco", "tacos", "vegemite", "berry", "berries", "flat white", "long black", "cappuccino", "latte", "espresso", "whey", "almond milk"]
+const FOOD_HINT_WORDS = ["egg", "eggs", "chicken", "rice", "beef", "pork", "lamb", "fish", "salmon", "tuna", "toast", "bread", "tea", "coffee", "juice", "milk", "beans", "oats", "yoghurt", "yogurt", "butter", "oil", "cheese", "potato", "salad", "apple", "banana", "celery", "chocolate", "pasta", "chips", "fries", "burger", "taco", "tacos", "vegemite", "berry", "berries", "flat white", "long black", "cappuccino", "latte", "espresso", "whey", "almond milk", "beer", "wine", "soda", "cola"]
 const QUANTITY_UNITS = [
   "kg",
   "g",
@@ -172,6 +172,25 @@ const QUANTITY_UNITS = [
   "egg",
   "eggs",
 ]
+
+const GENERIC_PORTION_UNITS = new Set([
+  "g",
+  "kg",
+  "ml",
+  "l",
+  "cup",
+  "tbsp",
+  "tsp",
+  "slice",
+  "tin",
+  "can",
+  "block",
+  "bunch",
+  "serve",
+  "bowl",
+  "plate",
+  "mug",
+])
 
 const MEAL_VERBS = /\b(had|ate|drank|log|track|save|add|include|breakfast|lunch|dinner|snack|meal|calories|macros|protein|carbs|fat)\b/i
 const MEAL_TYPES = ["breakfast", "lunch", "dinner", "snack"]
@@ -1257,8 +1276,19 @@ function canInheritGeneralizedDetails(details, target, state) {
   const preparations = extractPreparations(lead)
   if (preparations.length && !deriveRemainingWords(lead, "", preparations).length) return true
   const leadTokens = stripExclusionPhrases(lead).split(" ").filter(Boolean)
-  const sameBase = cleanText(deriveBaseName(lead)) === cleanText(target?.baseName || target?.key || "")
+  const explicitBase = cleanText(deriveBaseName(lead))
+  const targetBase = cleanText(target?.baseName || target?.key || "")
+  const sameBase = explicitBase === targetBase
   if (sameBase) return true
+  if (
+    explicitBase
+    && explicitBase !== targetBase
+    && target?.category === "drink"
+    && !preparations.length
+    && !firstRelationMatch(lead)
+  ) {
+    return false
+  }
   if (!hasGroupedContextForTarget(state, target)) return false
   const targetCountUnit = singularize(cleanText(target?.baseName || "").split(" ").at(-1) || "")
   const quantityUnit = inferTargetQuantityUnit(state, target)
@@ -1557,6 +1587,30 @@ function parseCookingAttachmentClause(state, clause) {
   }
 }
 
+function parseSubjectAttachmentClause(state, clause) {
+  const normalized = cleanText(clause)
+  const subjectMatch = normalized.match(/^(?<subject>(?!i\b)(?!we\b)(?!breakfast\b)(?!lunch\b)(?!dinner\b)(?!snack\b).+?)\s+(?<connector>had|has|with)\s+(?<ingredient>.+)$/i)
+  if (!subjectMatch?.groups?.subject || !subjectMatch?.groups?.ingredient) return null
+
+  const subjectText = stripCorrectionLead(subjectMatch.groups.subject || "")
+    .replace(/^(?:the|my|our|that|those|these)\s+/, "")
+    .trim()
+  if (!subjectText || hasDigits(subjectText) || looksLikeWorkoutOnly(subjectText)) return null
+  if (REST_PATTERN.test(subjectText) || REST_REFERENCE_ONLY_PATTERN.test(subjectText) || /^(?:rest|remainder)$/i.test(subjectText)) return null
+
+  const target = findCookingAttachmentTarget(state, subjectText)
+  if (!target) return null
+
+  const relation = firstRelationMatch(subjectMatch.groups.ingredient || "")?.relation || "with"
+  const ingredients = parseIngredientList(stripExclusionPhrases(subjectMatch.groups.ingredient), relation, clause)
+  if (!ingredients.length) return null
+
+  return {
+    target,
+    ingredients,
+  }
+}
+
 function parseGroupedPreparationAttachmentClause(state, clause) {
   const normalized = cleanText(clause)
   const relationTail = splitRelationTail(normalized)
@@ -1671,7 +1725,15 @@ function parseMeasuredFoodClause(clause, state = null, mealType = "") {
     const inferredPreparations = extractPreparations(rest)
     const remainingWords = deriveRemainingWords(rest, "", inferredPreparations)
     const preparationOnly = Boolean(inferredPreparations.length) && !remainingWords.length
-    const baseName = inheritedBaseName && (preparationOnly || !rest)
+    const explicitBaseFromUnit = unit && !GENERIC_PORTION_UNITS.has(unit)
+      ? deriveBaseName(unit)
+      : ""
+    const shouldInheritBase = Boolean(
+      inheritedBaseName
+      && (preparationOnly || !rest)
+      && !explicitBaseFromUnit
+    )
+    const baseName = shouldInheritBase
       ? inheritedBaseName
       : deriveBaseName(stripExclusionPhrases(label || mainText))
     const preparation = [...new Set([
@@ -1681,7 +1743,7 @@ function parseMeasuredFoodClause(clause, state = null, mealType = "") {
     if (/\brye\b/.test(normalized)) preparation.push("rye")
     const modifiers = extractItemQualifiers(rest || label || mainText, baseName, preparation)
     item = createItem({
-      label: defaultDisplayLabel(baseName, (inheritedBaseName && (preparationOnly || !rest)) ? baseName : (label || mainText)),
+      label: defaultDisplayLabel(baseName, shouldInheritBase ? baseName : (label || mainText)),
       baseName,
       quantity,
       preparation,
@@ -1904,6 +1966,26 @@ function mergeClauseIntoState(state, clause) {
     if (explicitCookingAttachment.queued) return true
     for (const ingredient of explicitCookingAttachment.ingredients || []) {
       changed = upsertItem(state, ingredient, { preferLast: true }) || changed
+    }
+    return changed
+  }
+
+  const subjectAttachment = parseSubjectAttachmentClause(state, clauseText)
+  if (subjectAttachment?.target) {
+    const targetReference = itemReferenceKey(subjectAttachment.target)
+    for (const ingredient of subjectAttachment.ingredients || []) {
+      const attachedRelation = ingredient.relation === "with" && subjectAttachment.target.preparation?.length
+        ? "cooked_in"
+        : ingredient.relation || "with"
+      changed = upsertItem(
+        state,
+        {
+          ...ingredient,
+          attachedTo: targetReference,
+          relation: attachedRelation,
+        },
+        { preferLast: true }
+      ) || changed
     }
     return changed
   }

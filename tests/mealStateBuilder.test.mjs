@@ -372,6 +372,48 @@ test("meal session keeps multiple foods and their specific cooking additions sep
   assert.match(String(session.items.find((item) => item.base_name === "butter")?.attached_to || ""), /^steak::/)
 })
 
+test("meal session keeps separate counted foods in the same turn instead of inheriting the previous base name", () => {
+  const { session } = replayMealConversation([
+    user("I had 3 beers and a burger"),
+  ])
+
+  assert.ok(session)
+  assert.equal(session.readyToLog, true)
+  assert.equal(session.summary, "3 beers, plus 1 burger")
+  assert.equal(session.items.filter((item) => !item.attached_to).length, 2)
+  assert.doesNotMatch(session.summary, /\bburger beer\b|\bbeer burger\b|\b1l\b/i)
+})
+
+test("meal session attaches subject-specific additions to the referenced item instead of the most recent item", () => {
+  const { session } = replayMealConversation([
+    user("I had 1 bowl salad and 1 bowl fries"),
+    user("the fries had gravy"),
+  ])
+
+  assert.ok(session)
+  assert.equal(session.readyToLog, true)
+  assert.equal(session.summary, "1 bowl salad, plus 1 bowl fries with gravy")
+  const gravy = session.items.find((item) => item.base_name === "gravy")
+  assert.ok(gravy)
+  assert.match(String(gravy.attached_to || ""), /^fry/)
+})
+
+test("meal session keeps separate quantified foods and attaches later subject-specific ingredients to the correct one", () => {
+  const { session } = replayMealConversation([
+    user("I had 300g steak"),
+    user("and 2 eggs"),
+    user("the steak had butter"),
+  ])
+
+  assert.ok(session)
+  assert.equal(session.readyToLog, true)
+  assert.equal(session.summary, "300g steak with butter, plus 2 eggs")
+  assert.equal(session.items.filter((item) => !item.attached_to).length, 2)
+  const butter = session.items.find((item) => item.base_name === "butter")
+  assert.ok(butter)
+  assert.match(String(butter.attached_to || ""), /^steak/)
+})
+
 test("meal session parses drink variants and attaches milk only to the intended drink", () => {
   const { session } = replayMealConversation([
     user("I had 2 coffees"),
@@ -522,6 +564,16 @@ test("meal session handles grouped totals and cooking additions across two hundr
       ],
       expect: [
         /1 bowl chips with gravy/i,
+      ],
+    },
+    {
+      name: "separate counted foods",
+      conversation: [
+        user("3 beers and a burger"),
+      ],
+      expect: [
+        /3 beers/i,
+        /1 burger/i,
       ],
     },
     {
