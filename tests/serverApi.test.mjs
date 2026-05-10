@@ -246,6 +246,46 @@ test("deterministic coach logging can emit separate breakfast and lunch meal act
   assert.equal(coach.actions?.[1]?.food_name, "200g steak, plus 1 cup rice")
 })
 
+test("deterministic coach logging handles grouped remainder preparations without corrupting the meal", async (t) => {
+  const port = randomPort()
+  const serverProcess = spawn(process.execPath, [serverEntry], {
+    cwd,
+    env: {
+      ...process.env,
+      OPENAI_COACH_PORT: String(port),
+      OPENAI_COACH_REQUIRE_AUTH: "false",
+      OPENAI_COACH_CORS_ORIGIN: "http://127.0.0.1:5173",
+      OPENFOODFACTS_ENABLED: "false",
+      OPENAI_API_KEY: "",
+      NODE_ENV: "production",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  })
+
+  t.after(async () => {
+    serverProcess.kill()
+  })
+
+  await waitForHealth(port)
+
+  const coachResponse = await fetch(`http://127.0.0.1:${port}/api/coach`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Origin: "http://127.0.0.1:5173",
+    },
+    body: JSON.stringify({
+      message: "I had 500g chicken total, 300g grilled, the rest fried in 20g olive oil",
+    }),
+  })
+  const coach = await coachResponse.json()
+  assert.equal(coachResponse.status, 200)
+  assert.equal(coach.actions?.[0]?.type, "log_meal")
+  assert.equal(coach.actions?.[0]?.food_name, "300g grilled chicken, plus 200g fried chicken cooked in 20g olive oil")
+  assert.ok(Number(coach.actions?.[0]?.protein_g) > 80)
+  assert.ok(Number(coach.actions?.[0]?.fat_g) > 10)
+})
+
 test("ready meal corrections outrank stray workout clarifications when OpenAI is unavailable", async (t) => {
   const port = randomPort()
   const serverProcess = spawn(process.execPath, [serverEntry], {

@@ -260,6 +260,51 @@ test("meal session supports grouped quantity splits for another food with prepar
   assert.equal(session.items.find((item) => item.base_name === "olive oil")?.attached_to, "chicken::fried")
 })
 
+test("meal session allocates grouped remainder to a new preparation-specific subgroup instead of attaching it to the wrong item", () => {
+  const { session } = replayMealConversation([
+    user("I had 500g chicken total, 300g grilled, the rest fried in 20g olive oil"),
+  ])
+
+  assert.ok(session)
+  assert.equal(session.readyToLog, true)
+  assert.equal(session.clarifyQuestion, "")
+  assert.equal(session.summary, "300g grilled chicken, plus 200g fried chicken cooked in 20g olive oil")
+  assert.equal(session.items.filter((item) => !item.attached_to).length, 2)
+  assert.equal(session.items.find((item) => item.base_name === "olive oil")?.attached_to, "chicken::fried")
+})
+
+test("meal session inherits grouped host bases so split variants stay attached to the shared food instead of turning into junk items", () => {
+  const { session } = replayMealConversation([
+    user("I had tacos"),
+    user("3 total"),
+    user("2 beef"),
+    user("the rest chicken"),
+  ])
+
+  assert.ok(session)
+  assert.equal(session.readyToLog, true)
+  assert.equal(session.clarifyQuestion, "")
+  assert.equal(session.summary, "2 beef tacos, plus 1 chicken taco")
+  assert.equal(session.items.filter((item) => !item.attached_to).length, 2)
+  assert.equal(session.items.every((item) => item.base_name === "taco"), true)
+})
+
+test("meal session keeps grouped drinks coherent when the remainder gets a later modifier", () => {
+  const { session } = replayMealConversation([
+    user("I had coffee"),
+    user("2 coffees total"),
+    user("1 black"),
+    user("the rest with milk"),
+  ])
+
+  assert.ok(session)
+  assert.equal(session.readyToLog, true)
+  assert.equal(session.clarifyQuestion, "")
+  assert.equal(session.summary, "1 black coffee, plus 1 coffee with milk")
+  assert.equal(session.items.filter((item) => !item.attached_to).length, 2)
+  assert.equal(session.items.find((item) => item.base_name === "milk")?.attached_to, "coffee::milk")
+})
+
 test("meal session keeps inline cooking-medium clauses attached to the intended measured subgroup", () => {
   const { session } = replayMealConversation([
     user("I had 300g fried chicken in 20g oil and 200g rice"),

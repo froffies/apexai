@@ -187,6 +187,7 @@ const QUESTION_PREFIX_PATTERN = /^(?:how many|how much|what(?:'s| is)?|can you|c
 const WORKOUT_ONLY_PATTERN = /\b(bench press|incline bench|overhead press|shoulder press|preacher curl|bicep curl|tricep pushdown|lat pulldown|pull up|push up|squat|deadlift|rdl|lunge|leg press|seated row|barbell row|treadmill|bike|rower|elliptical|stairmaster|sets?|reps?)\b/i
 const REMOVAL_PATTERN = /^(?:actually\s+)?(?:remove|without|skip|delete|drop)\s+(?<item>.+)$|^(?:actually\s+)?no\s+(?<item2>.+)$/i
 const REST_PATTERN = /^(?:the\s+)?rest(?:\s+of\s+(?:it|them))?(?:\s+was|\s+were)?\s+(?<details>.+)$/i
+const REST_REFERENCE_ONLY_PATTERN = /^(?:the\s+)?rest(?:\s+of\s+(?:it|them))?$/i
 const PREPARATION_PATTERNS = [
   ["hard boiled", /\bhard boiled\b/i],
   ["hard boiled", /\bhardboiled\b/i],
@@ -1260,7 +1261,7 @@ function canInheritGeneralizedDetails(details, target, state) {
   if (sameBase) return true
   if (!hasGroupedContextForTarget(state, target)) return false
   const targetCountUnit = singularize(cleanText(target?.baseName || "").split(" ").at(-1) || "")
-  const quantityUnit = normalizeUnit(target?.quantity?.unit || "")
+  const quantityUnit = inferTargetQuantityUnit(state, target)
   if (quantityUnit !== targetCountUnit) return false
   return leadTokens.length <= 2 && !/\d/.test(lead)
 }
@@ -1278,7 +1279,22 @@ function computeGroupedRemainder(state, target) {
   const actualAmount = comparable.reduce((total, entry) => total + entry.amount, 0)
   const remaining = declared.amount - actualAmount
   if (!(remaining > 0)) return null
-  return buildQuantity(remaining, declared.unit || target.quantity?.unit || "serve")
+  return buildQuantity(remaining, inferTargetQuantityUnit(state, target, declared.unit || target?.quantity?.unit || "serve"))
+}
+
+function inferTargetQuantityUnit(state, target, fallbackUnit = "") {
+  const directUnit = normalizeUnit(target?.quantity?.unit || "")
+  if (directUnit) return directUnit
+
+  const baseName = cleanText(target?.baseName || target?.key || state.lastGroupedBaseName || state.lastMainKey || "")
+  const declared = baseName
+    ? state.declaredTotals.find((entry) => cleanText(entry.baseName || "") === baseName)
+    : null
+  const declaredUnit = normalizeUnit(declared?.unit || "")
+  if (declaredUnit) return declaredUnit
+
+  const baseTail = singularize(baseName.split(" ").at(-1) || "")
+  return normalizeUnit(baseTail || fallbackUnit || (/\begg\b/.test(baseName) ? "egg" : "serve"))
 }
 
 function promoteGenericItemToDeclaredTotal(state, inheritedItem) {
@@ -1430,8 +1446,7 @@ function parseInheritedFoodClause(state, clause) {
   const detailSource = relationSource.lead || groupedPreparationMatch?.groups?.details || generalizedQuantityMatch?.groups?.details || restMatch?.groups?.details || normalized
   const inheritedUnit = groupedPreparationMatch?.groups?.unit
     || generalizedQuantityMatch?.groups?.unit
-    || target.quantity?.unit
-    || (/\begg\b/.test(target.baseName) ? "egg" : "serve")
+    || inferTargetQuantityUnit(state, target, /\begg\b/.test(target.baseName) ? "egg" : "serve")
   const quantity = restMatch
     ? computeGroupedRemainder(state, target)
     : hasInheritedReference
@@ -1517,7 +1532,9 @@ function parseCookingAttachmentClause(state, clause) {
   if (!relationMatch || relationMatch.relation !== "cooked_in") return null
   const subjectMatch = normalized.match(/^(?<subject>.+?)\s+(?:were|was)?\s*(?:cooking|cooked|fried|grilled|roasted|baked|sauteed|sautéed|boiled|poached|scrambled|steamed)\s+in\s+(?<ingredient>.+)$/i)
   if (!subjectMatch?.groups) return null
-  const normalizedSubject = stripCorrectionLead(subjectMatch.groups.subject)
+  const normalizedSubjectLead = stripCorrectionLead(subjectMatch.groups.subject || "")
+  if (normalizedSubjectLead.match(REST_PATTERN) || REST_REFERENCE_ONLY_PATTERN.test(normalizedSubjectLead)) return null
+  const normalizedSubject = normalizedSubjectLead
   if (normalizedSubject.match(new RegExp(`^(?:\\d+(?:\\.\\d+)?|${[...QUANTITY_WORDS.keys()].join("|")})\\s*(?:${QUANTITY_UNITS.join("|")})?\\b`, "i"))) {
     return null
   }
@@ -1547,7 +1564,9 @@ function parseGroupedPreparationAttachmentClause(state, clause) {
     ? { groups: { lead: relationTail.lead, ingredient: relationTail.attachments[0].ingredientText, connector: relationTail.attachments[0].relation } }
     : null
   if (!attachmentMatch?.groups) return null
-  const leadMatch = stripCorrectionLead(attachmentMatch.groups.lead).match(INHERITED_GROUP_PATTERN)
+  const normalizedLead = stripCorrectionLead(attachmentMatch.groups.lead)
+  const leadMatch = normalizedLead.match(INHERITED_GROUP_PATTERN)
+  const remainderMatch = normalizedLead.match(REST_PATTERN)
   const shorthandPreparations = extractPreparations(attachmentMatch.groups.lead || "")
   if (!leadMatch?.groups && !shorthandPreparations.length) return null
 
@@ -1563,6 +1582,20 @@ function parseGroupedPreparationAttachmentClause(state, clause) {
     attachmentMatch.groups.connector === "cooked_in" ? "cooked_in" : "with",
     clause,
   )
+
+  if (remainderMatch && target) {
+    const item = createItem({
+      label: defaultDisplayLabel(target.baseName, target.label || target.baseName),
+      baseName: target.baseName,
+      quantity: computeGroupedRemainder(state, target),
+      category: target.category,
+      preparation: preparations,
+      sourceMessage: clause,
+      variantKey: buildVariantSignature({ preparations }),
+      mealType: target.mealType || state.currentMealType,
+    })
+    return { item, ingredients }
+  }
 
   if (!leadMatch?.groups) {
     return { target, attachOnly: true, ingredients }
@@ -1875,6 +1908,28 @@ function mergeClauseIntoState(state, clause) {
     return changed
   }
 
+  if (parseDrinkDetailOnly(state, clauseText)) return true
+
+  const quantityOnly = parseQuantityOnly(normalized)
+  if (quantityOnly) return assignQuantityToPendingItem(state, quantityOnly)
+
+  const inheritedVariant = parseInheritedFoodClause(state, clauseText)
+  if (inheritedVariant?.item) {
+    promoteGenericItemToDeclaredTotal(state, inheritedVariant.item)
+    changed = upsertItem(state, inheritedVariant.item, { preferLast: true }) || changed
+    changed = resetConflictingDeclaredTotalsForItem(state, inheritedVariant.item, clauseText) || changed
+    changed = flushPendingAttachmentsForItem(state, inheritedVariant.item) || changed
+    for (const ingredient of inheritedVariant.attachedIngredients || []) {
+      const attachedRelation = ingredient.relation === "with" && inheritedVariant.item.preparation?.length
+        ? "cooked_in"
+        : ingredient.relation || "with"
+      changed = upsertItem(state, { ...ingredient, relation: attachedRelation }, { preferLast: true }) || changed
+    }
+    return changed
+  }
+
+  if (inheritedVariant) return false
+
   const groupedAttachment = parseGroupedPreparationAttachmentClause(state, clauseText)
   if (groupedAttachment?.attachOnly && groupedAttachment.target) {
     const targetReference = itemReferenceKey(groupedAttachment.target)
@@ -1936,23 +1991,6 @@ function mergeClauseIntoState(state, clause) {
       state.lastGroupedBaseName = cleanText(target.baseName || target.key || "")
       changed = attachLooseIngredientsToTarget(state, state.lastMainKey) || changed
       changed = flushPendingAttachmentsForItem(state, target) || changed
-    }
-    return changed
-  }
-
-  if (parseDrinkDetailOnly(state, clauseText)) return true
-
-  const quantityOnly = parseQuantityOnly(normalized)
-  if (quantityOnly) return assignQuantityToPendingItem(state, quantityOnly)
-
-  const inheritedVariant = parseInheritedFoodClause(state, clauseText)
-  if (inheritedVariant?.item) {
-    promoteGenericItemToDeclaredTotal(state, inheritedVariant.item)
-    changed = upsertItem(state, inheritedVariant.item, { preferLast: true }) || changed
-    changed = resetConflictingDeclaredTotalsForItem(state, inheritedVariant.item, clauseText) || changed
-    changed = flushPendingAttachmentsForItem(state, inheritedVariant.item) || changed
-    for (const ingredient of inheritedVariant.attachedIngredients || []) {
-      changed = upsertItem(state, ingredient, { preferLast: true }) || changed
     }
     return changed
   }
