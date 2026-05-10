@@ -2,6 +2,7 @@ import assert from "node:assert/strict"
 import test from "node:test"
 import {
   buildDeterministicMealAction,
+  buildDeterministicMealActions,
   buildDeterministicWorkoutAction,
   deterministicAlreadyLoggedReply,
   deterministicClarifyActionFromSession,
@@ -245,6 +246,122 @@ test("coach logging rules can repeat a recent meal deterministically", () => {
   assert.equal(action.food_name, "200g chicken, 1 cup rice, and 1 tbsp olive oil")
   assert.equal(action.meal_type, "lunch")
   assert.equal(action.calories, 640)
+})
+
+test("coach logging rules can emit separate deterministic meal actions for explicit breakfast and lunch groups", () => {
+  const actions = buildDeterministicMealActions({
+    mealSession: {
+      readyToLog: true,
+      alreadyLogged: false,
+      wantsLogging: true,
+      summary: "2 eggs, plus 1 slice toast, plus 200g steak, plus 1 cup rice",
+      items: [
+        {
+          base_name: "egg",
+          label: "Eggs",
+          category: "food",
+          quantity: { amount: 2, unit: "egg", text: "2 eggs" },
+          preparation: [],
+          exclusions: [],
+          attached_to: null,
+          relation: null,
+          meal_type: "breakfast",
+        },
+        {
+          base_name: "toast",
+          label: "Toast",
+          category: "food",
+          quantity: { amount: 1, unit: "slice", text: "1 slice" },
+          preparation: [],
+          exclusions: [],
+          attached_to: null,
+          relation: null,
+          meal_type: "breakfast",
+        },
+        {
+          base_name: "steak",
+          label: "Steak",
+          category: "food",
+          quantity: { amount: 200, unit: "g", text: "200g" },
+          preparation: [],
+          exclusions: [],
+          attached_to: null,
+          relation: null,
+          meal_type: "lunch",
+        },
+        {
+          base_name: "rice",
+          label: "Rice",
+          category: "food",
+          quantity: { amount: 1, unit: "cup", text: "1 cup" },
+          preparation: [],
+          exclusions: [],
+          attached_to: null,
+          relation: null,
+          meal_type: "lunch",
+        },
+      ],
+      meal_groups: [
+        {
+          meal_type: "breakfast",
+          summary: "2 eggs, plus 1 slice toast",
+          items: [
+            {
+              base_name: "egg",
+              label: "Eggs",
+              category: "food",
+              quantity: { amount: 2, unit: "egg", text: "2 eggs" },
+              attached_to: null,
+              relation: null,
+              meal_type: "breakfast",
+            },
+            {
+              base_name: "toast",
+              label: "Toast",
+              category: "food",
+              quantity: { amount: 1, unit: "slice", text: "1 slice" },
+              attached_to: null,
+              relation: null,
+              meal_type: "breakfast",
+            },
+          ],
+        },
+        {
+          meal_type: "lunch",
+          summary: "200g steak, plus 1 cup rice",
+          items: [
+            {
+              base_name: "steak",
+              label: "Steak",
+              category: "food",
+              quantity: { amount: 200, unit: "g", text: "200g" },
+              attached_to: null,
+              relation: null,
+              meal_type: "lunch",
+            },
+            {
+              base_name: "rice",
+              label: "Rice",
+              category: "food",
+              quantity: { amount: 1, unit: "cup", text: "1 cup" },
+              attached_to: null,
+              relation: null,
+              meal_type: "lunch",
+            },
+          ],
+        },
+      ],
+    },
+    explicitActions: [],
+    prompt: "breakfast was eggs and toast, lunch was steak and rice",
+  })
+
+  assert.equal(actions.length, 2)
+  assert.equal(actions[0].type, "log_meal")
+  assert.equal(actions[0].meal_type, "breakfast")
+  assert.equal(actions[0].food_name, "2 eggs, plus 1 slice toast")
+  assert.equal(actions[1].meal_type, "lunch")
+  assert.equal(actions[1].food_name, "200g steak, plus 1 cup rice")
 })
 
 test("coach logging rules build a deterministic workout action from ready workout state", () => {

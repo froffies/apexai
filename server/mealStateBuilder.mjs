@@ -174,6 +174,9 @@ const QUANTITY_UNITS = [
 ]
 
 const MEAL_VERBS = /\b(had|ate|drank|log|track|save|add|include|breakfast|lunch|dinner|snack|meal|calories|macros|protein|carbs|fat)\b/i
+const MEAL_TYPES = ["breakfast", "lunch", "dinner", "snack"]
+const MEAL_TYPE_PREFIX_PATTERN = /^(?:(?<mealType>breakfast|lunch|dinner|snack)\b(?:\s*(?:was|is|:|-)\s*)?)(?<details>.*)$/i
+const MEAL_TYPE_SUFFIX_PATTERN = /^(?<details>.+?)\s+\b(?:for|at)\s+(?<mealType>breakfast|lunch|dinner|snack)\b$/i
 const CORRECTION_PREFIX = /^(actually|no\b|nah\b|correction|change that|make that|it was|used to|used for)/i
 const FINALISE_PATTERN = /^(?:i just did|i already did|that'?s it|thats it|log it|save it|go ahead|that was it)$/i
 const MEAL_REFERENCE_PATTERN = /\b(no sugar|no milk|without sugar|without milk|cooked in|fried in|used to fry|used for|earl grey|the eggs?|the tea|the coffee|the toast|the beans?|the chicken|the rice|the butter|the oil)\b/i
@@ -231,6 +234,11 @@ function cleanText(value) {
     .replace(/[’']/g, "'")
     .replace(/\s+/g, " ")
     .trim()
+}
+
+function normalizeMealType(value) {
+  const text = cleanText(value)
+  return MEAL_TYPES.includes(text) ? text : ""
 }
 
 function titleCase(text) {
@@ -323,8 +331,6 @@ function uniqueNormalizedValues(values = []) {
 function normalizeLabel(label) {
   return cleanText(label)
     .replace(/^(?:i had|had|i ate|ate|i drank|drank|log|track|save|add|include)\s+/, "")
-    .replace(/\b(?:breakfast|lunch|dinner|snack)\s+was\b/g, "")
-    .replace(/\b(?:for breakfast|for lunch|for dinner|as a snack)\b/g, "")
     .replace(/\b(?:please|thanks|thank you)\b/g, "")
     .replace(/[?!.,]+$/g, "")
     .replace(/\s+/g, " ")
@@ -533,6 +539,7 @@ function toInternalItem(item = {}) {
     relation: item.relation || "",
     sourceMessage: item.sourceMessage || "",
     variantKey: normalizeVariantKey(item.variantKey || item.variant_key || ""),
+    mealType: normalizeMealType(item.mealType || item.meal_type || ""),
   }
 }
 
@@ -778,7 +785,7 @@ function appendUnique(list, value) {
   return [...list, value]
 }
 
-function createItem({ label = "", baseName = "", quantity = null, category = "", preparation = [], modifiers = [], exclusions = [], attachedTo = null, relation = "", sourceMessage = "", variantKey = "" }) {
+function createItem({ label = "", baseName = "", quantity = null, category = "", preparation = [], modifiers = [], exclusions = [], attachedTo = null, relation = "", sourceMessage = "", variantKey = "", mealType = "" }) {
   const safeBaseName = baseName || deriveBaseName(label)
   const safeCategory = category || detectCategory(safeBaseName || label)
   return {
@@ -794,6 +801,7 @@ function createItem({ label = "", baseName = "", quantity = null, category = "",
     relation,
     sourceMessage,
     variantKey: normalizeVariantKey(variantKey),
+    mealType: normalizeMealType(mealType),
   }
 }
 
@@ -818,8 +826,9 @@ function itemReferenceKey(item) {
   if (!base) return ""
   const prep = preparationKey(item)
   const modifiers = modifierKey(item)
+  const mealType = normalizeMealType(item?.mealType || item?.meal_type || "")
   const variant = cleanText(item?.variantKey || "")
-  const detailKey = [prep, modifiers, variant].filter(Boolean).join("::")
+  const detailKey = [mealType, prep, modifiers, variant].filter(Boolean).join("::")
   return detailKey ? `${base}::${detailKey}` : base
 }
 
@@ -842,13 +851,15 @@ function findBestItemIndex(state, nextItem) {
   const nextAttachment = cleanText(nextItem.attachedTo || "")
   const nextPreparationKey = preparationKey(nextItem)
   const nextModifierKey = modifierKey(nextItem)
+  const nextMealType = normalizeMealType(nextItem.mealType || nextItem.meal_type || "")
   const nextVariantKey = cleanText(nextItem.variantKey || "")
   const candidates = state.items
     .map((item, index) => ({ item, index }))
     .filter(({ item }) => {
       const existingKey = cleanText(item.baseName || item.key)
       const sameAttachment = cleanText(item.attachedTo || "") === nextAttachment
-      return sameAttachment && (
+      const sameMealType = normalizeMealType(item.mealType || item.meal_type || "") === nextMealType
+      return sameAttachment && sameMealType && (
         existingKey === key
         || existingKey.includes(key)
         || key.includes(existingKey)
@@ -894,6 +905,7 @@ function upsertItem(state, nextItem, { preferLast = true } = {}) {
       state.lastMainKey = key
       state.lastMainReference = itemReferenceKey(inserted)
       rememberGroupedBase(state, key)
+      state.currentMealType = normalizeMealType(inserted.mealType || state.currentMealType)
     }
     if (nextItem.category === "drink") state.lastDrinkKey = key
     return true
@@ -912,6 +924,7 @@ function upsertItem(state, nextItem, { preferLast = true } = {}) {
     attachedTo: nextItem.attachedTo ?? current.attachedTo,
     sourceMessage: nextItem.sourceMessage || current.sourceMessage,
     variantKey: normalizeVariantKey(nextItem.variantKey || current.variantKey || ""),
+    mealType: normalizeMealType(nextItem.mealType || current.mealType || ""),
   }
 
   if (preferLast && nextItem.quantity) merged.quantity = nextItem.quantity
@@ -920,6 +933,7 @@ function upsertItem(state, nextItem, { preferLast = true } = {}) {
     state.lastMainKey = key
     state.lastMainReference = itemReferenceKey(merged)
     rememberGroupedBase(state, key)
+    state.currentMealType = normalizeMealType(merged.mealType || state.currentMealType)
   }
   if (merged.category === "drink") state.lastDrinkKey = key
   return true
@@ -1101,6 +1115,43 @@ function parseIngredientPhrase(text) {
     .replace(/^just\s+/, "")
     .trim()
   return buildIngredientItem(source, relation, text)
+}
+
+function stripMealTypePrefix(text = "") {
+  const normalized = String(text || "").trim()
+  if (!normalized) return { explicitMealType: "", mealType: "", text: "" }
+
+  const prefixMatch = normalized.match(MEAL_TYPE_PREFIX_PATTERN)
+  if (prefixMatch?.groups) {
+    const explicitMealType = normalizeMealType(prefixMatch.groups.mealType)
+    return {
+      explicitMealType,
+      mealType: explicitMealType,
+      text: String(prefixMatch.groups.details || "").trim(),
+    }
+  }
+
+  const suffixMatch = normalized.match(MEAL_TYPE_SUFFIX_PATTERN)
+  if (suffixMatch?.groups) {
+    const explicitMealType = normalizeMealType(suffixMatch.groups.mealType)
+    return {
+      explicitMealType,
+      mealType: explicitMealType,
+      text: String(suffixMatch.groups.details || "").trim(),
+    }
+  }
+
+  const snackSuffixMatch = normalized.match(/^(?<details>.+?)\s+as\s+a\s+(?<mealType>snack)\b$/i)
+  if (snackSuffixMatch?.groups) {
+    const explicitMealType = normalizeMealType(snackSuffixMatch.groups.mealType)
+    return {
+      explicitMealType,
+      mealType: explicitMealType,
+      text: String(snackSuffixMatch.groups.details || "").trim(),
+    }
+  }
+
+  return { explicitMealType: "", mealType: "", text: normalized }
 }
 
 function parseLeadingHostVariantPhrase(text = "") {
@@ -1310,6 +1361,7 @@ function ensureReferenceItem(state, clause) {
     preparation: preparations.length ? preparations : pendingPreparation,
     sourceMessage: clause,
     variantKey: buildVariantSignature({ preparations: preparations.length ? preparations : pendingPreparation }),
+    mealType: state.currentMealType,
   })
   upsertItem(state, item, { preferLast: false })
   return state.items.find((entry) => !entry.attachedTo && cleanText(entry.baseName || entry.key || "") === baseName) || item
@@ -1422,6 +1474,7 @@ function parseInheritedFoodClause(state, clause) {
     exclusions,
     sourceMessage: clause,
     variantKey,
+    mealType: target.mealType || state.currentMealType,
   })
 
   const attachedIngredients = relationSource.attachments
@@ -1527,11 +1580,12 @@ function parseGroupedPreparationAttachmentClause(state, clause) {
     preparation: preparations,
     sourceMessage: clause,
     variantKey: buildVariantSignature({ preparations }),
+    mealType: target?.mealType || state.currentMealType,
   })
   return { item, ingredients }
 }
 
-function parseMeasuredFoodClause(clause, state = null) {
+function parseMeasuredFoodClause(clause, state = null, mealType = "") {
   const normalized = stripCorrectionLead(clause)
   const normalizedPreparations = extractPreparations(normalized)
   const relationTail = splitRelationTail(normalized).attachments.length
@@ -1570,6 +1624,7 @@ function parseMeasuredFoodClause(clause, state = null) {
       exclusions,
       sourceMessage: clause,
       variantKey: buildVariantSignature({ preparations: variantPreparations, modifiers }),
+      mealType,
     })
   } else if (quantityMatch?.groups) {
     const unit = normalizeUnit(quantityMatch.groups.unit)
@@ -1601,6 +1656,7 @@ function parseMeasuredFoodClause(clause, state = null) {
       exclusions,
       sourceMessage: clause,
       variantKey: buildVariantSignature({ preparations: preparation, modifiers }),
+      mealType,
     })
   } else {
     const contentWords = mainText
@@ -1618,6 +1674,7 @@ function parseMeasuredFoodClause(clause, state = null) {
       exclusions,
       sourceMessage: clause,
       variantKey: buildVariantSignature({ preparations, modifiers }),
+      mealType,
     })
   }
 
@@ -1735,9 +1792,14 @@ function findLooseAttachmentTarget(state, relation = "", ingredientText = "") {
 }
 
 function mergeClauseIntoState(state, clause) {
-  const normalized = cleanText(clause)
+  const mealTypeClause = stripMealTypePrefix(clause)
+  if (mealTypeClause.explicitMealType) {
+    state.currentMealType = mealTypeClause.explicitMealType
+  }
+  const clauseText = mealTypeClause.text || ""
+  const normalized = cleanText(clauseText)
   const normalizedWithoutAlso = normalized.replace(/^also\s+/, "")
-  if (!normalized) return false
+  if (!normalized) return Boolean(mealTypeClause.explicitMealType)
 
   let changed = false
 
@@ -1747,7 +1809,7 @@ function mergeClauseIntoState(state, clause) {
     return true
   }
 
-  if (detectQuestionOnlyTurn(clause) && state.items.length) {
+  if (detectQuestionOnlyTurn(clauseText) && state.items.length) {
     state.answerOnly = true
     return false
   }
@@ -1756,7 +1818,7 @@ function mergeClauseIntoState(state, clause) {
   if (!relationOnlySource.lead && relationOnlySource.attachments.length && relationOnlySource.attachments[0].relation !== "cooked_in") {
     const attachment = relationOnlySource.attachments[0]
     const ingredients = stripExclusionPhrases(attachment.ingredientText)
-      ? parseIngredientList(stripExclusionPhrases(attachment.ingredientText), attachment.relation, clause)
+      ? parseIngredientList(stripExclusionPhrases(attachment.ingredientText), attachment.relation, clauseText)
       : []
     const target = findLooseAttachmentTarget(state, attachment.relation, attachment.ingredientText)
     if (!target) {
@@ -1795,7 +1857,7 @@ function mergeClauseIntoState(state, clause) {
     if (removedBase) return removeItemsMatchingBaseName(state, removedBase)
   }
 
-  const declaredTotal = parseDeclaredTotalClause(clause)
+  const declaredTotal = parseDeclaredTotalClause(clauseText)
   if (declaredTotal) {
     if (!declaredTotal.baseName) {
       declaredTotal.baseName = cleanText(state.lastGroupedBaseName || state.lastMainKey || "")
@@ -1803,7 +1865,7 @@ function mergeClauseIntoState(state, clause) {
     return recordDeclaredTotal(state, declaredTotal)
   }
 
-  const explicitCookingAttachment = parseCookingAttachmentClause(state, clause)
+  const explicitCookingAttachment = parseCookingAttachmentClause(state, clauseText)
   if (explicitCookingAttachment) {
     if (explicitCookingAttachment.ignored) return true
     if (explicitCookingAttachment.queued) return true
@@ -1813,7 +1875,7 @@ function mergeClauseIntoState(state, clause) {
     return changed
   }
 
-  const groupedAttachment = parseGroupedPreparationAttachmentClause(state, clause)
+  const groupedAttachment = parseGroupedPreparationAttachmentClause(state, clauseText)
   if (groupedAttachment?.attachOnly && groupedAttachment.target) {
     const targetReference = itemReferenceKey(groupedAttachment.target)
     for (const ingredient of groupedAttachment.ingredients || []) {
@@ -1835,7 +1897,7 @@ function mergeClauseIntoState(state, clause) {
   if (groupedAttachment?.item) {
     promoteGenericItemToDeclaredTotal(state, groupedAttachment.item)
     changed = upsertItem(state, groupedAttachment.item, { preferLast: true }) || changed
-    changed = resetConflictingDeclaredTotalsForItem(state, groupedAttachment.item, clause) || changed
+    changed = resetConflictingDeclaredTotalsForItem(state, groupedAttachment.item, clauseText) || changed
     changed = flushPendingAttachmentsForItem(state, groupedAttachment.item) || changed
     if (groupedAttachment.ingredients?.length) {
       for (const ingredient of groupedAttachment.ingredients) {
@@ -1857,7 +1919,7 @@ function mergeClauseIntoState(state, clause) {
   }
 
   if (/^the\s+/.test(normalized)) {
-    const target = ensureReferenceItem(state, clause)
+    const target = ensureReferenceItem(state, clauseText)
     if (target) {
       state.lastMainKey = cleanText(target.baseName || target.key || "")
       state.lastGroupedBaseName = cleanText(target.baseName || target.key || "")
@@ -1868,7 +1930,7 @@ function mergeClauseIntoState(state, clause) {
   }
 
   if (/^(?:used to fry|used for|for)\s+the\s+/.test(normalized)) {
-    const target = ensureReferenceItem(state, clause)
+    const target = ensureReferenceItem(state, clauseText)
     if (target) {
       state.lastMainKey = cleanText(target.baseName || target.key || "")
       state.lastGroupedBaseName = cleanText(target.baseName || target.key || "")
@@ -1878,16 +1940,16 @@ function mergeClauseIntoState(state, clause) {
     return changed
   }
 
-  if (parseDrinkDetailOnly(state, clause)) return true
+  if (parseDrinkDetailOnly(state, clauseText)) return true
 
   const quantityOnly = parseQuantityOnly(normalized)
   if (quantityOnly) return assignQuantityToPendingItem(state, quantityOnly)
 
-  const inheritedVariant = parseInheritedFoodClause(state, clause)
+  const inheritedVariant = parseInheritedFoodClause(state, clauseText)
   if (inheritedVariant?.item) {
     promoteGenericItemToDeclaredTotal(state, inheritedVariant.item)
     changed = upsertItem(state, inheritedVariant.item, { preferLast: true }) || changed
-    changed = resetConflictingDeclaredTotalsForItem(state, inheritedVariant.item, clause) || changed
+    changed = resetConflictingDeclaredTotalsForItem(state, inheritedVariant.item, clauseText) || changed
     changed = flushPendingAttachmentsForItem(state, inheritedVariant.item) || changed
     for (const ingredient of inheritedVariant.attachedIngredients || []) {
       changed = upsertItem(state, ingredient, { preferLast: true }) || changed
@@ -1896,7 +1958,7 @@ function mergeClauseIntoState(state, clause) {
   }
 
   if (/^(?:cooked|fried|used)\s+(?:in|to fry)\s+/.test(normalizedWithoutAlso)) {
-    const ingredients = parseIngredientList(normalizedWithoutAlso.replace(/^(?:cooked|fried|used)\s+(?:in|to fry)\s+/, ""), "cooked_in", clause)
+    const ingredients = parseIngredientList(normalizedWithoutAlso.replace(/^(?:cooked|fried|used)\s+(?:in|to fry)\s+/, ""), "cooked_in", clauseText)
     if (ingredients.length) {
       const cookingTarget = findCookingMediumTarget(state)
       if (!cookingTarget) {
@@ -1913,13 +1975,13 @@ function mergeClauseIntoState(state, clause) {
     }
   }
 
-  const { item, attachedIngredients } = parseMeasuredFoodClause(clause, state)
+  const { item, attachedIngredients } = parseMeasuredFoodClause(clauseText, state, state.currentMealType)
   let nextItem = null
   if (item) {
     promoteGenericItemToDeclaredTotal(state, item)
     nextItem = applyPendingQuantity(state, item)
     changed = upsertItem(state, nextItem, { preferLast: true }) || changed
-    changed = resetConflictingDeclaredTotalsForItem(state, nextItem, clause) || changed
+    changed = resetConflictingDeclaredTotalsForItem(state, nextItem, clauseText) || changed
     changed = flushPendingAttachmentsForItem(state, nextItem) || changed
   }
   for (const attachedIngredient of attachedIngredients || []) {
@@ -2025,6 +2087,53 @@ function describeIngredient(item) {
   const prep = prepWords.length ? `${prepWords.join(" ")} ` : ""
   const label = cleanText(item.label || item.baseName || "")
   return `${quantityText}${prep}${label}`.replace(/\s+/g, " ").trim()
+}
+
+function buildMealGroupState(state, mealType = "") {
+  const normalizedMealType = normalizeMealType(mealType)
+  const primaryItems = state.items.filter((item) => !item.attachedTo && normalizeMealType(item.mealType || item.meal_type || "") === normalizedMealType)
+  if (!primaryItems.length) return null
+  const references = new Set(primaryItems.map((item) => itemReferenceKey(item)))
+  const attachments = state.items.filter((item) => item.attachedTo && references.has(cleanText(item.attachedTo)))
+  return {
+    ...state,
+    items: [...primaryItems, ...attachments],
+  }
+}
+
+function summarizeMealGroup(state, mealType = "") {
+  const groupState = buildMealGroupState(state, mealType)
+  if (!groupState) return ""
+  return groupState.items
+    .filter((item) => !item.attachedTo)
+    .map((item) => describeItem(item, groupState))
+    .join(", plus ")
+}
+
+function buildMealGroups(state) {
+  const groupedMealTypes = [...new Set(
+    state.items
+      .filter((item) => !item.attachedTo)
+      .map((item) => normalizeMealType(item.mealType || item.meal_type || ""))
+      .filter(Boolean)
+  )]
+
+  if (groupedMealTypes.length <= 1) return []
+
+  return groupedMealTypes
+    .map((mealType) => {
+      const groupState = buildMealGroupState(state, mealType)
+      if (!groupState) return null
+      const summary = summarizeMealGroup(state, mealType)
+      return summary
+        ? {
+            meal_type: mealType,
+            summary,
+            items: groupState.items.map((item) => cloneItem(item)),
+          }
+        : null
+    })
+    .filter(Boolean)
 }
 
 function summarizeMeal(state) {
@@ -2197,6 +2306,7 @@ function seedStateFromExistingSession(state, existingSession) {
   state.lastMainReference = cleanText(existingSession.lastMainReference || itemReferenceKey(state.items.findLast?.((item) => item.category === "food" && !item.attachedTo) || {}) || state.lastMainReference)
   state.lastDrinkKey = cleanText(existingSession.lastDrinkKey || state.items.findLast?.((item) => item.category === "drink")?.baseName || state.lastDrinkKey)
   state.lastGroupedBaseName = cleanText(existingSession.lastGroupedBaseName || state.lastMainKey || state.lastGroupedBaseName)
+  state.currentMealType = normalizeMealType(existingSession.currentMealType || state.items.findLast?.((item) => !item.attachedTo && item.category === "food")?.mealType || state.currentMealType)
   state.declaredTotals = safeArray(existingSession.declaredTotals, 8).map((entry) => ({
     amount: Number(entry?.amount) || 0,
     unit: normalizeUnit(entry?.unit || ""),
@@ -2222,6 +2332,7 @@ export function emptyMealSession() {
   return {
     active: false,
     items: [],
+    meal_groups: [],
     clarificationAttempts: 0,
     clarificationCounts: {},
     readyToLog: false,
@@ -2238,6 +2349,7 @@ export function emptyMealSession() {
     lastMainReference: "",
     lastGroupedBaseName: "",
     lastDrinkKey: "",
+    currentMealType: "",
     declaredTotals: [],
     pendingAttachments: [],
     pendingQuantities: [],
@@ -2259,6 +2371,7 @@ export function buildMealStateFromConversation(recentMessages = [], currentMessa
     lastMainReference: "",
     lastGroupedBaseName: "",
     lastDrinkKey: "",
+    currentMealType: "",
     mealConversation: false,
     shouldStopClarifying: false,
     readyToLog: false,
@@ -2323,6 +2436,7 @@ export function buildMealStateFromConversation(recentMessages = [], currentMessa
   }
   state.readyToLog = state.items.some((item) => !item.attachedTo) && state.missingItems.length === 0
   state.summary = summarizeMeal(state)
+  state.meal_groups = buildMealGroups(state)
   state.clarifyQuestion = state.readyToLog ? "" : buildClarifyQuestion(state)
   if (state.suppressed) {
     state.items = []
@@ -2351,36 +2465,34 @@ export function buildMealContext(recentMessages = [], currentMessage = "", exist
   const mealState = buildMealStateFromConversation(recentMessages, currentMessage, existingSession)
   if (!mealState.mealConversation && !mealState.suppressed) return null
 
+  const toExternalItem = (item) => ({
+    base_name: item.baseName,
+    label: item.label,
+    category: item.category,
+    quantity: item.quantity ? { ...item.quantity } : null,
+    preparation: item.preparation,
+    modifiers: item.modifiers,
+    exclusions: item.exclusions,
+    attached_to: item.attachedTo || null,
+    relation: item.relation || null,
+    variant_key: item.variantKey || "",
+    meal_type: normalizeMealType(item.mealType || item.meal_type || ""),
+  })
+
   return {
     ...mealState,
-    items: mealState.items.map((item) => ({
-      base_name: item.baseName,
-      label: item.label,
-      category: item.category,
-      quantity: item.quantity ? { ...item.quantity } : null,
-      preparation: item.preparation,
-      modifiers: item.modifiers,
-      exclusions: item.exclusions,
-      attached_to: item.attachedTo || null,
-      relation: item.relation || null,
-      variant_key: item.variantKey || "",
+    items: mealState.items.map((item) => toExternalItem(item)),
+    meal_groups: safeArray(mealState.meal_groups, 8).map((group) => ({
+      meal_type: normalizeMealType(group.meal_type || ""),
+      summary: String(group.summary || "").trim(),
+      items: safeArray(group.items, 16).map((item) => toExternalItem(item)),
     })),
     lastMainReference: mealState.lastMainReference,
+    currentMealType: normalizeMealType(mealState.currentMealType || ""),
     thread_messages: mealState.threadTurns?.map((entry) => ({ role: entry.role, content: String(entry.content || "") })) || [],
     declaredTotals: mealState.declaredTotals.map((entry) => ({ ...entry })),
     pendingAttachments: mealState.pendingAttachments.map((entry) => ({
-      ingredient: {
-        base_name: entry.ingredient.baseName,
-        label: entry.ingredient.label,
-        category: entry.ingredient.category,
-        quantity: entry.ingredient.quantity ? { ...entry.ingredient.quantity } : null,
-        preparation: entry.ingredient.preparation,
-        modifiers: entry.ingredient.modifiers,
-        exclusions: entry.ingredient.exclusions,
-        attached_to: entry.ingredient.attachedTo || null,
-        relation: entry.ingredient.relation || null,
-        variant_key: entry.ingredient.variantKey || "",
-      },
+      ingredient: toExternalItem(entry.ingredient),
       targetBaseName: entry.targetBaseName,
       targetPreparations: [...entry.targetPreparations],
     })),

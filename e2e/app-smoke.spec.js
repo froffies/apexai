@@ -1243,6 +1243,81 @@ test("coach corrections still update a saved meal after redundant post-save foll
   await expect(todayMealsSection.getByText("17 fried eggs cooked in 100g salted butter, plus 250ml Earl Grey tea with no milk and no sugar")).toHaveCount(0)
 })
 
+test("coach can save explicit breakfast and lunch groups as separate nutrition entries", async ({ page }) => {
+  await seedOnboardedProfile(page)
+  await page.route("**/api/coach", async (route) => {
+    const body = route.request().postDataJSON()
+    const message = String(body.message || "").toLowerCase()
+    if (!message.includes("breakfast was 2 eggs") || !message.includes("lunch was 200g steak")) {
+      return route.fallback()
+    }
+
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        reply: "Saved to today's nutrition: Breakfast - 2 eggs, plus 1 slice toast; Lunch - 200g steak, plus 1 cup rice.",
+        actions: [
+          {
+            type: "log_meal",
+            food_name: "2 eggs, plus 1 slice toast",
+            meal_type: "breakfast",
+            quantity: "1 meal",
+            calories: 242,
+            protein_g: 16.6,
+            carbs_g: 16.6,
+            fat_g: 11.6,
+            estimated: true,
+            nutrition_source: "Coach estimate from accumulated meal details across chat",
+          },
+          {
+            type: "log_meal",
+            food_name: "200g steak, plus 1 cup rice",
+            meal_type: "lunch",
+            quantity: "1 meal",
+            calories: 666,
+            protein_g: 57.4,
+            carbs_g: 45,
+            fat_g: 27.2,
+            estimated: true,
+            nutrition_source: "Coach estimate from accumulated meal details across chat",
+          },
+        ],
+        warnings: [],
+        meal_session: {
+          active: true,
+          mealConversation: true,
+          readyToLog: true,
+          clarificationAttempts: 0,
+          clarificationCounts: {},
+          summary: "2 eggs, plus 1 slice toast, plus 200g steak, plus 1 cup rice",
+          clarifyQuestion: "",
+          meal_groups: [
+            { meal_type: "breakfast", summary: "2 eggs, plus 1 slice toast", items: [] },
+            { meal_type: "lunch", summary: "200g steak, plus 1 cup rice", items: [] },
+          ],
+          items: [],
+        },
+        workout_session: {},
+      }),
+    })
+  })
+
+  await page.goto("/Coach")
+  const composer = page.getByPlaceholder(/log bench 80kg for 4 sets of 6/i)
+  await composer.fill("breakfast was 2 eggs and 1 slice toast, lunch was 200g steak and 1 cup rice")
+  await page.getByRole("button", { name: /^Send$/i }).click()
+  await expect(page.getByText(/saved to today's nutrition: breakfast - 2 eggs, plus 1 slice toast; lunch - 200g steak, plus 1 cup rice\./i)).toBeVisible()
+
+  await page.goto("/Nutrition")
+  const todayMealsSection = page.locator("section").filter({ has: page.getByRole("heading", { name: /today's meals/i }) })
+  await expect(todayMealsSection.getByText("2 eggs, plus 1 slice toast")).toBeVisible()
+  await expect(todayMealsSection.getByText("200g steak, plus 1 cup rice")).toBeVisible()
+  await page.reload()
+  await expect(todayMealsSection.getByText("2 eggs, plus 1 slice toast")).toBeVisible()
+  await expect(todayMealsSection.getByText("200g steak, plus 1 cup rice")).toBeVisible()
+})
+
 test("coach additive follow-ups update a saved meal instead of creating a duplicate", async ({ page }) => {
   await seedOnboardedProfile(page)
   await page.goto("/Coach")

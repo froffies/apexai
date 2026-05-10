@@ -210,6 +210,7 @@ function seedLegacyMealSession(session) {
       attached_to: item.attached_to || item.attachedTo || null,
       relation: item.relation || null,
       variant_key: item.variant_key || item.variantKey || "",
+      meal_type: item.meal_type || item.mealType || "",
     })),
     clarificationAttempts: Number(session.clarificationAttempts) || 0,
     clarificationCounts: { ...(session.clarificationCounts || {}) },
@@ -227,6 +228,7 @@ function seedLegacyMealSession(session) {
     lastMainReference: session.lastMainReference || "",
     lastGroupedBaseName: session.lastGroupedBaseName || "",
     lastDrinkKey: session.lastDrinkKey || "",
+    currentMealType: session.currentMealType || "",
     declaredTotals: Array.isArray(session.declaredTotals) ? session.declaredTotals.map((entry) => ({ ...entry })) : [],
     pendingAttachments: Array.isArray(session.pendingAttachments) ? session.pendingAttachments.map((entry) => ({ ...entry })) : [],
     pendingQuantities: Array.isArray(session.pendingQuantities) ? session.pendingQuantities.map((entry) => ({ ...entry })) : [],
@@ -733,6 +735,8 @@ function buildWorkoutSessionState(recentMessages = [], currentMessage = "", exis
 export function emptyMealSessionState() {
   return {
     ...emptyLegacyMealSession(),
+    meal_groups: [],
+    currentMealType: "",
     referenceMeal: null,
     persisted: false,
     persistedMealId: "",

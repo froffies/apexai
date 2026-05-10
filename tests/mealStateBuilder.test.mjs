@@ -530,6 +530,24 @@ function normalizePrimaryQuantities(items, baseName, unit) {
     .reduce((total, item) => total + Number(item.quantity?.amount || 0), 0)
 }
 
+test("meal session keeps explicit breakfast and lunch groups separate inside one conversation", () => {
+  const { session } = replayMealConversation([
+    user("breakfast was 2 eggs and 1 slice toast"),
+    user("lunch was 200g steak and 1 cup rice"),
+  ])
+
+  assert.ok(session)
+  assert.equal(session.readyToLog, true)
+  assert.equal(session.clarifyQuestion, "")
+  assert.equal(session.meal_groups.length, 2)
+  assert.deepEqual(
+    session.meal_groups.map((group) => group.meal_type),
+    ["breakfast", "lunch"],
+  )
+  assert.equal(session.meal_groups[0].summary, "2 eggs, plus 1 slice toast")
+  assert.equal(session.meal_groups[1].summary, "200g steak, plus 1 cup rice")
+})
+
 test("meal session fuzzes two hundred randomized grouped meals without corrupting relationships", () => {
   const random = createSeededRandom(426913)
   const templates = [

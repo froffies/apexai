@@ -6,12 +6,13 @@ import { createClient } from "@supabase/supabase-js"
 import { searchVerifiedFoods, verifiedFoods } from "../src/lib/nutritionDatabase.js"
 import { buildCoachSessionState } from "./coachSessionState.mjs"
 import {
-  buildDeterministicMealAction,
+  buildDeterministicMealActions,
   buildDeterministicWorkoutAction,
   deterministicAlreadyLoggedReply,
   deterministicClarifyActionFromSession,
   formatDeterministicMealAnswer,
   summarizeCoachAction,
+  summarizeCoachActions,
 } from "./coachLoggingRules.mjs"
 import { normalizeCoachResponse } from "./normalizeCoachResponse.mjs"
 
@@ -827,16 +828,16 @@ async function handleCoach(request, response) {
   }
 
   if (mealContext?.readyToLog) {
-    const mealAction = buildDeterministicMealAction({
+    const mealActions = buildDeterministicMealActions({
       mealSession: mealContext,
       explicitActions: [],
       prompt: body.message,
       candidateFoodMatches,
       allowAnswerOnly: mealContext?.answerOnly,
     })
-    if (mealContext?.answerOnly && mealAction) {
+    if (mealContext?.answerOnly && mealActions[0]) {
       sendJson(response, 200, {
-        reply: formatDeterministicMealAnswer(mealAction),
+        reply: formatDeterministicMealAnswer(mealActions[0]),
         actions: [],
         warnings: [],
         meal_session: mealContext,
@@ -844,10 +845,10 @@ async function handleCoach(request, response) {
       }, requestResponseOrigin(request))
       return
     }
-    if (mealAction) {
+    if (mealActions.length) {
       sendJson(response, 200, {
-        reply: summarizeCoachAction(mealAction),
-        actions: [mealAction],
+        reply: summarizeCoachActions(mealActions) || summarizeCoachAction(mealActions[0]),
+        actions: mealActions,
         warnings: [],
         meal_session: mealContext,
         workout_session: workoutContext,

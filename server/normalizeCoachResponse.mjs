@@ -1,5 +1,5 @@
 import {
-  buildDeterministicMealAction,
+  buildDeterministicMealActions,
   buildDeterministicWorkoutAction,
   deterministicAlreadyLoggedReply,
   deterministicClarifyActionFromSession,
@@ -12,6 +12,7 @@ import {
   safeArray,
   shouldAllowAction,
   summarizeCoachAction,
+  summarizeCoachActions,
 } from "./coachLoggingRules.mjs"
 
 function extractImplicitActions(value) {
@@ -52,7 +53,7 @@ export function normalizeCoachResponse(value, context = {}) {
 
   const mealClarifyAction = deterministicClarifyActionFromSession(context.mealContext)
   const workoutClarifyAction = deterministicClarifyActionFromSession(context.workoutContext)
-  const deterministicMealAction = buildDeterministicMealAction({
+  const deterministicMealActions = buildDeterministicMealActions({
     mealSession: context.mealContext,
     explicitActions,
     prompt: context.prompt,
@@ -63,7 +64,7 @@ export function normalizeCoachResponse(value, context = {}) {
   })
 
   const filteredExplicitActions = explicitActions.filter((action) => {
-    if (deterministicMealAction && isMealPersistenceAction(action)) return false
+    if (deterministicMealActions.length && isMealPersistenceAction(action)) return false
     if (deterministicWorkoutAction && isWorkoutPersistenceAction(action)) return false
     if (context.mealContext?.readyToLog && action?.type === "clarify") return false
     if (context.workoutContext?.readyToLog && action?.type === "clarify") return false
@@ -87,7 +88,7 @@ export function normalizeCoachResponse(value, context = {}) {
     forcedReply = workoutClarifyAction.message
   } else {
     actions = [
-      ...(deterministicMealAction ? [deterministicMealAction] : []),
+      ...deterministicMealActions,
       ...(deterministicWorkoutAction ? [deterministicWorkoutAction] : []),
       ...filteredExplicitActions,
     ]
@@ -105,6 +106,7 @@ export function normalizeCoachResponse(value, context = {}) {
   let reply =
     forcedReply ||
     originalReply ||
+    summarizeCoachActions(actions) ||
     summarizeCoachAction(actions[0]) ||
     "Tell me what happened or what you want to change, and I'll help you sort the next move."
 

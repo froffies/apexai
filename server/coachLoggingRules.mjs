@@ -296,6 +296,11 @@ export function inferMealTypeFromPrompt(prompt) {
   return "snack"
 }
 
+function normalizeMealType(value) {
+  const text = String(value || "").trim().toLowerCase()
+  return ["breakfast", "lunch", "dinner", "snack"].includes(text) ? text : ""
+}
+
 export function summarizeCoachAction(action) {
   if (!action || typeof action !== "object") return ""
 
@@ -332,6 +337,29 @@ export function summarizeCoachAction(action) {
   }
 
   return ""
+}
+
+export function summarizeCoachActions(actions = []) {
+  const safeActions = safeArray(actions, 8).filter(Boolean)
+  if (!safeActions.length) return ""
+  if (safeActions.length === 1) return summarizeCoachAction(safeActions[0])
+
+  const mealActions = safeActions.filter(isMealPersistenceAction)
+  if (mealActions.length === safeActions.length) {
+    const labels = mealActions.map((action) => {
+      const mealType = normalizeMealType(action.meal_type || "")
+      const prefix = mealType ? `${mealType.charAt(0).toUpperCase()}${mealType.slice(1)} - ` : ""
+      return `${prefix}${String(action.food_name || "meal").trim()}`
+    })
+    return `Saved to today's nutrition: ${labels.join("; ")}.`
+  }
+
+  const workoutActions = safeActions.filter(isWorkoutPersistenceAction)
+  if (workoutActions.length === safeActions.length) {
+    return `Saved to Workouts: ${workoutActions.map((action) => String(action.workout_type || action.exercise_name || "workout").trim()).join("; ")}.`
+  }
+
+  return summarizeCoachAction(safeActions[0])
 }
 
 export function normalizeMealAction(action) {
@@ -398,7 +426,34 @@ export function deterministicAlreadyLoggedReply(session, kind = "meal") {
     : `I already saved ${summary} in Workouts. If you want to change it, tell me what to update.`
 }
 
-export function buildDeterministicMealAction({ mealSession, explicitActions = [], prompt = "", candidateFoodMatches = {}, allowAnswerOnly = false }) {
+function normalizeSessionItem(item = {}) {
+  return {
+    ...item,
+    baseName: item.baseName || item.base_name || "",
+    attachedTo: item.attachedTo || item.attached_to || null,
+    variantKey: item.variantKey || item.variant_key || "",
+    mealType: normalizeMealType(item.mealType || item.meal_type || ""),
+  }
+}
+
+function buildMealSessionSubset(mealSession, group = null) {
+  if (!group) return mealSession
+  return {
+    ...mealSession,
+    summary: String(group.summary || "").trim(),
+    items: safeArray(group.items, 24).map((item) => normalizeSessionItem(item)),
+    meal_groups: [],
+  }
+}
+
+function buildSingleDeterministicMealAction({
+  mealSession,
+  explicitActions = [],
+  prompt = "",
+  candidateFoodMatches = {},
+  allowAnswerOnly = false,
+  mealTypeOverride = "",
+}) {
   if (!mealSession?.readyToLog || mealSession?.alreadyLogged || mealSession?.suppressed || (mealSession?.answerOnly && !allowAnswerOnly)) return null
   const shouldPersist =
     mealSession?.wantsLogging !== false
@@ -436,7 +491,7 @@ export function buildDeterministicMealAction({ mealSession, explicitActions = []
   return normalizeMealAction({
     type: mealSession.persistedMealId && mealSession.correctionRequested ? "update_meal_log" : "log_meal",
     ...(mealSession.persistedMealId && mealSession.correctionRequested ? { meal_id: mealSession.persistedMealId } : {}),
-    meal_type: explicit?.meal_type || mealSession?.referenceMeal?.meal_type || inferMealTypeFromPrompt(prompt),
+    meal_type: normalizeMealType(mealTypeOverride) || explicit?.meal_type || mealSession?.referenceMeal?.meal_type || inferMealTypeFromPrompt(prompt),
     food_name: mealSession.summary || mealSession?.referenceMeal?.food_name || "",
     quantity: explicit?.quantity || mealSession?.referenceMeal?.quantity || "1 meal",
     estimated: explicit?.estimated ?? true,
@@ -445,6 +500,44 @@ export function buildDeterministicMealAction({ mealSession, explicitActions = []
       : mealSession?.referenceMeal?.nutrition_source || "Coach estimate from accumulated meal details across chat",
     ...macros,
   })
+}
+
+export function buildDeterministicMealActions(args = {}) {
+  const { mealSession } = args
+  if (!mealSession?.readyToLog || mealSession?.alreadyLogged || mealSession?.suppressed || (mealSession?.answerOnly && !args.allowAnswerOnly)) return []
+
+  const groups = safeArray(mealSession?.meal_groups, 8).filter((group) => (
+    normalizeMealType(group?.meal_type || "")
+    && String(group?.summary || "").trim()
+    && safeArray(group?.items, 24).length
+  ))
+
+  const shouldSplitByMealType = (
+    groups.length > 1
+    && !mealSession?.persistedMealId
+    && !mealSession?.referenceMeal
+    && !mealSession?.correctionRequested
+  )
+
+  if (shouldSplitByMealType) {
+    return groups
+      .map((group) => buildSingleDeterministicMealAction({
+        ...args,
+        mealSession: buildMealSessionSubset(mealSession, group),
+        mealTypeOverride: group.meal_type,
+      }))
+      .filter(Boolean)
+  }
+
+  const singleAction = buildSingleDeterministicMealAction({
+    ...args,
+    mealTypeOverride: groups.length === 1 ? groups[0].meal_type : "",
+  })
+  return singleAction ? [singleAction] : []
+}
+
+export function buildDeterministicMealAction(args = {}) {
+  return buildDeterministicMealActions(args)[0] || null
 }
 
 export function buildDeterministicWorkoutAction({ workoutSession, explicitActions = [] }) {

@@ -204,6 +204,48 @@ test("deterministic coach logging still works when OpenAI is unavailable", async
   assert.ok(Number(coach.actions?.[0]?.calories) > 1500)
 })
 
+test("deterministic coach logging can emit separate breakfast and lunch meal actions when OpenAI is unavailable", async (t) => {
+  const port = randomPort()
+  const serverProcess = spawn(process.execPath, [serverEntry], {
+    cwd,
+    env: {
+      ...process.env,
+      OPENAI_COACH_PORT: String(port),
+      OPENAI_COACH_REQUIRE_AUTH: "false",
+      OPENAI_COACH_CORS_ORIGIN: "http://127.0.0.1:5173",
+      OPENFOODFACTS_ENABLED: "false",
+      OPENAI_API_KEY: "",
+      NODE_ENV: "production",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  })
+
+  t.after(async () => {
+    serverProcess.kill()
+  })
+
+  await waitForHealth(port)
+
+  const coachResponse = await fetch(`http://127.0.0.1:${port}/api/coach`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Origin: "http://127.0.0.1:5173",
+    },
+    body: JSON.stringify({
+      message: "breakfast was 2 eggs and 1 slice toast, lunch was 200g steak and 1 cup rice",
+    }),
+  })
+  const coach = await coachResponse.json()
+  assert.equal(coachResponse.status, 200)
+  assert.equal(coach.actions?.length, 2)
+  assert.equal(coach.actions?.[0]?.type, "log_meal")
+  assert.equal(coach.actions?.[0]?.meal_type, "breakfast")
+  assert.equal(coach.actions?.[0]?.food_name, "2 eggs, plus 1 slice toast")
+  assert.equal(coach.actions?.[1]?.meal_type, "lunch")
+  assert.equal(coach.actions?.[1]?.food_name, "200g steak, plus 1 cup rice")
+})
+
 test("ready meal corrections outrank stray workout clarifications when OpenAI is unavailable", async (t) => {
   const port = randomPort()
   const serverProcess = spawn(process.execPath, [serverEntry], {

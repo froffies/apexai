@@ -56,6 +56,7 @@ function createEmptyMealSession() {
   return {
     active: false,
     items: [],
+    meal_groups: [],
     clarificationAttempts: 0,
     clarificationCounts: {},
     readyToLog: false,
@@ -71,6 +72,7 @@ function createEmptyMealSession() {
     mealConversation: false,
     lastMainKey: "",
     lastDrinkKey: "",
+    currentMealType: "",
     persisted: false,
     persistedMealId: "",
     persistedSummary: "",
@@ -544,7 +546,15 @@ function normalizeMealPersistenceAction(action, currentSession, nextSession, mea
   if (!action || typeof action !== "object") return { action, duplicateSummary: "" }
 
   const context = resolvePersistedMealContext(currentSession, nextSession, meals)
-  const preferredSummary = sanitizeMealSummaryText(context.sessionSummary || action.food_name || "Estimated mixed meal")
+  const multiMealGroups = [
+    ...(Array.isArray(currentSession?.meal_groups) ? currentSession.meal_groups : []),
+    ...(Array.isArray(nextSession?.meal_groups) ? nextSession.meal_groups : []),
+  ].filter((group) => String(group?.summary || "").trim()).length > 1
+  const preferredSummary = sanitizeMealSummaryText(
+    multiMealGroups
+      ? (action.food_name || "Estimated mixed meal")
+      : (context.sessionSummary || action.food_name || "Estimated mixed meal")
+  )
   const normalizedAction = {
     ...action,
     food_name: preferredSummary || sanitizeMealSummaryText(action.food_name || "Estimated mixed meal"),
@@ -658,6 +668,15 @@ function normalizeWorkoutPersistenceAction(action, currentSession, nextSession, 
 
 function formatCoachMealConfirmation(prefix, meal) {
   return `${prefix}: ${meal.food_name}. ${Math.round(Number(meal.calories) || 0)} kcal, ${Math.round(Number(meal.protein_g) || 0)}g protein, ${Math.round(Number(meal.carbs_g) || 0)}g carbs, ${Math.round(Number(meal.fat_g) || 0)}g fat.`
+}
+
+function formatCoachMealBatchConfirmation(prefix, meals) {
+  const lines = meals.map((meal) => {
+    const mealType = String(meal.meal_type || "").trim()
+    const mealLabel = mealType ? `${mealTypeLabel(mealType)} - ` : ""
+    return `${mealLabel}${meal.food_name}`
+  })
+  return `${prefix}: ${lines.join("; ")}.`
 }
 
 function formatCoachWorkoutConfirmation(prefix, workout, action) {
@@ -1022,6 +1041,8 @@ export default function Coach() {
     const updatedMealIds = []
     const loggedWorkoutIds = []
     const updatedWorkoutIds = []
+    const loggedMeals = []
+    const updatedMeals = []
     let latestLoggedMeal = null
     let latestUpdatedMeal = null
     let latestLoggedWorkout = null
@@ -1201,6 +1222,7 @@ export default function Coach() {
           }
           setMeals((current) => [nextMeal, ...current])
           loggedMealIds.push(mealId)
+          loggedMeals.push(nextMeal)
           latestLoggedMeal = nextMeal
         }
       }
@@ -1235,6 +1257,7 @@ export default function Coach() {
         }
         setMeals((current) => upsertMealEntry(current, nextMeal))
         updatedMealIds.push(mealId)
+        updatedMeals.push(nextMeal)
         latestUpdatedMeal = nextMeal
       }
     }
@@ -1244,14 +1267,19 @@ export default function Coach() {
     const mealSaveSucceeded = loggedMealIds.length > 0 || updatedMealIds.length > 0
     const workoutSaveSucceeded = loggedWorkoutIds.length > 0 || updatedWorkoutIds.length > 0
     if (mealSaveSucceeded) {
-      const persistedSource = nextMealSession || mealSession
-      const persistedMeal = latestLoggedMeal || latestUpdatedMeal
-      const persistedMealId = loggedMealIds[0] || updatedMealIds[0] || ""
-      setMealSession(buildPersistedMealSession(
-        persistedSource,
-        { food_name: persistedMeal?.food_name || nextMealSession?.summary || "", ...(persistedMeal || {}) },
-        persistedMealId
-      ))
+      const totalMealChanges = loggedMeals.length + updatedMeals.length
+      if (totalMealChanges > 1) {
+        setMealSession(createEmptyMealSession())
+      } else {
+        const persistedSource = nextMealSession || mealSession
+        const persistedMeal = latestLoggedMeal || latestUpdatedMeal
+        const persistedMealId = loggedMealIds[0] || updatedMealIds[0] || ""
+        setMealSession(buildPersistedMealSession(
+          persistedSource,
+          { food_name: persistedMeal?.food_name || nextMealSession?.summary || "", ...(persistedMeal || {}) },
+          persistedMealId
+        ))
+      }
     } else if (nextMealSession && (nextMealSession.active || nextMealSession.mealConversation || nextMealSession.summary)) {
       setMealSession(nextMealSession)
     }
@@ -1280,6 +1308,12 @@ export default function Coach() {
       replyText = "I have the meal details, but I couldn't save it just now."
     } else if (requestedWorkoutPersistence && !workoutSaveSucceeded) {
       replyText = "I have the details, but I couldn't save it just now."
+    } else if (loggedMeals.length > 1 && !updatedMeals.length) {
+      replyText = formatCoachMealBatchConfirmation("Saved to today's nutrition", loggedMeals)
+    } else if (updatedMeals.length > 1 && !loggedMeals.length) {
+      replyText = formatCoachMealBatchConfirmation("Updated today's nutrition", updatedMeals)
+    } else if ((loggedMeals.length + updatedMeals.length) > 1) {
+      replyText = formatCoachMealBatchConfirmation("Updated today's nutrition entries", [...updatedMeals, ...loggedMeals])
     } else if (latestLoggedMeal) {
       replyText = formatCoachMealConfirmation("Saved to today's nutrition", latestLoggedMeal)
     } else if (latestUpdatedMeal) {
