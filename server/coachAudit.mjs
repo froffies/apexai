@@ -267,9 +267,16 @@ function addFlag(flags, code, label, severity = "warn") {
 }
 
 function numericFoodSummary(summary = "") {
-  const normalized = cleanText(summary)
-  if (!normalized) return false
-  return /\b(?:serve|meal)\s+\d+(?:\.\d+)?\b/.test(normalized) || /(?:^|,\s*|plus\s+)\d+(?:\.\d+)?(?:$|[,.])/i.test(summary)
+  const parts = String(summary || "")
+    .split(/\s*,\s*plus\s+|;\s*/i)
+    .map((part) => cleanText(part))
+    .filter(Boolean)
+
+  return parts.some((part) => (
+    /^\d+(?:\.\d+)?$/.test(part)
+    || /^\d+(?:\.\d+)?\s+(?:serve|meal)\s+\d+(?:\.\d+)?$/.test(part)
+    || /^(?:serve|meal)\s+\d+(?:\.\d+)?$/.test(part)
+  ))
 }
 
 function duplicatePhraseSummary(summary = "") {

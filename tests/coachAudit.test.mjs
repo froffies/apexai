@@ -138,6 +138,33 @@ test("buildCoachAuditFlags catches complaint-derived foods, corrupted persistenc
   assert.ok(deleteFlags.some((flag) => flag.code === "delete_intent_ignored"))
 })
 
+test("buildCoachAuditFlags does not flag valid numeric food quantities as fake numeric food items", () => {
+  const flags = buildCoachAuditFlags({
+    user_message: "500ml",
+    assistant_reply: "Saved to today's nutrition: 1 serve pie, plus 19.2 eggs, plus 500ml milk.",
+    persisted_actions: [
+      {
+        type: "log_meal",
+        food_name: "1 serve pie, plus 19.2 eggs, plus 500ml milk",
+      },
+    ],
+    route_type: "deterministic",
+    persistence_status: "succeeded",
+    state_after: {
+      meal_session: {
+        items: [
+          { base_name: "pie", label: "Pie" },
+          { base_name: "egg", label: "Eggs" },
+          { base_name: "milk", label: "Milk" },
+        ],
+      },
+    },
+  })
+
+  assert.equal(flags.some((flag) => flag.code === "numeric_food_item"), false)
+  assert.equal(flags.some((flag) => flag.code === "corrupted_state_persisted"), false)
+})
+
 test("detectCoachAuditIntent distinguishes questions from logging", () => {
   assert.equal(
     detectCoachAuditIntent({
