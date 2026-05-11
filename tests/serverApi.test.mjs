@@ -128,8 +128,9 @@ test("local API server exposes health, local nutrition, telemetry, and sanitized
     body: JSON.stringify({ message: "hello" }),
   })
   const coach = await coachResponse.json()
-  assert.equal(coachResponse.status, 503)
-  assert.equal(coach.error, "Live coach is unavailable right now.")
+  assert.equal(coachResponse.status, 200)
+  assert.equal(coach.actions?.length || 0, 0)
+  assert.match(coach.reply, /tell me what happened today|help you sort the next move/i)
 
   assert.match(output, /ApexAI OpenAI coach server listening/i)
 })
@@ -922,6 +923,211 @@ test("deterministic coach binds decimal clarification replies, ignores frustrati
   assert.equal(fifth.coach.actions?.[0]?.type, "delete_meal_log")
   assert.equal(fifth.coach.actions?.[0]?.meal_id, "meal_delete_live")
   assert.match(fifth.coach.reply, /removed .*today's nutrition log/i)
+})
+
+test("deterministic coach keeps recent clarification context for complaint turns when a meal session is already active", async (t) => {
+  const port = randomPort()
+  const serverProcess = spawn(process.execPath, [serverEntry], {
+    cwd,
+    env: {
+      ...process.env,
+      OPENAI_COACH_PORT: String(port),
+      OPENAI_COACH_REQUIRE_AUTH: "false",
+      OPENAI_COACH_CORS_ORIGIN: "http://127.0.0.1:5173",
+      OPENFOODFACTS_ENABLED: "false",
+      OPENAI_API_KEY: "",
+      NODE_ENV: "production",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  })
+
+  t.after(async () => {
+    serverProcess.kill()
+  })
+
+  await waitForHealth(port)
+
+  const coachResponse = await fetch(`http://127.0.0.1:${port}/api/coach`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Origin: "http://127.0.0.1:5173",
+    },
+    body: JSON.stringify({
+      message: "you asked and i gave you a number",
+      recentMessages: [
+        { role: "user", content: "i had egg and pie and tea today" },
+        { role: "assistant", content: "How many eggs did you have?" },
+        { role: "user", content: "2.7" },
+        { role: "assistant", content: "How much tea did you have?" },
+      ],
+      mealSession: {
+        active: true,
+        mealConversation: true,
+        readyToLog: false,
+        wantsLogging: true,
+        clarificationAttempts: 1,
+        clarificationCounts: { "egg:quantity": 1 },
+        summary: "2.7 eggs, plus 1 serve pie, plus tea",
+        clarifyQuestion: "How much tea did you have?",
+        items: [
+          {
+            base_name: "egg",
+            label: "Eggs",
+            category: "food",
+            quantity: { amount: 2.7, unit: "egg", text: "2.7 eggs" },
+            preparation: [],
+            exclusions: [],
+            attached_to: null,
+            relation: null,
+          },
+          {
+            base_name: "pie",
+            label: "Pie",
+            category: "food",
+            quantity: { amount: 1, unit: "serve", text: "1 serve" },
+            preparation: [],
+            exclusions: [],
+            attached_to: null,
+            relation: null,
+          },
+          {
+            base_name: "tea",
+            label: "Tea",
+            category: "drink",
+            quantity: null,
+            preparation: [],
+            exclusions: [],
+            attached_to: null,
+            relation: null,
+          },
+        ],
+        pendingClarification: {
+          type: "quantity",
+          targetReference: "tea",
+          targetBaseName: "tea",
+          targetLabel: "Tea",
+          expectedValueType: "number",
+        },
+      },
+    }),
+  })
+  const coach = await coachResponse.json()
+  assert.equal(coachResponse.status, 200)
+  assert.equal(coach.actions?.[0]?.type, "clarify")
+  assert.match(coach.reply, /how much tea/i)
+  assert.equal(coach.meal_session?.pendingClarification?.targetBaseName, "tea")
+})
+
+test("deterministic coach deletes the saved workout on request", async (t) => {
+  const port = randomPort()
+  const serverProcess = spawn(process.execPath, [serverEntry], {
+    cwd,
+    env: {
+      ...process.env,
+      OPENAI_COACH_PORT: String(port),
+      OPENAI_COACH_REQUIRE_AUTH: "false",
+      OPENAI_COACH_CORS_ORIGIN: "http://127.0.0.1:5173",
+      OPENFOODFACTS_ENABLED: "false",
+      OPENAI_API_KEY: "",
+      NODE_ENV: "production",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  })
+
+  t.after(async () => {
+    serverProcess.kill()
+  })
+
+  await waitForHealth(port)
+
+  const coachResponse = await fetch(`http://127.0.0.1:${port}/api/coach`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Origin: "http://127.0.0.1:5173",
+    },
+    body: JSON.stringify({
+      message: "delete it",
+      recentMessages: [
+        { role: "user", content: "bench press" },
+        { role: "assistant", content: "How many sets did you do?" },
+        { role: "user", content: "4 sets" },
+        { role: "assistant", content: "How many reps?" },
+        { role: "user", content: "8 reps" },
+        { role: "assistant", content: "What weight did you use?" },
+        { role: "user", content: "80kg" },
+        { role: "assistant", content: "Saved to Workouts: Bench Press." },
+      ],
+      workoutSession: {
+        active: false,
+        workoutConversation: true,
+        wantsLogging: true,
+        readyToLog: false,
+        clarifyQuestion: "",
+        persisted: true,
+        persistedWorkoutId: "workout_delete_live",
+        persistedSummary: "Bench Press",
+        persistedAt: "2026-05-05T00:00:00.000Z",
+        exercise_name: "Bench Press",
+        workout_type: "Bench Press",
+        muscle_group: "full_body",
+        sets: 4,
+        reps: 8,
+        weight_kg: 80,
+        duration_seconds: 0,
+        distance_km: 0,
+        alreadyLogged: false,
+        correctionRequested: false,
+        deleteRequested: false,
+      },
+    }),
+  })
+  const coach = await coachResponse.json()
+  assert.equal(coachResponse.status, 200)
+  assert.equal(coach.actions?.[0]?.type, "delete_workout_log")
+  assert.equal(coach.actions?.[0]?.workout_id, "workout_delete_live")
+  assert.match(coach.reply, /removed .*from workouts/i)
+})
+
+test("contextless do-not-log turns stay deterministic when the live coach is unavailable", async (t) => {
+  const port = randomPort()
+  const serverProcess = spawn(process.execPath, [serverEntry], {
+    cwd,
+    env: {
+      ...process.env,
+      OPENAI_COACH_PORT: String(port),
+      OPENAI_COACH_REQUIRE_AUTH: "false",
+      OPENAI_COACH_CORS_ORIGIN: "http://127.0.0.1:5173",
+      OPENFOODFACTS_ENABLED: "false",
+      OPENAI_API_KEY: "",
+      NODE_ENV: "production",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  })
+
+  t.after(async () => {
+    serverProcess.kill()
+  })
+
+  await waitForHealth(port)
+
+  const coachResponse = await fetch(`http://127.0.0.1:${port}/api/coach`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Origin: "http://127.0.0.1:5173",
+    },
+    body: JSON.stringify({
+      message: "don't log that",
+      recentMessages: [],
+    }),
+  })
+  const coach = await coachResponse.json()
+  assert.equal(coachResponse.status, 200)
+  assert.equal(coach.actions?.length || 0, 0)
+  assert.match(coach.reply, /won't save that/i)
+  assert.equal(coach.meal_session?.suppressed, true)
 })
 
 test("protected API endpoints require auth when production auth is enabled", async (t) => {

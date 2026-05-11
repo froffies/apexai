@@ -35,8 +35,9 @@ export function isCoachAuditAdmin(user) {
   return false
 }
 
-async function authorizedFetch(url, options = {}) {
+async function authorizedFetch(url, options = {}, { requireToken = false } = {}) {
   const token = await getCloudAccessToken()
+  if (requireToken && !token) return null
   const response = await fetch(url, {
     ...options,
     headers: {
@@ -54,7 +55,8 @@ export async function sendCoachAuditEvent(payload) {
     const response = await authorizedFetch(`${defaultCoachAuditUrl()}/event`, {
       method: "POST",
       body: JSON.stringify(payload),
-    })
+    }, { requireToken: true })
+    if (!response) return { accepted: false, skipped: "missing_auth" }
     return await response.json().catch(() => ({}))
   } catch {
     return null

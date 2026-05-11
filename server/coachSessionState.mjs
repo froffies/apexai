@@ -10,6 +10,7 @@ const SUPPRESS_SESSION_PATTERN = /\b(?:don't|dont|do not|stop|no)\s+(?:log|save|
 const REPEAT_RECENT_MEAL_PATTERN = /\b(?:same as yesterday|same as last time|same as before|repeat that(?: meal)?|same thing as yesterday)\b/i
 const WORKOUT_START_PATTERN = /\b(?:workout|train(?:ed|ing)?|lift(?:ed|ing)?|exercise|exercises|session|cardio|bench|squat|deadlift|row|rows|press|curls?|pulldown|pull ups?|push ups?|lunge|treadmill|bike|run|running|walk|walking|rower|elliptical|stairmaster|km|min|minutes|sets?|reps?|kg)\b/i
 const WORKOUT_CORRECTION_PATTERN = /\b(?:actually|correction|change(?:\s+that)?|update(?:\s+that)?|make that|not\b|instead|sorry|i meant)\b/i
+const WORKOUT_DELETE_PATTERN = /\b(?:delete|remove|undo|erase)\b(?:\s+(?:it|that|this|workout|session|log))?/i
 const WORKOUT_FINALISE_PATTERN = /^(?:i just did|i already did|that'?s it|thats it|log it|save it|go ahead|yes|yeah|yep|okay|ok)$/i
 const WORKOUT_EXERCISES = [
   "bench press",
@@ -49,12 +50,35 @@ const WORKOUT_EXERCISES = [
   "stairmaster",
 ]
 
+const CORRECTION_LEAD_PATTERNS = [
+  /^(?:actually|sorry|correction)\s+/i,
+  /^(?:no|nah),?\s+i meant\s+/i,
+  /^(?:i meant|it was|it is)\s+/i,
+  /^(?:make that|change that(?: to)?|update that(?: to)?|instead)\s+/i,
+]
+
 function cleanText(value) {
   return String(value || "")
     .toLowerCase()
     .replace(/[’']/g, "'")
     .replace(/\s+/g, " ")
     .trim()
+}
+
+function stripCorrectionLead(text) {
+  let normalized = String(text || "").trim()
+  let changed = true
+  while (changed && normalized) {
+    changed = false
+    for (const pattern of CORRECTION_LEAD_PATTERNS) {
+      const stripped = normalized.replace(pattern, "").trim()
+      if (stripped !== normalized) {
+        normalized = stripped
+        changed = true
+      }
+    }
+  }
+  return normalized
 }
 
 function titleCase(text) {
@@ -140,7 +164,19 @@ function normalizedItemQuantities(session) {
 function meaningfulTokens(text) {
   return cleanText(text)
     .split(" ")
-    .filter((token) => token.length > 2 && !["just", "did", "with", "plus", "also", "meal", "food", "that", "this", "the"].includes(token))
+    .filter((token) => token.length > 2 && !["just", "did", "with", "plus", "also", "meal", "food", "that", "this", "the", "had", "ate", "drank", "log", "track", "save", "add", "include", "trained", "lifted"].includes(token))
+}
+
+function numericTokens(text) {
+  return cleanText(text).match(/\d+(?:\.\d+)?/g) || []
+}
+
+function summaryIncludesNumbers(numbers = [], summaryText = "", quantitySet = new Set()) {
+  if (!numbers.length) return false
+  return numbers.every((token) => (
+    summaryText.includes(token)
+    || [...quantitySet].some((quantity) => quantity.includes(token) || token.includes(quantity))
+  ))
 }
 
 function mealCorrectionRequested(message) {
@@ -159,8 +195,23 @@ function workoutCorrectionRequested(message) {
   return WORKOUT_CORRECTION_PATTERN.test(cleanText(message))
 }
 
+function workoutDeleteRequested(message) {
+  return WORKOUT_DELETE_PATTERN.test(cleanText(message))
+}
+
 function suppressionRequested(message) {
   return SUPPRESS_SESSION_PATTERN.test(cleanText(message))
+}
+
+function hasWorkoutMetricDetail(parsed = null) {
+  if (!parsed) return false
+  return Boolean(
+    Number(parsed.sets || 0) > 0
+    || Number(parsed.reps || 0) > 0
+    || Number(parsed.weight_kg || 0) > 0
+    || Number(parsed.duration_seconds || 0) > 0
+    || Number(parsed.distance_km || 0) > 0
+  )
 }
 
 function repeatRecentMealRequested(message) {
@@ -174,7 +225,6 @@ function isExplicitMealStart(message) {
 function isRedundantPersistedMealFollowUp(message, session) {
   const normalized = cleanText(message)
   if (!session?.persisted || !normalized) return false
-  if (isExplicitMealStart(normalized)) return false
   if (mealCorrectionRequested(normalized)) return false
   if (mealRejectionRequested(normalized)) return false
   if (mealDeleteRequested(normalized)) return false
@@ -186,11 +236,15 @@ function isRedundantPersistedMealFollowUp(message, session) {
   const nameSet = normalizedItemNames(session)
   const quantitySet = normalizedItemQuantities(session)
   const tokens = meaningfulTokens(normalized)
+  const numbers = numericTokens(normalized)
   const referencesKnownItems = tokens.length > 0 && tokens.every((token) => (
     summaryText.includes(token)
     || [...nameSet].some((name) => name.includes(token) || token.includes(name))
     || [...quantitySet].some((quantity) => quantity.includes(token) || token.includes(quantity))
   ))
+  if (isExplicitMealStart(message)) {
+    return referencesKnownItems && summaryIncludesNumbers(numbers, summaryText, quantitySet)
+  }
   return referencesKnownItems
 }
 
@@ -312,11 +366,26 @@ function summariesEquivalent(left, right) {
   return cleanText(left) && cleanText(left) === cleanText(right)
 }
 
+function looksLikeFullMealCorrectionRestatement(message) {
+  const normalized = cleanText(stripCorrectionLead(message))
+  if (!normalized) return false
+  if (/\bplus\b|,/.test(normalized)) return true
+  const quantityCount = (normalized.match(/\b\d+(?:\.\d+)?\b/g) || []).length
+  if (quantityCount >= 2) return true
+  return /\b(?:and|with)\b/.test(normalized) && /\d/.test(normalized)
+}
+
 function buildMealSessionState(recentMessages = [], currentMessage = "", existingSession = null, recentMeals = []) {
   const prior = normalizeMealSession(existingSession)
   const normalizedCurrent = cleanText(currentMessage)
   const deleteRequested = Boolean(prior.persistedMealId && mealDeleteRequested(currentMessage))
   const rejectionRequested = Boolean(prior.persistedMealId && mealRejectionRequested(currentMessage))
+  const correctionRequested = Boolean(prior.persistedMealId && mealCorrectionRequested(currentMessage))
+  const fullCorrectionRestatement = Boolean(
+    prior.persistedMealId
+    && correctionRequested
+    && looksLikeFullMealCorrectionRestatement(currentMessage)
+  )
 
   if (!prior.active && !prior.persisted && repeatRecentMealRequested(currentMessage)) {
     const repeated = buildRepeatedMealSession(recentMeals)
@@ -344,14 +413,13 @@ function buildMealSessionState(recentMessages = [], currentMessage = "", existin
     return persistedMealMarker(prior, recentMessages, currentMessage)
   }
 
-  const startedNewMeal = prior.persisted && isExplicitMealStart(currentMessage) && !mealCorrectionRequested(currentMessage)
-  const seededSession = prior.active || (prior.persisted && !startedNewMeal)
-    ? seedLegacyMealSession(prior)
-    : null
-  const next = buildLegacyMealContext(recentMessages, currentMessage, seededSession)
+  const startedNewMeal = prior.persisted && isExplicitMealStart(currentMessage) && !correctionRequested
+  const historyForNext = fullCorrectionRestatement ? [] : recentMessages
+  const shouldSeedPersistedSession = !fullCorrectionRestatement && (prior.active || (prior.persisted && !startedNewMeal))
+  const seededSession = shouldSeedPersistedSession ? seedLegacyMealSession(prior) : null
+  const next = buildLegacyMealContext(historyForNext, currentMessage, seededSession)
   if (!next) return null
 
-  const correctionRequested = Boolean(prior.persistedMealId && mealCorrectionRequested(currentMessage))
   const impliedCorrectionRequested = Boolean(
     prior.persistedMealId
     && !startedNewMeal
@@ -663,6 +731,41 @@ function buildWorkoutSummary(state) {
   return parts.join(" ")
 }
 
+function workoutMatchesPersistedSession(parsed = null, session = null) {
+  if (!parsed || !session) return false
+
+  const parsedExercise = cleanText(parsed.exercise_name || parsed.workout_type || "")
+  const persistedExercise = cleanText(session.exercise_name || session.workout_type || "")
+  if (parsedExercise && persistedExercise && parsedExercise !== persistedExercise) return false
+
+  const parsedDuration = Number(parsed.duration_seconds || 0)
+  const persistedDuration = Number(session.duration_seconds || 0)
+  const parsedDistance = Number(parsed.distance_km || 0)
+  const persistedDistance = Number(session.distance_km || 0)
+  const parsedWeight = Number(parsed.weight_kg || 0)
+  const persistedWeight = Number(session.weight_kg || 0)
+  const parsedSets = Number(parsed.sets || 0)
+  const persistedSets = Number(session.sets || 0)
+  const parsedReps = Number(parsed.reps || 0)
+  const persistedReps = Number(session.reps || 0)
+
+  const isCardio = parsedDuration > 0 || persistedDuration > 0 || parsedDistance > 0 || persistedDistance > 0 || cleanText(session.muscle_group || "") === "cardio"
+  if (isCardio) {
+    return (
+      (!parsedExercise || !persistedExercise || parsedExercise === persistedExercise)
+      && parsedDuration === persistedDuration
+      && parsedDistance === persistedDistance
+    )
+  }
+
+  return (
+    (!parsedExercise || !persistedExercise || parsedExercise === persistedExercise)
+    && parsedWeight === persistedWeight
+    && parsedSets === persistedSets
+    && parsedReps === persistedReps
+  )
+}
+
 function buildWorkoutClarifyQuestion(state) {
   const missingExerciseAttempts = state.clarificationCounts[buildWorkoutClarificationKey("exercise")] || 0
   const missingRepsAttempts = state.clarificationCounts[buildWorkoutClarificationKey("reps")] || 0
@@ -681,18 +784,94 @@ function isRedundantPersistedWorkoutFollowUp(message, session) {
   const normalized = cleanText(message)
   if (!session?.persisted || !normalized) return false
   if (workoutCorrectionRequested(normalized)) return false
+  if (workoutDeleteRequested(normalized)) return false
   if (WORKOUT_FINALISE_PATTERN.test(normalized) || workoutReferenceMessage(normalized)) return true
+  const parsed = parseWorkoutMessage(message)
+  if (workoutMatchesPersistedSession(parsed, session)) return true
   const summary = cleanText(session.persistedSummary || session.summary || "")
   if (!summary) return false
   const tokens = meaningfulTokens(normalized)
-  return tokens.length > 0 && tokens.every((token) => summary.includes(token))
+  const numbers = numericTokens(normalized)
+  const referencesKnownWorkout = tokens.length > 0 && tokens.every((token) => summary.includes(token))
+  if (WORKOUT_START_PATTERN.test(normalized)) {
+    return referencesKnownWorkout && summaryIncludesNumbers(numbers, summary)
+  }
+  return referencesKnownWorkout
+}
+
+function persistedWorkoutFollowUpLooksLikeUpdate(message, session, nextState = null) {
+  const normalized = cleanText(message)
+  if (!session?.persisted || !normalized) return false
+  if (workoutDeleteRequested(message) || suppressionRequested(message) || WORKOUT_FINALISE_PATTERN.test(normalized)) return false
+
+  const nextSummary = cleanText(nextState?.summary || "")
+  const persistedSummary = cleanText(session.persistedSummary || session.summary || "")
+  if (!nextSummary || nextSummary === persistedSummary) return false
+
+  const parsed = parseWorkoutMessage(message)
+  if (!parsed) return false
+
+  const hasMetricDetail = hasWorkoutMetricDetail(parsed)
+  if (!hasMetricDetail) return false
+
+  const parsedExercise = cleanText(parsed.exercise_name || parsed.workout_type || "")
+  const persistedExercise = cleanText(session.exercise_name || session.workout_type || "")
+  return !parsedExercise || !persistedExercise || parsedExercise === persistedExercise
+}
+
+function buildGenericSuppressedMealSession(recentMessages = [], currentMessage = "") {
+  return {
+    ...emptyMealSessionState(),
+    active: false,
+    mealConversation: false,
+    suppressed: true,
+    suppressionReply: "Okay, I won't save that.",
+    thread_messages: buildThreadMessages(recentMessages, currentMessage),
+  }
+}
+
+function shouldDiscardInvalidMealSessionForWorkoutFollowUp(currentMessage = "", mealSession = null, workoutSession = null, priorWorkoutSession = null) {
+  if (!mealSession || !workoutSession) return false
+  if (!mealSession.invalidStructure) return false
+  if (Array.isArray(mealSession.items) && mealSession.items.length) return false
+  if (mealSession.summary || mealSession.readyToLog || mealSession.clarifyQuestion) return false
+
+  const hasOrphanQuantity = Array.isArray(mealSession.pendingQuantities) && mealSession.pendingQuantities.length > 0
+  const hasPendingClarification = Boolean(mealSession.pendingClarification)
+  if (!hasOrphanQuantity && !hasPendingClarification) return false
+
+  const priorWorkout = normalizeWorkoutSession(priorWorkoutSession)
+  const workoutHasContext = Boolean(
+    workoutSession.active
+    || workoutSession.persisted
+    || priorWorkout.active
+    || priorWorkout.persisted
+  )
+  if (!workoutHasContext) return false
+
+  const parsed = parseWorkoutMessage(currentMessage)
+  return hasWorkoutMetricDetail(parsed)
 }
 
 function buildWorkoutSessionState(recentMessages = [], currentMessage = "", existingSession = null) {
   const prior = normalizeWorkoutSession(existingSession)
   const normalizedCurrent = cleanText(currentMessage)
   const correctionRequested = Boolean(prior.persistedWorkoutId && workoutCorrectionRequested(currentMessage))
+  const deleteRequested = Boolean(prior.persistedWorkoutId && workoutDeleteRequested(currentMessage))
   const suppressed = suppressionRequested(currentMessage)
+
+  if (prior.persisted && deleteRequested) {
+    return {
+      ...prior,
+      active: false,
+      readyToLog: false,
+      clarifyQuestion: "",
+      alreadyLogged: false,
+      correctionRequested: false,
+      deleteRequested: true,
+      thread_messages: buildThreadMessages(recentMessages, currentMessage),
+    }
+  }
 
   if (prior.persisted && isRedundantPersistedWorkoutFollowUp(currentMessage, prior)) {
     return {
@@ -716,12 +895,13 @@ function buildWorkoutSessionState(recentMessages = [], currentMessage = "", exis
     clarificationCounts: { ...(prior.clarificationCounts || {}), ...(clarificationStats.counts || {}) },
     persisted: Boolean(prior.persisted),
     persistedWorkoutId: String(prior.persistedWorkoutId || ""),
-    persistedSummary: String(prior.persistedSummary || ""),
-    persistedAt: String(prior.persistedAt || ""),
-    correctionRequested,
-    thread_messages: thread,
-    active: true,
-    workoutConversation: true,
+      persistedSummary: String(prior.persistedSummary || ""),
+      persistedAt: String(prior.persistedAt || ""),
+      correctionRequested,
+      deleteRequested: false,
+      thread_messages: thread,
+      active: true,
+      workoutConversation: true,
     wantsLogging: true,
     suppressed,
     suppressionReply: suppressed ? "Okay, I won't save that." : "",
@@ -750,6 +930,13 @@ function buildWorkoutSessionState(recentMessages = [], currentMessage = "", exis
     ? Boolean(state.exercise_name && (state.duration_seconds > 0 || state.distance_km > 0))
     : Boolean(state.exercise_name && state.reps > 0)
 
+  const impliedCorrectionRequested = Boolean(
+    prior.persistedWorkoutId
+    && !correctionRequested
+    && persistedWorkoutFollowUpLooksLikeUpdate(currentMessage, prior, state)
+  )
+  state.correctionRequested = correctionRequested || impliedCorrectionRequested
+
   if (suppressed) {
     state.readyToLog = false
     state.clarifyQuestion = ""
@@ -767,7 +954,7 @@ function buildWorkoutSessionState(recentMessages = [], currentMessage = "", exis
 
   if (
     prior.persisted
-    && !correctionRequested
+    && !state.correctionRequested
     && !WORKOUT_START_PATTERN.test(normalizedCurrent)
     && cleanText(state.summary)
     && cleanText(state.summary) === cleanText(prior.persistedSummary || prior.summary || "")
@@ -824,13 +1011,14 @@ export function emptyWorkoutSessionState() {
     wantsLogging: false,
     persisted: false,
     persistedWorkoutId: "",
-    persistedSummary: "",
-    persistedAt: "",
-    alreadyLogged: false,
-    correctionRequested: false,
-    thread_messages: [],
+      persistedSummary: "",
+      persistedAt: "",
+      alreadyLogged: false,
+      correctionRequested: false,
+      deleteRequested: false,
+      thread_messages: [],
+    }
   }
-}
 
 export function buildCoachSessionState({
   recentMessages = [],
@@ -839,8 +1027,23 @@ export function buildCoachSessionState({
   workoutSession = null,
   recentMeals = [],
 } = {}) {
+  let nextMealSession = buildMealSessionState(recentMessages, currentMessage, mealSession, recentMeals)
+  const nextWorkoutSession = buildWorkoutSessionState(recentMessages, currentMessage, workoutSession)
+
+  if (
+    !nextMealSession
+    && !nextWorkoutSession
+    && suppressionRequested(currentMessage)
+  ) {
+    nextMealSession = buildGenericSuppressedMealSession(recentMessages, currentMessage)
+  }
+
+  if (shouldDiscardInvalidMealSessionForWorkoutFollowUp(currentMessage, nextMealSession, nextWorkoutSession, workoutSession)) {
+    nextMealSession = null
+  }
+
   return {
-    mealSession: buildMealSessionState(recentMessages, currentMessage, mealSession, recentMeals),
-    workoutSession: buildWorkoutSessionState(recentMessages, currentMessage, workoutSession),
+    mealSession: nextMealSession,
+    workoutSession: nextWorkoutSession,
   }
 }

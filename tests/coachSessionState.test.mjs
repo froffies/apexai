@@ -56,6 +56,20 @@ function makePersistedMealSession(session, mealId = "meal_1") {
   }
 }
 
+function makePersistedWorkoutSession(session, workoutId = "workout_1") {
+  return {
+    ...session,
+    persisted: true,
+    persistedWorkoutId: workoutId,
+    persistedSummary: session.summary,
+    persistedAt: "2026-05-05T00:00:00.000Z",
+    active: false,
+    readyToLog: false,
+    clarifyQuestion: "",
+    alreadyLogged: false,
+  }
+}
+
 test("coach session state accumulates the exact fragmented egg and tea meal into one ready-to-log session", () => {
   const conversation = [
     user("i had egg and tea"),
@@ -112,6 +126,28 @@ test("coach session state marks redundant follow-ups as already logged instead o
   assert.equal(next.mealSession.alreadyLogged, true)
   assert.equal(next.mealSession.readyToLog, false)
   assert.equal(next.mealSession.clarifyQuestion, "")
+})
+
+test("coach session state treats an identical persisted meal message as already logged instead of duplicating it", () => {
+  const initial = replayCoachConversation([
+    user("i had 3 chips"),
+  ])
+
+  const persistedMeal = makePersistedMealSession(initial.mealSession, "meal_repeat_live")
+  const next = buildCoachSessionState({
+    recentMessages: [
+      ...initial.history,
+      assistant("Saved to today's nutrition: 3 chips."),
+    ],
+    currentMessage: "i had 3 chips",
+    mealSession: persistedMeal,
+    workoutSession: emptyWorkoutSessionState(),
+  })
+
+  assert.ok(next.mealSession)
+  assert.equal(next.mealSession.alreadyLogged, true)
+  assert.equal(next.mealSession.readyToLog, false)
+  assert.equal(next.mealSession.correctionRequested, false)
 })
 
 test("coach session state reopens a persisted meal for corrections instead of duplicating it", () => {
@@ -186,6 +222,125 @@ test("coach session state turns post-save delete intent into a deterministic mea
   assert.equal(next.mealSession.persistedMealId, "meal_delete_live")
 })
 
+test("coach session state turns post-save workout delete intent into a deterministic workout deletion request", () => {
+  const initial = replayCoachConversation([
+    user("bench press"),
+    assistant("How many sets did you do?"),
+    user("4 sets"),
+    assistant("How many reps?"),
+    user("8 reps"),
+    assistant("What weight did you use?"),
+    user("80kg"),
+  ])
+
+  const persistedWorkout = makePersistedWorkoutSession(initial.workoutSession, "workout_delete_live")
+  const next = buildCoachSessionState({
+    recentMessages: [
+      ...initial.history,
+      assistant("Saved to Workouts: Bench Press."),
+    ],
+    currentMessage: "delete it",
+    mealSession: emptyMealSessionState(),
+    workoutSession: persistedWorkout,
+  })
+
+  assert.ok(next.workoutSession)
+  assert.equal(next.workoutSession.deleteRequested, true)
+  assert.equal(next.workoutSession.alreadyLogged, false)
+  assert.equal(next.workoutSession.persistedWorkoutId, "workout_delete_live")
+})
+
+test("coach session state treats an identical persisted workout message as already logged instead of duplicating it", () => {
+  const initial = replayCoachConversation([
+    user("bench press 80kg x 8 x 4"),
+  ])
+
+  const persistedWorkout = makePersistedWorkoutSession(initial.workoutSession, "workout_repeat_live")
+  const next = buildCoachSessionState({
+    recentMessages: [
+      ...initial.history,
+      assistant("Saved to Workouts: Bench Press 80kg for 4 sets of 8."),
+    ],
+    currentMessage: "bench press 80kg x 8 x 4",
+    mealSession: emptyMealSessionState(),
+    workoutSession: persistedWorkout,
+  })
+
+  assert.ok(next.workoutSession)
+  assert.equal(next.workoutSession.alreadyLogged, true)
+  assert.equal(next.workoutSession.readyToLog, false)
+  assert.equal(next.workoutSession.correctionRequested, false)
+})
+
+test("coach session state treats an identical persisted cardio workout message as already logged instead of duplicating it", () => {
+  const persistedWorkout = makePersistedWorkoutSession({
+    ...emptyWorkoutSessionState(),
+    active: false,
+    workoutConversation: true,
+    exercise_name: "Bike",
+    workout_type: "Bike",
+    muscle_group: "cardio",
+    sets: 1,
+    reps: 0,
+    weight_kg: 0,
+    duration_seconds: 20 * 60,
+    summary: "20 min Bike",
+    readyToLog: false,
+  }, "workout_repeat_cardio")
+
+  const next = buildCoachSessionState({
+    recentMessages: [
+      user("20 minutes bike"),
+      assistant("I logged that workout for you."),
+    ],
+    currentMessage: "20 minutes bike",
+    mealSession: emptyMealSessionState(),
+    workoutSession: persistedWorkout,
+  })
+
+  assert.equal(next.mealSession, null)
+  assert.ok(next.workoutSession)
+  assert.equal(next.workoutSession.alreadyLogged, true)
+  assert.equal(next.workoutSession.readyToLog, false)
+  assert.equal(next.workoutSession.correctionRequested, false)
+})
+
+test("coach session state treats metric-only follow-ups on a persisted workout as updates instead of new logs", () => {
+  const persistedWorkout = makePersistedWorkoutSession({
+    ...emptyWorkoutSessionState(),
+    active: false,
+    workoutConversation: true,
+    exercise_name: "Bench Press",
+    workout_type: "Bench Press",
+    sets: 2,
+    reps: 7,
+    weight_kg: 0,
+    summary: "Bench Press for 2 sets of 7",
+    readyToLog: false,
+  }, "workout_fragmented_fix")
+
+  const next = buildCoachSessionState({
+    recentMessages: [
+      user("i did bench press"),
+      assistant("How many reps did you do for Bench Press?"),
+      user("2 sets"),
+      assistant("How many reps did you do for Bench Press?"),
+      user("7 reps"),
+      assistant("I logged that workout for you."),
+    ],
+    currentMessage: "34kg",
+    mealSession: emptyMealSessionState(),
+    workoutSession: persistedWorkout,
+  })
+
+  assert.equal(next.mealSession, null)
+  assert.ok(next.workoutSession)
+  assert.equal(next.workoutSession.readyToLog, true)
+  assert.equal(next.workoutSession.correctionRequested, true)
+  assert.equal(next.workoutSession.weight_kg, 34)
+  assert.equal(next.workoutSession.exercise_name, "Bench Press")
+})
+
 test("coach session state asks for the correction detail when a saved meal is rejected without saying what to change", () => {
   const initial = replayCoachConversation([
     user("i had pie and eggs and milk"),
@@ -223,6 +378,37 @@ test("pure nutrition questions do not open a meal logging clarification flow", (
 
   assert.equal(next.mealSession, null)
   assert.equal(next.workoutSession, null)
+})
+
+test("contextless do-not-log turns stay deterministic instead of falling through to the live coach", () => {
+  const next = buildCoachSessionState({
+    recentMessages: [],
+    currentMessage: "don't log that",
+    mealSession: emptyMealSessionState(),
+    workoutSession: emptyWorkoutSessionState(),
+  })
+
+  assert.ok(next.mealSession)
+  assert.equal(next.mealSession.suppressed, true)
+  assert.equal(next.mealSession.suppressionReply, "Okay, I won't save that.")
+  assert.equal(next.workoutSession, null)
+})
+
+test("classic workout x-pattern messages do not open a fake meal session", () => {
+  const next = buildCoachSessionState({
+    recentMessages: [],
+    currentMessage: "row 78kg x 9 x 5",
+    mealSession: emptyMealSessionState(),
+    workoutSession: emptyWorkoutSessionState(),
+  })
+
+  assert.equal(next.mealSession, null)
+  assert.ok(next.workoutSession)
+  assert.equal(next.workoutSession.readyToLog, true)
+  assert.equal(next.workoutSession.exercise_name, "Row")
+  assert.equal(next.workoutSession.weight_kg, 78)
+  assert.equal(next.workoutSession.reps, 9)
+  assert.equal(next.workoutSession.sets, 5)
 })
 
 test("coach session state replaces persisted meal quantities when a correction restates the full meal", () => {

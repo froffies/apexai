@@ -336,6 +336,60 @@ function clarificationTargetSatisfied(mealState = null, clarification = null) {
   return Boolean(matchedItem && Number.isFinite(quantityAmount))
 }
 
+function clarificationStateMadeProgress(before = null, after = null) {
+  if (!before && !after) return false
+
+  const beforeSummary = cleanText(before?.summary || "")
+  const afterSummary = cleanText(after?.summary || "")
+  if (beforeSummary && afterSummary && beforeSummary !== afterSummary) return true
+
+  const beforeItems = safeArray(before?.items, 24)
+  const afterItems = safeArray(after?.items, 24)
+  if (afterItems.length !== beforeItems.length) return true
+
+  for (const afterItem of afterItems) {
+    const beforeItem = beforeItems.find((candidate) => (
+      cleanText(candidate?.reference || candidate?.attached_to || candidate?.base_name || candidate?.label || "")
+      === cleanText(afterItem?.reference || afterItem?.attached_to || afterItem?.base_name || afterItem?.label || "")
+    ))
+    const beforeQuantity = cleanText(beforeItem?.quantity?.text || "")
+    const afterQuantity = cleanText(afterItem?.quantity?.text || "")
+    if (!beforeQuantity && afterQuantity) return true
+    if (beforeQuantity && afterQuantity && beforeQuantity !== afterQuantity) return true
+    const beforeExclusions = cleanText(safeArray(beforeItem?.exclusions, 8).join(" "))
+    const afterExclusions = cleanText(safeArray(afterItem?.exclusions, 8).join(" "))
+    if (beforeExclusions !== afterExclusions) return true
+  }
+
+  const beforePending = cleanText(before?.pendingClarification?.targetReference || before?.pendingClarification?.targetBaseName || "")
+  const afterPending = cleanText(after?.pendingClarification?.targetReference || after?.pendingClarification?.targetBaseName || "")
+  if (beforePending && afterPending && beforePending !== afterPending) return true
+
+  return false
+}
+
+function workoutClarificationStateMadeProgress(before = null, after = null) {
+  if (!before && !after) return false
+
+  const numericFields = ["sets", "reps", "weight_kg", "duration_seconds", "distance_km"]
+  for (const field of numericFields) {
+    const beforeValue = Number(before?.[field] || 0)
+    const afterValue = Number(after?.[field] || 0)
+    if (!beforeValue && afterValue) return true
+    if (beforeValue && afterValue && beforeValue !== afterValue) return true
+  }
+
+  const beforeExercise = cleanText(before?.exercise_name || before?.workout_type || "")
+  const afterExercise = cleanText(after?.exercise_name || after?.workout_type || "")
+  if (beforeExercise && afterExercise && beforeExercise !== afterExercise) return true
+
+  const beforeQuestion = cleanText(before?.clarifyQuestion || "")
+  const afterQuestion = cleanText(after?.clarifyQuestion || "")
+  if (beforeQuestion && afterQuestion && beforeQuestion !== afterQuestion) return true
+
+  return false
+}
+
 export function buildCoachAuditFlags(entry = {}) {
   const flags = []
   const transcriptText = collectTranscriptText(entry)
@@ -361,7 +415,13 @@ export function buildCoachAuditFlags(entry = {}) {
   )
   const priorTargetSatisfied = clarificationTargetSatisfied(mealStateAfter, mealStateBefore?.pendingClarification)
 
-  if (entry.clarification_asked && previousAssistantMessage && cleanText(previousAssistantMessage.content) === cleanText(assistantReply)) {
+  if (
+    entry.clarification_asked
+    && previousAssistantMessage
+    && cleanText(previousAssistantMessage.content) === cleanText(assistantReply)
+    && !clarificationStateMadeProgress(mealStateBefore, mealStateAfter)
+    && !workoutClarificationStateMadeProgress(entry?.state_before?.workout_session || entry?.state_before?.workoutSession || null, workoutStateAfter)
+  ) {
     addFlag(flags, "clarification_loop", "Coach repeated the same clarification.", "warn")
   }
 
@@ -384,6 +444,7 @@ export function buildCoachAuditFlags(entry = {}) {
 
   if (
     replyClaimsPersistence(assistantReply)
+    && !replyIsConditionalPersistenceOffer(assistantReply)
     && persistedActions.length === 0
     && entry.intent !== "app_help"
     && !["already_logged", "suppressed"].includes(String(entry.persistence_status || ""))
@@ -473,7 +534,11 @@ export function buildCoachAuditFlags(entry = {}) {
   }
 
   if ((entry.intent === "meal_logging" || entry.intent === "workout_logging") && !entry.clarification_asked && persistedActions.length === 0 && !replyClaimsPersistence(assistantReply)) {
-    addFlag(flags, "no_action_when_expected", "A likely logging turn did not clarify or persist anything.", "warn")
+    const mealSuppressed = Boolean(mealStateAfter?.suppressed)
+    const workoutSuppressed = Boolean(workoutStateAfter?.suppressed)
+    if (!mealSuppressed && !workoutSuppressed) {
+      addFlag(flags, "no_action_when_expected", "A likely logging turn did not clarify or persist anything.", "warn")
+    }
   }
 
   return flags
@@ -481,6 +546,14 @@ export function buildCoachAuditFlags(entry = {}) {
 
 function replyClaimsPersistence(reply) {
   return /\b(logged|saved|tracked|added|recorded|updated|deleted)\b/i.test(String(reply || ""))
+}
+
+function replyIsConditionalPersistenceOffer(reply) {
+  const text = cleanText(reply)
+  if (!text) return false
+  return /\bif you want (?:it|that|this) (?:saved|logged|tracked)\b/.test(text)
+    || /\btell me to (?:log|save|track) (?:it|that|this)\b/.test(text)
+    || /\bi can (?:log|save|track) (?:it|that|this) if you want\b/.test(text)
 }
 
 export function detectCoachAuditIntent({

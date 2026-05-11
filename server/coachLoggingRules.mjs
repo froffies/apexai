@@ -320,6 +320,10 @@ export function summarizeCoachAction(action) {
     return `Updated your workout log for ${String(action.workout_type || action.exercise_name || "that session").trim()}.`
   }
 
+  if (action.type === "delete_workout_log") {
+    return `Removed ${String(action.workout_type || action.exercise_name || "that workout").trim()} from Workouts.`
+  }
+
   if (action.type === "log_meal") {
     return `Saved to today's nutrition: ${String(action.food_name || "that meal").trim()}.`
   }
@@ -577,6 +581,15 @@ export function buildDeterministicWorkoutAction({ workoutSession, explicitAction
     weight_kg: Number(workoutSession.weight_kg || explicit?.weight_kg || 0),
     duration_seconds: Number(workoutSession.duration_seconds || explicit?.duration_seconds || 0),
     distance_km: Number(workoutSession.distance_km || explicit?.distance_km || 0),
+  }
+}
+
+export function buildDeterministicWorkoutDeletionAction(workoutSession) {
+  if (!workoutSession?.deleteRequested || !String(workoutSession?.persistedWorkoutId || "").trim()) return null
+  return {
+    type: "delete_workout_log",
+    workout_id: String(workoutSession.persistedWorkoutId).trim(),
+    workout_type: String(workoutSession.persistedSummary || workoutSession.summary || "that workout").trim() || "that workout",
   }
 }
 

@@ -204,7 +204,9 @@ const ASSISTANT_MEAL_PATTERN = /\b(what type|what kind|how much|how many|milk|su
 const SUPPRESS_LOG_PATTERN = /\b(?:don't|dont|do not|stop|no)\s+(?:log|save|track|record|add)\b/i
 const NUTRITION_QUESTION_PATTERN = /\b(calories|calorie|macro|macros|protein|carbs|fat|estimate|estimated|calculate)\b/i
 const QUESTION_PREFIX_PATTERN = /^(?:how many|how much|what(?:'s| is)?|can you|could you|please calculate|calculate|estimate)\b/i
-const WORKOUT_ONLY_PATTERN = /\b(bench press|incline bench|overhead press|shoulder press|preacher curl|bicep curl|tricep pushdown|lat pulldown|pull up|push up|squat|deadlift|rdl|lunge|leg press|seated row|barbell row|treadmill|bike|rower|elliptical|stairmaster|sets?|reps?)\b/i
+const WORKOUT_ONLY_PATTERN = /\b(bench press|incline bench|overhead press|shoulder press|preacher curl|bicep curl|tricep pushdown|lat pulldown|pull up|push up|squat|deadlift|rdl|lunge|leg press|seated row|barbell row|row|rows|treadmill|bike|rower|elliptical|stairmaster|sets?|reps?)\b/i
+const WORKOUT_X_PATTERN = /\b\d+(?:\.\d+)?\s*kg\b\s*x\s*\d+\s*x\s*\d+\b/i
+const WORKOUT_CARDIO_PATTERN = /\b\d+\s*(?:min|mins|minutes)\s*(?:incline treadmill|treadmill|bike|rower|elliptical|stairmaster|run|walk)\b/i
 const REMOVAL_PATTERN = /^(?:actually\s+)?(?:remove|without|skip|delete|drop)\s+(?<item>.+)$|^(?:actually\s+)?no\s+(?<item2>.+)$/i
 const REST_PATTERN = /^(?:the\s+)?rest(?:\s+of\s+(?:it|them))?(?:\s+was|\s+were)?\s+(?<details>.+)$/i
 const REST_REFERENCE_ONLY_PATTERN = /^(?:the\s+)?rest(?:\s+of\s+(?:it|them))?$/i
@@ -431,6 +433,30 @@ function splitInlineCookingTail(text = "", preparations = []) {
   }
 }
 
+function splitInheritedRelationTail(text = "", preparations = [], state = null, target = null) {
+  const directRelationTail = splitRelationTail(text)
+  if (directRelationTail.attachments.length) return directRelationTail
+
+  const inlineCookingTail = splitInlineCookingTail(text, preparations)
+  if (inlineCookingTail?.attachments.length) return inlineCookingTail
+
+  if (!preparations.length) return directRelationTail
+
+  const inheritedMatch = String(text || "").match(/^(?<lead>.+?)\s+in\s+(?<ingredient>.+)$/i)
+  if (!inheritedMatch?.groups?.lead || !inheritedMatch?.groups?.ingredient) return directRelationTail
+
+  const inheritedLead = inheritedMatch.groups.lead.trim()
+  const leadPreparations = extractPreparations(inheritedLead)
+  if (!leadPreparations.length) return directRelationTail
+  if (deriveRemainingWords(inheritedLead, "", leadPreparations).length) return directRelationTail
+  if (state && target && !hasGroupedContextForTarget(state, target)) return directRelationTail
+
+  return {
+    lead: inheritedLead,
+    attachments: [{ relation: "cooked_in", ingredientText: inheritedMatch.groups.ingredient.trim() }],
+  }
+}
+
 function relationPromptLabel(relation = "") {
   if (relation === "cooked_in") return "cooked in"
   if (relation === "mixed_with") return "mixed with"
@@ -502,6 +528,7 @@ function looksFoodishPhrase(text) {
 function looksLikeWorkoutOnly(text) {
   const normalized = cleanText(text)
   if (!normalized || looksFoodishPhrase(normalized) || MEAL_VERBS.test(normalized)) return false
+  if (WORKOUT_X_PATTERN.test(normalized) || WORKOUT_CARDIO_PATTERN.test(normalized)) return true
   return WORKOUT_ONLY_PATTERN.test(normalized)
 }
 
@@ -869,6 +896,23 @@ function ingredientMatchesItem(entry, item) {
   return Boolean(attachedTo && (attachedTo === reference || attachedTo === base))
 }
 
+function attachedIngredientVariantKey(state, item) {
+  return normalizeVariantKey(
+    state.items
+      .filter((entry) => ingredientMatchesItem(entry, item))
+      .map((entry) => deriveBaseName(entry.label || entry.baseName || ""))
+      .filter(Boolean)
+      .join(" ")
+  )
+}
+
+function variantIdentityMatches(state, item, nextVariantKey = "") {
+  const storedVariantKey = cleanText(item.variantKey || "")
+  const attachedVariantKey = attachedIngredientVariantKey(state, item)
+  if (nextVariantKey) return storedVariantKey === nextVariantKey || attachedVariantKey === nextVariantKey
+  return !storedVariantKey && !attachedVariantKey
+}
+
 function findBestItemIndex(state, nextItem) {
   const key = cleanText(nextItem.baseName || nextItem.key || nextItem.label)
   const nextAttachment = cleanText(nextItem.attachedTo || "")
@@ -894,13 +938,14 @@ function findBestItemIndex(state, nextItem) {
   const exactVariant = candidates.find(({ item }) => (
     preparationKey(item) === nextPreparationKey
     && modifierKey(item) === nextModifierKey
-    && cleanText(item.variantKey || "") === nextVariantKey
+    && variantIdentityMatches(state, item, nextVariantKey)
   ))
   if ((nextPreparationKey || nextModifierKey || nextVariantKey) && exactVariant) return exactVariant.index
 
   const equivalentStructuredCandidate = candidates.find(({ item }) => (
     preparationKey(item) === nextPreparationKey
     && modifierKey(item) === nextModifierKey
+    && variantIdentityMatches(state, item, nextVariantKey)
     && quantitiesMatch(item.quantity, nextItem.quantity)
   ))
   if ((nextPreparationKey || nextModifierKey || nextVariantKey) && equivalentStructuredCandidate) {
@@ -1289,7 +1334,20 @@ function buildInheritedQuantity(amount, unit, target) {
   const inheritedUnit = unit
     || target?.quantity?.unit
     || (/\begg\b/.test(target?.baseName || "") ? "egg" : "serve")
-  return buildQuantity(amount, inheritedUnit)
+  const quantity = buildQuantity(amount, inheritedUnit)
+  const normalizedBase = cleanText(target?.baseName || "")
+  if (
+    quantity
+    && normalizedBase
+    && normalizeUnit(inheritedUnit) === normalizedBase
+    && normalizedBase !== "egg"
+  ) {
+    return {
+      ...quantity,
+      text: String(quantity.amount),
+    }
+  }
+  return quantity
 }
 
 function hasGroupedContextForTarget(state, target) {
@@ -1315,9 +1373,9 @@ function hasGroupedContextForTarget(state, target) {
 }
 
 function canInheritGeneralizedDetails(details, target, state) {
-  const lead = splitRelationTail(details).lead.trim()
+  const preparations = extractPreparations(details)
+  const lead = splitInheritedRelationTail(details, preparations, state, target).lead.trim()
   if (!lead) return true
-  const preparations = extractPreparations(lead)
   if (preparations.length && !deriveRemainingWords(lead, "", preparations).length) return true
   const leadTokens = stripExclusionPhrases(lead).split(" ").filter(Boolean)
   const explicitBase = cleanText(deriveBaseName(lead))
@@ -1511,13 +1569,23 @@ function parseInheritedFoodClause(state, clause) {
     return null
   }
 
-  const relationSource = splitRelationTail(
-    groupedPreparationMatch?.groups?.details
+  const inheritedDetails = groupedPreparationMatch?.groups?.details
     || generalizedQuantityMatch?.groups?.details
     || restMatch?.groups?.details
     || normalized
+  const relationSource = splitInheritedRelationTail(
+    inheritedDetails,
+    groupedPreparationMatch
+      ? extractPreparations(groupedPreparationMatch.groups.details || normalized)
+      : restMatch
+        ? extractPreparations(restMatch.groups.details || normalized)
+        : generalizedQuantityMatch
+          ? extractPreparations(generalizedQuantityMatch.groups.details || normalized)
+          : referencePreparations,
+    state,
+    target
   )
-  const detailSource = relationSource.lead || groupedPreparationMatch?.groups?.details || generalizedQuantityMatch?.groups?.details || restMatch?.groups?.details || normalized
+  const detailSource = relationSource.lead || inheritedDetails
   const inheritedUnit = groupedPreparationMatch?.groups?.unit
     || generalizedQuantityMatch?.groups?.unit
     || inferTargetQuantityUnit(state, target, /\begg\b/.test(target.baseName) ? "egg" : "serve")
@@ -1544,7 +1612,7 @@ function parseInheritedFoodClause(state, clause) {
   ])
   const qualifierSource = relationSource.attachments.length ? relationSource.lead : detailSource
   const modifiers = extractItemQualifiers(qualifierSource, target.baseName, preparations)
-  const relationVariant = (!preparations.length && !modifiers.length && relationSource.attachments.length)
+  const relationVariant = relationSource.attachments.length
     ? relationSource.attachments.map((entry) => deriveBaseName(entry.ingredientText)).filter(Boolean).join(" ")
     : ""
   const variantKey = buildVariantSignature({ preparations, modifiers, relationTail: relationVariant })
@@ -1682,6 +1750,9 @@ function parseGroupedPreparationAttachmentClause(state, clause) {
   )
 
   if (remainderMatch && target) {
+    const relationVariant = ingredients.length
+      ? ingredients.map((ingredient) => deriveBaseName(ingredient.label || ingredient.baseName || "")).filter(Boolean).join(" ")
+      : ""
     const item = createItem({
       label: defaultDisplayLabel(target.baseName, target.label || target.baseName),
       baseName: target.baseName,
@@ -1689,7 +1760,7 @@ function parseGroupedPreparationAttachmentClause(state, clause) {
       category: target.category,
       preparation: preparations,
       sourceMessage: clause,
-      variantKey: buildVariantSignature({ preparations }),
+      variantKey: buildVariantSignature({ preparations, relationTail: relationVariant }),
       mealType: target.mealType || state.currentMealType,
     })
     return { item, ingredients }
@@ -1723,6 +1794,9 @@ function parseMeasuredFoodClause(clause, state = null, mealType = "") {
     ? splitRelationTail(normalized)
     : splitInlineCookingTail(normalized, normalizedPreparations) || splitRelationTail(normalized)
   const mainText = relationTail.lead.trim()
+  const relationVariant = relationTail.attachments.length
+    ? relationTail.attachments.map((entry) => deriveBaseName(entry.ingredientText)).filter(Boolean).join(" ")
+    : ""
 
   const quantityMatch = mainText.match(QUANTITY_PATTERN)
   const countedFoodMatch = quantityMatch ? null : mainText.match(new RegExp(`^(?<amount>\\d+(?:\\.\\d+)?|${[...QUANTITY_WORDS.keys()].join("|")})\\s+(?<food>[a-z][a-z\\s%-]+)$`, "i"))
@@ -1754,7 +1828,7 @@ function parseMeasuredFoodClause(clause, state = null, mealType = "") {
       modifiers,
       exclusions,
       sourceMessage: clause,
-      variantKey: buildVariantSignature({ preparations: variantPreparations, modifiers }),
+      variantKey: buildVariantSignature({ preparations: variantPreparations, modifiers, relationTail: relationVariant }),
       mealType,
     })
   } else if (quantityMatch?.groups) {
@@ -1794,7 +1868,7 @@ function parseMeasuredFoodClause(clause, state = null, mealType = "") {
       modifiers,
       exclusions,
       sourceMessage: clause,
-      variantKey: buildVariantSignature({ preparations: preparation, modifiers }),
+      variantKey: buildVariantSignature({ preparations: preparation, modifiers, relationTail: relationVariant }),
       mealType,
     })
   } else {
@@ -1815,7 +1889,7 @@ function parseMeasuredFoodClause(clause, state = null, mealType = "") {
       modifiers,
       exclusions,
       sourceMessage: clause,
-      variantKey: buildVariantSignature({ preparations, modifiers }),
+      variantKey: buildVariantSignature({ preparations, modifiers, relationTail: relationVariant }),
       mealType,
     })
   }
@@ -1892,6 +1966,37 @@ function buildPendingQuantity(state, target, amount, rawText = "") {
   const explicitUnit = normalizeUnit(explicitUnitMatch?.groups?.unit || "")
   const inferredUnit = explicitUnit || inferTargetQuantityUnit(state, target, /\begg\b/.test(target?.baseName || "") ? "egg" : "serve")
   return buildQuantity(amount, inferredUnit)
+}
+
+function findAlternateUnresolvedItemDetail(state, pendingTarget, clause) {
+  const normalized = cleanText(clause)
+  if (!normalized) return null
+
+  const unresolvedItems = unresolvedQuantityItems(state)
+    .filter((item) => item && item !== pendingTarget)
+  if (!unresolvedItems.length) return null
+
+  const quantityPrefix = normalized.match(
+    new RegExp(`^(?:\\d+(?:\\.\\d+)?|${[...QUANTITY_WORDS.keys()].join("|")})\\s*(?:${QUANTITY_UNITS.join("|")})?\\b`, "i")
+  )
+  const quantityOnly = parseQuantityOnly(normalized)
+  const bareAmount = parseBareNumericAmount(clause)
+  const clauseBase = deriveBaseName(stripExclusionPhrases(stripCorrectionLead(clause)))
+  const drinkStyleDetail = /\b(?:no sugar|without sugar|no milk|without milk|earl grey|flat white|long black|cappuccino|latte|espresso)\b/.test(normalized)
+  const relation = firstRelationMatch(normalized)
+
+  for (const item of unresolvedItems) {
+    const baseName = cleanText(item.baseName || item.key || item.label || "")
+    if (!baseName) continue
+    const mentionsBase = clauseBase === baseName || new RegExp(`\\b${escapeRegex(baseName)}\\b`, "i").test(normalized)
+    if (!mentionsBase) continue
+    if (relation?.relation === "cooked_in" && item.category !== "drink") continue
+    if (item.category === "drink" || quantityPrefix || quantityOnly || bareAmount !== null || drinkStyleDetail) {
+      return item
+    }
+  }
+
+  return null
 }
 
 function bindPendingClarificationReply(state, clause) {
@@ -1977,6 +2082,10 @@ function bindPendingClarificationReply(state, clause) {
     if (looksLikeClarificationConfusion(normalized)) {
       state.pendingClarification = { ...pending, invalidReply: true }
       return { handled: true, changed: false }
+    }
+    const alternateItem = findAlternateUnresolvedItemDetail(state, target, clause)
+    if (alternateItem) {
+      return { handled: false, changed: false }
     }
     const explicitAttachment = parseCookingAttachmentClause(state, clause)
     const ingredients = explicitAttachment?.ingredients?.length
@@ -2363,7 +2472,16 @@ function describeItem(item, state) {
       : `${mainItem.quantity.amount} eggs`
   } else {
     if (baseNameTail && quantityUnit && baseNameTail === quantityUnit && baseNameTail !== "egg") {
-      baseLabel = Number(mainItem.quantity?.amount || 0) === 1 ? baseNameTail : pluralizeCountUnit(baseNameTail, mainItem.quantity?.amount || 0)
+      const numericLeadOnly = cleanText(quantityText) === String(mainItem.quantity?.amount || "")
+      const labelText = cleanText(mainItem.label || "")
+      const labelLooksPluralCount = labelText && labelText !== baseNameTail && singularize(labelText) === baseNameTail
+      baseLabel = numericLeadOnly
+        ? (labelLooksPluralCount && Number(mainItem.quantity?.amount || 0) !== 1
+            ? pluralizeCountUnit(baseNameTail, mainItem.quantity?.amount || 0)
+            : baseLabel)
+        : Number(mainItem.quantity?.amount || 0) === 1
+          ? baseNameTail
+          : pluralizeCountUnit(baseNameTail, mainItem.quantity?.amount || 0)
       description = cleanText(quantityText).endsWith(cleanText(baseLabel))
         ? quantityText.trim()
         : `${quantityText}${baseLabel}`.trim()
@@ -2538,6 +2656,25 @@ function cookingMediumShouldStopClarifying(item, state) {
   return attempts >= 2 || (userIsFinalising(state) && attempts >= 1)
 }
 
+function sameBaseGroupedSiblingHasCookingMedium(item, state) {
+  const baseName = cleanText(item?.baseName || item?.key || "")
+  if (!baseName) return false
+
+  const groupedSiblings = state.items.filter((entry) => (
+    !entry.attachedTo
+    && entry !== item
+    && cleanText(entry.baseName || entry.key || "") === baseName
+  ))
+  if (!groupedSiblings.length) return false
+
+  const hasDeclaredGroupedTotal = (state.declaredTotals || []).some((entry) => cleanText(entry?.baseName || "") === baseName)
+  if (!hasDeclaredGroupedTotal && groupedSiblings.length < 1) return false
+
+  return groupedSiblings.some((sibling) => (
+    state.items.some((entry) => ingredientMatchesItem(entry, sibling) && entry.relation === "cooked_in")
+  ))
+}
+
 function identifyMissingDetails(state) {
   const missing = []
   const declaredTotalMismatch = findDeclaredTotalMismatch(state)
@@ -2552,6 +2689,7 @@ function identifyMissingDetails(state) {
     }
     const needsCookingMedium = item.preparation?.includes("fried")
       && !state.items.some((entry) => ingredientMatchesItem(entry, item) && entry.relation === "cooked_in")
+      && !sameBaseGroupedSiblingHasCookingMedium(item, state)
       && !cookingMediumShouldStopClarifying(item, state)
     if (needsCookingMedium) {
       missing.push({ type: "cooking_medium", item })

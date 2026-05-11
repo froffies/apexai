@@ -57,6 +57,46 @@ test("buildCoachAuditFlags catches fake save replies without persisted actions",
   assert.ok(flags.some((flag) => flag.code === "fake_save_blocked"))
 })
 
+test("buildCoachAuditFlags does not flag conditional save offers as fake persistence", () => {
+  const flags = buildCoachAuditFlags({
+    user_message: "how many calories is that?",
+    assistant_reply: "That comes to about 294 kcal. If you want it saved, tell me to log it.",
+    persisted_actions: [],
+    route_type: "deterministic",
+    persistence_status: "not_requested",
+    state_after: {
+      meal_session: {
+        readyToLog: true,
+        wantsNutrition: true,
+        answerOnly: true,
+        summary: "3 fried eggs cooked in 10g butter, plus 250ml Earl Grey tea with no milk and no sugar",
+      },
+    },
+  })
+
+  assert.equal(flags.some((flag) => flag.code === "fake_save_blocked"), false)
+})
+
+test("buildCoachAuditFlags does not flag suppressed logging turns as missing actions", () => {
+  const flags = buildCoachAuditFlags({
+    user_message: "i had steak and beer today, don't log that",
+    assistant_reply: "Okay, I won't save that.",
+    persisted_actions: [],
+    route_type: "deterministic",
+    persistence_status: "suppressed",
+    intent: "meal_logging",
+    state_after: {
+      meal_session: {
+        wantsLogging: true,
+        suppressed: true,
+        suppressionReply: "Okay, I won't save that.",
+      },
+    },
+  })
+
+  assert.equal(flags.some((flag) => flag.code === "no_action_when_expected"), false)
+})
+
 test("buildCoachAuditFlags catches clarification target loss and unbound decimal quantity replies", () => {
   const flags = buildCoachAuditFlags({
     user_message: "19.2",
@@ -144,6 +184,92 @@ test("buildCoachAuditFlags does not flag a decimal reply when it binds to the as
   assert.equal(flags.some((flag) => flag.code === "clarification_loop"), false)
   assert.equal(flags.some((flag) => flag.code === "clarification_target_lost"), false)
   assert.equal(flags.some((flag) => flag.code === "decimal_quantity_unbound"), false)
+})
+
+test("buildCoachAuditFlags does not flag a repeated clarification as a loop when another unresolved item was filled correctly", () => {
+  const flags = buildCoachAuditFlags({
+    user_message: "355ml milk no sugar",
+    assistant_reply: "What were the fried steak cooked in?",
+    persisted_actions: [],
+    route_type: "deterministic",
+    persistence_status: "not_requested",
+    clarification_asked: true,
+    state_before: {
+      meal_session: {
+        summary: "4 fried steaks, plus milk",
+        items: [
+          { base_name: "steak", label: "Steak", quantity: { amount: 4, unit: "steak", text: "4 steaks" }, preparation: ["fried"] },
+          { base_name: "milk", label: "Milk" },
+        ],
+        pendingClarification: {
+          type: "cooking_medium",
+          targetReference: "steak::fried",
+          targetBaseName: "steak",
+          targetLabel: "Steak",
+          expectedValueType: "ingredient",
+        },
+      },
+    },
+    state_after: {
+      meal_session: {
+        summary: "4 fried steaks, plus 355ml milk with no sugar",
+        items: [
+          { base_name: "steak", label: "Steak", quantity: { amount: 4, unit: "steak", text: "4 steaks" }, preparation: ["fried"] },
+          { base_name: "milk", label: "Milk", quantity: { amount: 355, unit: "ml", text: "355ml" }, exclusions: ["no sugar"] },
+        ],
+        pendingClarification: {
+          type: "cooking_medium",
+          targetReference: "steak::fried",
+          targetBaseName: "steak",
+          targetLabel: "Steak",
+          expectedValueType: "ingredient",
+        },
+      },
+    },
+    conversation_window: [
+      { role: "assistant", content: "What were the fried steak cooked in?" },
+      { role: "user", content: "355ml milk no sugar" },
+      { role: "assistant", content: "What were the fried steak cooked in?" },
+    ],
+  })
+
+  assert.equal(flags.some((flag) => flag.code === "clarification_loop"), false)
+})
+
+test("buildCoachAuditFlags does not flag a repeated workout clarification as a loop when workout state progressed", () => {
+  const flags = buildCoachAuditFlags({
+    user_message: "2 sets",
+    assistant_reply: "How many reps did you do for Row?",
+    persisted_actions: [],
+    route_type: "deterministic",
+    persistence_status: "not_requested",
+    clarification_asked: true,
+    state_before: {
+      workout_session: {
+        exercise_name: "Row",
+        workout_type: "Row",
+        sets: 0,
+        reps: 0,
+        clarifyQuestion: "How many reps did you do for Row?",
+      },
+    },
+    state_after: {
+      workout_session: {
+        exercise_name: "Row",
+        workout_type: "Row",
+        sets: 2,
+        reps: 0,
+        clarifyQuestion: "How many reps did you do for Row?",
+      },
+    },
+    conversation_window: [
+      { role: "assistant", content: "How many reps did you do for Row?" },
+      { role: "user", content: "2 sets" },
+      { role: "assistant", content: "How many reps did you do for Row?" },
+    ],
+  })
+
+  assert.equal(flags.some((flag) => flag.code === "clarification_loop"), false)
 })
 
 test("buildCoachAuditFlags catches complaint-derived foods, corrupted persistence, and ignored delete intent", () => {

@@ -113,6 +113,7 @@ function createEmptyWorkoutSession() {
     persistedAt: "",
     alreadyLogged: false,
     correctionRequested: false,
+    deleteRequested: false,
     suppressed: false,
     suppressionReply: "",
     thread_messages: [],
@@ -444,6 +445,7 @@ function buildPersistedWorkoutSession(session, action, workoutId) {
     persistedAt: new Date().toISOString(),
     alreadyLogged: false,
     correctionRequested: false,
+    deleteRequested: false,
   }
 }
 
@@ -473,6 +475,7 @@ function hasMeaningfulWorkoutSession(session) {
     || session.workoutConversation
     || session.alreadyLogged
     || session.correctionRequested
+    || session.deleteRequested
     || session.persisted
     || session.persistedWorkoutId
     || session.persistedSummary
@@ -1244,6 +1247,7 @@ export default function Coach() {
     const deletedMealIds = []
     const loggedWorkoutIds = []
     const updatedWorkoutIds = []
+    const deletedWorkoutIds = []
     const loggedMeals = []
     const updatedMeals = []
     let latestLoggedMeal = null
@@ -1264,7 +1268,7 @@ export default function Coach() {
       ? coachResponse.workout_session
       : null
     const requestedMealPersistence = (coachResponse.actions || []).some((action) => action?.type === "log_meal" || action?.type === "update_meal_log" || action?.type === "delete_meal_log")
-    const requestedWorkoutPersistence = (coachResponse.actions || []).some((action) => action?.type === "log_workout" || action?.type === "update_workout_log")
+    const requestedWorkoutPersistence = (coachResponse.actions || []).some((action) => action?.type === "log_workout" || action?.type === "update_workout_log" || action?.type === "delete_workout_log")
 
     for (const rawAction of coachResponse.actions || []) {
       const normalizedResult = rawAction?.type === "log_meal" || rawAction?.type === "update_meal_log"
@@ -1379,8 +1383,8 @@ export default function Coach() {
         persistedActions.push({ type: "log_workout", workout_id: sessionId, ...action })
       }
 
-      if (action.type === "update_workout_log") {
-        const workoutId = String(action.workout_id || "").trim()
+        if (action.type === "update_workout_log") {
+          const workoutId = String(action.workout_id || "").trim()
         const existingWorkout = workouts.find((workout) => workout.id === workoutId)
         if (!workoutId || !existingWorkout) {
           rejectedActions.push("I couldn't match that workout correction to a saved session, so I left your history alone.")
@@ -1409,8 +1413,26 @@ export default function Coach() {
         updatedWorkoutIds.push(workoutId)
         latestUpdatedWorkout = nextWorkout
         latestUpdatedWorkoutAction = action
-        persistedActions.push({ type: "update_workout_log", workout_id: workoutId, ...action })
-      }
+          persistedActions.push({ type: "update_workout_log", workout_id: workoutId, ...action })
+        }
+
+        if (action.type === "delete_workout_log") {
+          const workoutId = String(action.workout_id || "").trim()
+          const existingWorkout = workouts.find((workout) => workout.id === workoutId)
+          if (!workoutId || !existingWorkout) {
+            rejectedActions.push("I couldn't match that delete request to a saved workout, so I left your history alone.")
+            continue
+          }
+          setWorkouts((current) => current.filter((workout) => workout.id !== workoutId))
+          setWorkoutSets((current) => current.filter((set) => set.session_id !== workoutId))
+          if (activeWorkout?.session_id === workoutId) setActiveWorkout(emptyActiveWorkout)
+          deletedWorkoutIds.push(workoutId)
+          persistedActions.push({
+            type: "delete_workout_log",
+            workout_id: workoutId,
+            workout_type: String(existingWorkout.workout_type || action.workout_type || action.exercise_name || "that workout").trim() || "that workout",
+          })
+        }
 
       if (action.type === "log_meal") {
         const hasMacros = [action.calories, action.protein_g, action.carbs_g, action.fat_g].every((value) => Number.isFinite(Number(value)))
@@ -1497,7 +1519,7 @@ export default function Coach() {
     const warnings = [...(coachResponse.warnings || []), ...rejectedActions].filter(Boolean)
     const suffix = warnings.length ? `\n\n${warnings.join(" ")}` : ""
     const mealSaveSucceeded = loggedMealIds.length > 0 || updatedMealIds.length > 0 || deletedMealIds.length > 0
-    const workoutSaveSucceeded = loggedWorkoutIds.length > 0 || updatedWorkoutIds.length > 0
+    const workoutSaveSucceeded = loggedWorkoutIds.length > 0 || updatedWorkoutIds.length > 0 || deletedWorkoutIds.length > 0
     if (deletedMealIds.length > 0) {
       setMealSession(createEmptyMealSession())
       finalMealSessionState = cloneAuditState(createEmptyMealSession())
@@ -1522,7 +1544,10 @@ export default function Coach() {
       setMealSession(nextMealSession)
       finalMealSessionState = cloneAuditState(nextMealSession)
     }
-    if (workoutSaveSucceeded) {
+    if (deletedWorkoutIds.length > 0) {
+      setWorkoutSession(createEmptyWorkoutSession())
+      finalWorkoutSessionState = cloneAuditState(createEmptyWorkoutSession())
+    } else if (workoutSaveSucceeded) {
       const persistedSource = nextWorkoutSession || workoutSession
       const persistedWorkout = latestLoggedWorkout || latestUpdatedWorkout
       const persistedWorkoutId = loggedWorkoutIds[0] || updatedWorkoutIds[0] || ""
@@ -1572,9 +1597,10 @@ export default function Coach() {
       ...(loggedMealIds.length ? { loggedMealIds } : {}),
       ...(updatedMealIds.length ? { updatedMealIds } : {}),
       ...(deletedMealIds.length ? { deletedMealIds } : {}),
-      ...(loggedWorkoutIds.length ? { loggedWorkoutIds } : {}),
-      ...(updatedWorkoutIds.length ? { updatedWorkoutIds } : {}),
-      auditMeta: {
+        ...(loggedWorkoutIds.length ? { loggedWorkoutIds } : {}),
+        ...(updatedWorkoutIds.length ? { updatedWorkoutIds } : {}),
+        ...(deletedWorkoutIds.length ? { deletedWorkoutIds } : {}),
+        auditMeta: {
         ...(coachResponse.audit_meta || {}),
         route_type: coachResponse?.audit_meta?.route_type || "ai-assisted",
         intent: coachResponse?.audit_meta?.intent || "general_chat",

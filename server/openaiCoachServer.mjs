@@ -20,6 +20,7 @@ import {
   buildDeterministicMealDeletionAction,
   buildDeterministicMealActions,
   buildDeterministicWorkoutAction,
+  buildDeterministicWorkoutDeletionAction,
   deterministicAlreadyLoggedReply,
   deterministicClarifyActionFromSession,
   formatDeterministicMealAnswer,
@@ -753,8 +754,34 @@ function needsRecentChatContext(message) {
   if (!text) return false
   if (text.length <= 24) return true
   if (/\b(yes|yeah|yep|no|nah|correct|actually|instead|also|too|same|that|it|them|those|this|there|here|afterward|afterwards|before|used to|save it|log it|update it|fix that)\b/.test(text)) return true
+  if (/\b(you asked|i gave you|i told you|already said|what do you mean|why can(?:'|’)t you understand|why cant you understand)\b/.test(text)) return true
   if (/\b(where did you log|where was that logged|what's next|whats next|show me that|do that|go ahead)\b/.test(text)) return true
   return false
+}
+
+function buildOfflineCoachFallbackReply(message) {
+  const text = cleanLookupText(message)
+  if (!text) {
+    return "Tell me what happened today, what you ate, what you trained, or what you want to change, and I'll help you sort the next move."
+  }
+
+  if (/^(?:hi|hello|hey|yo|gday|g'day|sup|whats up|what's up)\b/.test(text)) {
+    return "Hey. Tell me what happened today, what you ate, what you trained, or what you want to change, and I'll help you sort the next move."
+  }
+
+  if (/\b(?:calories|calorie|protein|carbs|fat|macros?|estimate|estimated|nutrition)\b/.test(text)) {
+    return "I can help estimate that. Tell me the food and roughly how much you had, and I'll break it down."
+  }
+
+  if (/\b(?:workout|train|training|exercise|session|sets?|reps?|weight|kg|cardio|run|running|treadmill|bike|row|press|squat|deadlift)\b/.test(text)) {
+    return "I can help with that. Tell me what you trained or what you want to adjust, and I'll help you sort the next move."
+  }
+
+  if (/[?]$/.test(String(message || "").trim()) || /\b(?:what should i|what do i|help me|can you|could you)\b/.test(text)) {
+    return "Give me a bit more detail on the meal, training, or goal you're working with, and I'll help you map the next step."
+  }
+
+  return "Tell me what happened today, what you ate, what you trained, or what you want to change, and I'll help you sort the next move."
 }
 
 function shouldHydrateCoachFoodMatches(message, recentMessages = []) {
@@ -836,7 +863,13 @@ async function handleCoach(request, response) {
       workout_session: body.workoutSession || null,
     })
 
-    contextualRecentMessages = needsRecentChatContext(body.message)
+    const hasActiveCoachSession = Boolean(
+      body.mealSession?.active
+      || body.mealSession?.persisted
+      || body.workoutSession?.active
+      || body.workoutSession?.persisted
+    )
+    contextualRecentMessages = hasActiveCoachSession || needsRecentChatContext(body.message)
       ? normalizeRecentMessages(body.recentMessages, body.message, 18)
       : []
 
@@ -926,6 +959,18 @@ async function handleCoach(request, response) {
       sendCoachPayload({
         reply: summarizeCoachAction(mealDeleteAction),
         actions: [mealDeleteAction],
+        warnings: [],
+        meal_session: mealContext,
+        workout_session: workoutContext,
+      }, "deterministic")
+      return
+    }
+
+    const workoutDeleteAction = buildDeterministicWorkoutDeletionAction(workoutContext)
+    if (workoutDeleteAction) {
+      sendCoachPayload({
+        reply: summarizeCoachAction(workoutDeleteAction),
+        actions: [workoutDeleteAction],
         warnings: [],
         meal_session: mealContext,
         workout_session: workoutContext,
@@ -1044,10 +1089,14 @@ async function handleCoach(request, response) {
     }
 
     if (!client) {
-      throw createHttpError(503, "Live coach is unavailable right now.", {
-        expose: true,
-        logMessage: "OPENAI_API_KEY is not set for the coach server",
-      })
+      sendCoachPayload({
+        reply: buildOfflineCoachFallbackReply(body.message),
+        actions: [],
+        warnings: [],
+        meal_session: mealContext,
+        workout_session: workoutContext,
+      }, "fallback")
+      return
     }
 
     if (mealContext) {

@@ -4,6 +4,7 @@ import {
   buildDeterministicMealAction,
   buildDeterministicMealActions,
   buildDeterministicWorkoutAction,
+  buildDeterministicWorkoutDeletionAction,
   deterministicAlreadyLoggedReply,
   deterministicClarifyActionFromSession,
   formatDeterministicMealAnswer,
@@ -413,6 +414,19 @@ test("coach logging rules emit update_workout_log for persisted workout correcti
   assert.ok(action)
   assert.equal(action.type, "update_workout_log")
   assert.equal(action.workout_id, "workout_fix")
+})
+
+test("coach logging rules emit delete_workout_log for persisted workout delete requests", () => {
+  const action = buildDeterministicWorkoutDeletionAction({
+    deleteRequested: true,
+    persistedWorkoutId: "workout_delete",
+    persistedSummary: "Bench Press",
+  })
+
+  assert.ok(action)
+  assert.equal(action.type, "delete_workout_log")
+  assert.equal(action.workout_id, "workout_delete")
+  assert.equal(action.workout_type, "Bench Press")
 })
 
 test("coach logging rules surface deterministic clarification prompts", () => {

@@ -161,6 +161,28 @@ test("meal session keeps clarification binding stable and ignores complaint text
   assert.equal(session.invalidStructure, false)
 })
 
+test("meal session does not coerce another unresolved drink detail into a cooking medium attachment", () => {
+  const { session, snapshots } = replayMealConversation([
+    user("i had tofu and milk"),
+    assistant("How much tofu did you have?"),
+    user("4 fried tofu"),
+    assistant("What were the fried tofu cooked in?"),
+    user("437ml milk no sugar"),
+    assistant("What were the fried tofu cooked in?"),
+    user("cooked in 15g olive oil"),
+  ])
+
+  assert.ok(session)
+  assert.equal(snapshots[2].session.clarifyQuestion, "What were the fried tofu cooked in?")
+  assert.equal(snapshots[2].session.summary, "4 fried tofu, plus 437ml milk with no sugar")
+  assert.equal(
+    snapshots[2].session.items.some((item) => item.attached_to?.includes("tofu") && /milk/i.test(`${item.base_name} ${item.label}`)),
+    false,
+  )
+  assert.equal(session.readyToLog, true)
+  assert.equal(session.summary, "4 fried tofu cooked in 15g olive oil, plus 437ml milk with no sugar")
+})
+
 test("meal session keeps frustration text out of saved summaries across varied meal combinations", () => {
   const scenarios = [
     {
@@ -425,7 +447,7 @@ test("meal session supports grouped quantity splits for another food with prepar
   assert.equal(session.readyToLog, true)
   assert.equal(session.summary, "300g grilled chicken, plus 200g fried chicken cooked in 20g olive oil")
   assert.equal(session.items.filter((item) => !item.attached_to).length, 2)
-  assert.equal(session.items.find((item) => item.base_name === "olive oil")?.attached_to, "chicken::fried")
+  assert.match(String(session.items.find((item) => item.base_name === "olive oil")?.attached_to || ""), /^chicken::fried/)
 })
 
 test("meal session allocates grouped remainder to a new preparation-specific subgroup instead of attaching it to the wrong item", () => {
@@ -438,7 +460,7 @@ test("meal session allocates grouped remainder to a new preparation-specific sub
   assert.equal(session.clarifyQuestion, "")
   assert.equal(session.summary, "300g grilled chicken, plus 200g fried chicken cooked in 20g olive oil")
   assert.equal(session.items.filter((item) => !item.attached_to).length, 2)
-  assert.equal(session.items.find((item) => item.base_name === "olive oil")?.attached_to, "chicken::fried")
+  assert.match(String(session.items.find((item) => item.base_name === "olive oil")?.attached_to || ""), /^chicken::fried/)
 })
 
 test("meal session inherits grouped host bases so split variants stay attached to the shared food instead of turning into junk items", () => {
@@ -484,7 +506,7 @@ test("meal session keeps inline cooking-medium clauses attached to the intended 
   assert.equal(session.items.filter((item) => !item.attached_to).length, 2)
   const oil = session.items.find((item) => item.base_name === "oil")
   assert.ok(oil)
-  assert.equal(oil.attached_to, "chicken::fried")
+  assert.match(String(oil.attached_to || ""), /^chicken::fried/)
   assert.equal(session.clarifyQuestion, "")
 })
 
@@ -512,7 +534,58 @@ test("meal session supports grouped split carbs without collapsing fried and pla
   assert.equal(session.readyToLog, true)
   assert.equal(session.summary, "1 cup plain rice, plus 1 cup fried rice cooked in 10g oil")
   assert.equal(session.items.filter((item) => !item.attached_to).length, 2)
-  assert.equal(session.items.find((item) => item.base_name === "oil")?.attached_to, "rice::fried")
+  assert.match(String(session.items.find((item) => item.base_name === "oil")?.attached_to || ""), /^rice::fried/)
+})
+
+test("meal session accepts grouped totals when a sibling preparation already carries the cooking medium", () => {
+  const { session } = replayMealConversation([
+    user("i had 15 eggs total, 13 fried, 2 grilled in 20g butter"),
+  ])
+
+  assert.ok(session)
+  assert.equal(session.readyToLog, true)
+  assert.equal(session.clarifyQuestion, "")
+  assert.match(session.summary, /13 fried eggs/i)
+  assert.match(session.summary, /2 grilled eggs cooked in 20g butter/i)
+})
+
+test("meal session keeps inherited grouped subgroups intact when a later subgroup adds its own ingredient tail", () => {
+  const { session } = replayMealConversation([
+    user("i had 500g chicken total, 300g grilled, 200g plain in 20g olive oil"),
+  ])
+
+  assert.ok(session)
+  assert.equal(session.readyToLog, true)
+  assert.equal(session.clarifyQuestion, "")
+  assert.equal(session.summary, "300g grilled chicken, plus 200g plain chicken cooked in 20g olive oil")
+  assert.equal(session.items.filter((item) => !item.attached_to).length, 2)
+  assert.match(String(session.items.find((item) => item.base_name === "olive oil")?.attached_to || ""), /^chicken::plain/)
+})
+
+test("meal session keeps same-preparation grouped subgroups separate when only one branch has a cooking tail", () => {
+  const { session } = replayMealConversation([
+    user("i had 17 eggs total, 11 plain, 6 plain in 20g olive oil"),
+  ])
+
+  assert.ok(session)
+  assert.equal(session.readyToLog, true)
+  assert.equal(session.clarifyQuestion, "")
+  assert.equal(session.summary, "11 plain eggs, plus 6 plain eggs cooked in 20g olive oil")
+  assert.equal(session.items.filter((item) => !item.attached_to).length, 2)
+  assert.equal(session.items.find((item) => item.base_name === "olive oil")?.attached_to, "egg::plain::plain olive oil")
+})
+
+test("meal session keeps repeated same-preparation grouped branches separate when only one branch carries a cooking medium", () => {
+  const { session } = replayMealConversation([
+    user("i had 10 rice total, 5 fried, 5 fried in 20g butter"),
+  ])
+
+  assert.ok(session)
+  assert.equal(session.readyToLog, true)
+  assert.equal(session.clarifyQuestion, "")
+  assert.equal(session.summary, "5 fried rice, plus 5 fried rice cooked in 20g butter")
+  assert.equal(session.items.filter((item) => !item.attached_to).length, 2)
+  assert.match(String(session.items.find((item) => item.base_name === "butter")?.attached_to || ""), /^rice::fried/)
 })
 
 test("meal session asks one useful clarification when grouped totals do not add up", () => {
