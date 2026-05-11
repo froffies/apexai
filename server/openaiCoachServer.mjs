@@ -17,6 +17,7 @@ import {
   summarizeCoachAuditRecords,
 } from "./coachAudit.mjs"
 import {
+  buildDeterministicMealDeletionAction,
   buildDeterministicMealActions,
   buildDeterministicWorkoutAction,
   deterministicAlreadyLoggedReply,
@@ -83,7 +84,7 @@ const coachResponseSchema = {
         properties: {
           type: {
             type: "string",
-            enum: ["none", "clarify", "log_workout", "update_workout_log", "log_meal", "update_meal_log", "create_workout_plan", "create_meal_plan", "update_targets"],
+            enum: ["none", "clarify", "log_workout", "update_workout_log", "delete_workout_log", "log_meal", "update_meal_log", "delete_meal_log", "create_workout_plan", "create_meal_plan", "update_targets"],
           },
           message: { type: "string" },
           date: { type: "string" },
@@ -143,6 +144,7 @@ const coachResponseSchema = {
           protein_target_g: { type: "number" },
           carbs_target_g: { type: "number" },
           fat_target_g: { type: "number" },
+          delete_confirmed: { type: "boolean" },
         },
       },
     },
@@ -432,8 +434,10 @@ function isPersistenceAction(action) {
   return [
     "log_meal",
     "update_meal_log",
+    "delete_meal_log",
     "log_workout",
     "update_workout_log",
+    "delete_workout_log",
     "create_workout_plan",
     "create_meal_plan",
     "update_targets",
@@ -915,6 +919,18 @@ async function handleCoach(request, response) {
         ...payload,
         ...(auditCapabilities.enabled ? { audit_meta: buildCoachAuditResponseMeta(auditRecord) } : {}),
       }, requestResponseOrigin(request))
+    }
+
+    const mealDeleteAction = buildDeterministicMealDeletionAction(mealContext)
+    if (mealDeleteAction) {
+      sendCoachPayload({
+        reply: summarizeCoachAction(mealDeleteAction),
+        actions: [mealDeleteAction],
+        warnings: [],
+        meal_session: mealContext,
+        workout_session: workoutContext,
+      }, "deterministic")
+      return
     }
 
     if (mealContext?.alreadyLogged) {

@@ -57,6 +57,7 @@ const STOPWORDS = new Set([
   "save",
   "add",
   "include",
+  "today",
 ])
 
 const PREPARATION_WORDS = new Set([
@@ -207,6 +208,8 @@ const WORKOUT_ONLY_PATTERN = /\b(bench press|incline bench|overhead press|should
 const REMOVAL_PATTERN = /^(?:actually\s+)?(?:remove|without|skip|delete|drop)\s+(?<item>.+)$|^(?:actually\s+)?no\s+(?<item2>.+)$/i
 const REST_PATTERN = /^(?:the\s+)?rest(?:\s+of\s+(?:it|them))?(?:\s+was|\s+were)?\s+(?<details>.+)$/i
 const REST_REFERENCE_ONLY_PATTERN = /^(?:the\s+)?rest(?:\s+of\s+(?:it|them))?$/i
+const META_COMPLAINT_PATTERN = /\b(?:you asked|i gave you|why can(?:'|’)t you understand|why cant you understand|i told you|already said|what do you mean|i just answered|you just asked)\b/i
+const COMPLAINT_DERIVED_ITEM_PATTERN = /\b(?:you|asked|understand|number|mean|gave)\b/i
 const PREPARATION_PATTERNS = [
   ["hard boiled", /\bhard boiled\b/i],
   ["hard boiled", /\bhardboiled\b/i],
@@ -999,8 +1002,20 @@ function looksLikeClarificationConfusion(text) {
   return /^(?:what do you mean|what\?|huh|sorry\?|not sure|confused)$/i.test(cleanText(text))
 }
 
+function looksLikeMetaConversationTurn(text) {
+  const normalized = cleanText(text)
+  if (!normalized) return false
+  return META_COMPLAINT_PATTERN.test(normalized)
+}
+
 function isNumericLikeBaseName(value = "") {
   return /^\d+(?:\.\d+)?$/.test(cleanText(value))
+}
+
+function looksComplaintDerivedBaseName(value = "") {
+  const normalized = cleanText(value)
+  if (!normalized) return false
+  return META_COMPLAINT_PATTERN.test(normalized) || COMPLAINT_DERIVED_ITEM_PATTERN.test(normalized)
 }
 
 function normalizePendingClarification(pending = null) {
@@ -1895,17 +1910,15 @@ function bindPendingClarificationReply(state, clause) {
       state.pendingClarification = { ...pending, invalidReply: true }
       return { handled: true, changed: false }
     }
+    if (looksLikeMetaConversationTurn(normalized)) {
+      state.pendingClarification = { ...pending, invalidReply: true }
+      return { handled: true, changed: false }
+    }
     const bareAmount = parseBareNumericAmount(clause)
     const quantityOnly = parseQuantityOnly(clause)
     const explicitTargetMatch = normalized.match(new RegExp(`^(?<amount>\\d+(?:\\.\\d+)?|${[...QUANTITY_WORDS.keys()].join("|")})\\s+(?<food>.+)$`, "i"))
 
     if (bareAmount !== null) {
-      if (shouldClarifyNumericBindingTarget(state, pending, target)) {
-        const options = [pending.targetLabel || titleCase(defaultDisplayLabel(target.baseName || "", target.label || "")), ...pending.siblingTargets.map((entry) => titleCase(defaultDisplayLabel(entry, entry)))]
-        state.pendingClarification = { ...pending, invalidReply: true }
-        state.overrideClarifyQuestion = `I need to know which item the ${bareAmount} applies to: ${options.join(" or ")}?`
-        return { handled: true, changed: false }
-      }
       const quantity = buildPendingQuantity(state, target, bareAmount, clause)
       if (!quantity) {
         state.pendingClarification = { ...pending, invalidReply: true }
@@ -2089,6 +2102,10 @@ function mergeClauseIntoState(state, clause) {
   if (!normalized) return Boolean(mealTypeClause.explicitMealType)
 
   let changed = false
+
+  if (looksLikeMetaConversationTurn(clauseText)) {
+    return false
+  }
 
   if (detectSuppressedLogging(normalized)) {
     state.suppressed = true
@@ -2633,6 +2650,13 @@ function detectStructuralIssues(state) {
   const numericPrimaryItems = state.items.filter((item) => !item.attachedTo && isNumericLikeBaseName(item.baseName || item.label || ""))
   for (const item of numericPrimaryItems) {
     issues.push({ type: "numeric_item", item })
+  }
+  const complaintDerivedItems = state.items.filter((item) => (
+    !item.attachedTo
+    && looksComplaintDerivedBaseName(item.baseName || item.label || item.sourceMessage || "")
+  ))
+  for (const item of complaintDerivedItems) {
+    issues.push({ type: "complaint_derived_item", item })
   }
   if (state.pendingQuantities.length) {
     issues.push({ type: "orphan_quantity" })

@@ -2,6 +2,8 @@ import { buildMealContext as buildLegacyMealContext, detectQuestionOnlyTurn, emp
 
 const MEAL_EXPLICIT_START_PATTERN = /^(?:please\s+)?(?:(?:i\s+)?(?:had|ate|drank)|log|track|save|add|include)\b/i
 const MEAL_CORRECTION_PATTERN = /\b(?:actually|correction|change(?:\s+that)?|update(?:\s+that)?|make that|not\b|instead|sorry|i meant)\b/i
+const MEAL_DELETE_PATTERN = /\b(?:delete|remove|undo|erase)\b(?:\s+(?:it|that|this|meal))?/i
+const MEAL_REJECTION_PATTERN = /\b(?:that's wrong|thats wrong|logged wrong|wrong meal|fix that|fix it)\b/i
 const MEAL_FINALISE_PATTERN = /^(?:i just did|i already did|that'?s it|thats it|log it|save it|go ahead|yes|yeah|yep|okay|ok)$/i
 const MEAL_REFERENCE_PATTERN = /\b(?:the eggs?|the tea|the coffee|the toast|the beans?|the chicken|the rice|the butter|the oil)\b/i
 const SUPPRESS_SESSION_PATTERN = /\b(?:don't|dont|do not|stop|no)\s+(?:log|save|track|record|add)\b/i
@@ -145,6 +147,14 @@ function mealCorrectionRequested(message) {
   return MEAL_CORRECTION_PATTERN.test(cleanText(message))
 }
 
+function mealDeleteRequested(message) {
+  return MEAL_DELETE_PATTERN.test(cleanText(message))
+}
+
+function mealRejectionRequested(message) {
+  return MEAL_REJECTION_PATTERN.test(cleanText(message))
+}
+
 function workoutCorrectionRequested(message) {
   return WORKOUT_CORRECTION_PATTERN.test(cleanText(message))
 }
@@ -166,6 +176,8 @@ function isRedundantPersistedMealFollowUp(message, session) {
   if (!session?.persisted || !normalized) return false
   if (isExplicitMealStart(normalized)) return false
   if (mealCorrectionRequested(normalized)) return false
+  if (mealRejectionRequested(normalized)) return false
+  if (mealDeleteRequested(normalized)) return false
   if (MEAL_FINALISE_PATTERN.test(normalized) || MEAL_REFERENCE_PATTERN.test(normalized)) return true
 
   const summaryText = cleanText(session.persistedSummary || session.summary || "")
@@ -250,6 +262,7 @@ function persistedMealMarker(session, recentMessages, currentMessage) {
     readyToLog: false,
     shouldStopClarifying: false,
     clarifyQuestion: "",
+    deleteRequested: false,
     alreadyLogged: true,
     correctionRequested: false,
     answerOnly: false,
@@ -302,6 +315,8 @@ function summariesEquivalent(left, right) {
 function buildMealSessionState(recentMessages = [], currentMessage = "", existingSession = null, recentMeals = []) {
   const prior = normalizeMealSession(existingSession)
   const normalizedCurrent = cleanText(currentMessage)
+  const deleteRequested = Boolean(prior.persistedMealId && mealDeleteRequested(currentMessage))
+  const rejectionRequested = Boolean(prior.persistedMealId && mealRejectionRequested(currentMessage))
 
   if (!prior.active && !prior.persisted && repeatRecentMealRequested(currentMessage)) {
     const repeated = buildRepeatedMealSession(recentMeals)
@@ -310,6 +325,18 @@ function buildMealSessionState(recentMessages = [], currentMessage = "", existin
         ...repeated,
         thread_messages: buildThreadMessages(recentMessages, currentMessage),
       }
+    }
+  }
+
+  if (prior.persisted && deleteRequested) {
+    return {
+      ...persistedMealMarker(prior, recentMessages, currentMessage),
+      persisted: true,
+      persistedMealId: String(prior.persistedMealId || ""),
+      persistedSummary: String(prior.persistedSummary || prior.summary || ""),
+      persistedAt: String(prior.persistedAt || ""),
+      deleteRequested: true,
+      alreadyLogged: false,
     }
   }
 
@@ -338,14 +365,32 @@ function buildMealSessionState(recentMessages = [], currentMessage = "", existin
     persistedMealId: startedNewMeal ? "" : String(prior.persistedMealId || ""),
     persistedSummary: startedNewMeal ? "" : String(prior.persistedSummary || ""),
     persistedAt: startedNewMeal ? "" : String(prior.persistedAt || ""),
-    correctionRequested: correctionRequested || impliedCorrectionRequested,
+    correctionRequested: correctionRequested || impliedCorrectionRequested || rejectionRequested,
+    deleteRequested: false,
     alreadyLogged: false,
+  }
+
+  if (
+    rejectionRequested
+    && (
+      (!merged.readyToLog && !merged.summary)
+      || summariesEquivalent(merged.summary, prior.persistedSummary || prior.summary)
+    )
+  ) {
+    return {
+      ...merged,
+      active: true,
+      readyToLog: false,
+      alreadyLogged: false,
+      clarifyQuestion: "Tell me what to change, or say delete it if you want that meal removed.",
+      thread_messages: buildThreadMessages(recentMessages, currentMessage),
+    }
   }
 
   if (
     prior.persisted
     && !startedNewMeal
-    && !correctionRequested
+    && !merged.correctionRequested
     && !MEAL_FINALISE_PATTERN.test(normalizedCurrent)
     && summariesEquivalent(merged.summary, prior.persistedSummary || prior.summary)
   ) {
@@ -751,6 +796,7 @@ export function emptyMealSessionState() {
     persistedAt: "",
     alreadyLogged: false,
     correctionRequested: false,
+    deleteRequested: false,
     suppressed: false,
     suppressionReply: "",
     thread_messages: [],

@@ -1,4 +1,5 @@
 import {
+  buildDeterministicMealDeletionAction,
   buildDeterministicMealActions,
   buildDeterministicWorkoutAction,
   deterministicAlreadyLoggedReply,
@@ -26,8 +27,10 @@ function extractImplicitActions(value) {
     "clarify",
     "log_workout",
     "update_workout_log",
+    "delete_workout_log",
     "log_meal",
     "update_meal_log",
+    "delete_meal_log",
     "create_workout_plan",
     "create_meal_plan",
     "update_targets",
@@ -58,13 +61,14 @@ export function normalizeCoachResponse(value, context = {}) {
     explicitActions,
     prompt: context.prompt,
   })
+  const deterministicMealDeleteAction = buildDeterministicMealDeletionAction(context.mealContext)
   const deterministicWorkoutAction = buildDeterministicWorkoutAction({
     workoutSession: context.workoutContext,
     explicitActions,
   })
 
   const filteredExplicitActions = explicitActions.filter((action) => {
-    if (deterministicMealActions.length && isMealPersistenceAction(action)) return false
+    if ((deterministicMealActions.length || deterministicMealDeleteAction) && isMealPersistenceAction(action)) return false
     if (deterministicWorkoutAction && isWorkoutPersistenceAction(action)) return false
     if (context.mealContext?.readyToLog && action?.type === "clarify") return false
     if (context.workoutContext?.readyToLog && action?.type === "clarify") return false
@@ -80,6 +84,9 @@ export function normalizeCoachResponse(value, context = {}) {
     forcedReply = deterministicAlreadyLoggedReply(context.mealContext, "meal")
   } else if (context.workoutContext?.alreadyLogged) {
     forcedReply = deterministicAlreadyLoggedReply(context.workoutContext, "workout")
+  } else if (deterministicMealDeleteAction) {
+    actions = [deterministicMealDeleteAction]
+    forcedReply = summarizeCoachAction(deterministicMealDeleteAction)
   } else if (mealClarifyAction) {
     actions = [mealClarifyAction]
     forcedReply = mealClarifyAction.message

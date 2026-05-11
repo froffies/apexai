@@ -115,7 +115,7 @@ test("meal session keeps a typed clarification when the reply is unrelated text"
   assert.equal(session.items.some((item) => item.base_name === "blue"), false)
 })
 
-test("meal session asks which item a bare number belongs to when a drink and another food are both still unresolved", () => {
+test("meal session binds a bare number to the explicitly asked food even when other items are still unresolved", () => {
   const { session } = replayMealConversation([
     user("i had eggs and coffees"),
     assistant("How many eggs did you have?"),
@@ -124,7 +124,8 @@ test("meal session asks which item a bare number belongs to when a drink and ano
 
   assert.ok(session)
   assert.equal(session.readyToLog, false)
-  assert.match(session.clarifyQuestion, /which item the 18 applies to/i)
+  assert.match(session.clarifyQuestion, /how much coffee/i)
+  assert.match(session.summary, /18 eggs/i)
   assert.equal(session.items.some((item) => item.base_name === "18"), false)
 })
 
@@ -138,6 +139,106 @@ test("meal session keeps decimal quantities when the pending clarification expec
   assert.ok(session)
   assert.equal(session.readyToLog, true)
   assert.match(session.summary.toLowerCase(), /0\.5 .*pizza/)
+})
+
+test("meal session keeps clarification binding stable and ignores complaint text in the pie egg milk conversation", () => {
+  const { session, snapshots } = replayMealConversation([
+    user("i had pie and egg and milk today"),
+    assistant("How many eggs did you have?"),
+    user("19.2"),
+    assistant("How much milk did you have?"),
+    user("eggs, you asked how many eggs and I gave you a number, why can't you understand?"),
+    assistant("How much milk did you have?"),
+    user("500ml"),
+  ])
+
+  assert.ok(session)
+  assert.equal(snapshots[1].session.clarifyQuestion, "How much milk did you have?")
+  assert.equal(snapshots[2].session.clarifyQuestion, "How much milk did you have?")
+  assert.equal(session.readyToLog, true)
+  assert.equal(session.summary, "1 serve pie, plus 19.2 eggs, plus 500ml milk")
+  assert.equal(session.items.some((item) => /you|asked|understand|number/i.test(`${item.base_name} ${item.label}`)), false)
+  assert.equal(session.invalidStructure, false)
+})
+
+test("meal session keeps frustration text out of saved summaries across varied meal combinations", () => {
+  const scenarios = [
+    {
+      intro: "i had pie and egg and milk today",
+      answers: {
+        egg: "19.2",
+        milk: "500ml",
+      },
+      expected: "1 serve pie, plus 19.2 eggs, plus 500ml milk",
+    },
+    {
+      intro: "i had cake and eggs and coffee",
+      answers: {
+        egg: "7.5",
+        coffee: "350ml",
+      },
+      expected: "1 serve cake, plus 7.5 eggs, plus 350ml coffee",
+    },
+    {
+      intro: "i had rice and chicken and sauce",
+      answers: {
+        rice: "1 serve",
+        chicken: "300g",
+        sauce: "20g",
+      },
+      expectedParts: ["rice", "20g sauce"],
+    },
+    {
+      intro: "i had burger and chips and drink",
+      answers: {
+        burger: "1 serve",
+        chip: "1.5 bowls",
+        drink: "375ml",
+      },
+      expectedParts: ["burger", "chips", "drink"],
+    },
+  ]
+
+  for (const scenario of scenarios) {
+    let session = buildMealContext([], scenario.intro, emptyMealSession())
+    const history = [user(scenario.intro)]
+    let insertedComplaint = false
+
+    for (let turn = 0; turn < 5 && session && !session.readyToLog; turn += 1) {
+      const target = session.pendingClarification?.targetBaseName || ""
+      const answer = scenario.answers[target]
+      assert.ok(answer, `missing answer for ${scenario.intro} targeting ${target}`)
+
+      history.push(assistant(session.clarifyQuestion))
+      const answeredSession = buildMealContext(history, answer, session)
+      history.push(user(answer))
+      session = answeredSession
+
+      if (!insertedComplaint && session && !session.readyToLog && session.pendingClarification?.targetBaseName) {
+        const complaintTarget = session.pendingClarification.targetBaseName
+        history.push(assistant(session.clarifyQuestion))
+        const complainedSession = buildMealContext(
+          history,
+          "you asked, I gave you a number, why can't you understand?",
+          session
+        )
+        history.push(user("you asked, I gave you a number, why can't you understand?"))
+        assert.equal(complainedSession.pendingClarification?.targetBaseName, complaintTarget)
+        session = complainedSession
+        insertedComplaint = true
+      }
+    }
+
+    assert.ok(session)
+    assert.equal(session.readyToLog, true)
+    if (scenario.expected) {
+      assert.equal(session.summary, scenario.expected)
+    }
+    for (const piece of scenario.expectedParts || []) {
+      assert.match(session.summary, new RegExp(piece.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"))
+    }
+    assert.equal(session.items.some((item) => /you|asked|understand|number/i.test(`${item.base_name} ${item.label}`)), false)
+  }
 })
 
 test("meal session survives truncated recent history because the existing session remains the source of truth", () => {

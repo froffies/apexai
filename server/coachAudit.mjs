@@ -276,6 +276,30 @@ function duplicatePhraseSummary(summary = "") {
   return /\b([a-z0-9 ]{4,})\b(?:\s+(?:and|,)\s+\1\b)/i.test(String(summary || ""))
 }
 
+function isComplaintText(text = "") {
+  return /\b(?:you asked|i gave you|why can(?:'|’)t you understand|why cant you understand|i told you|already said|what do you mean|i just answered|you just asked)\b/i.test(String(text || ""))
+}
+
+function isDeleteIntent(text = "") {
+  return /\b(?:delete|remove|undo|erase)\b(?:\s+(?:it|that|this|meal))?/i.test(String(text || ""))
+}
+
+function isNumericOnlyReply(text = "") {
+  return /^(?:\d+(?:\.\d+)?)$/.test(cleanText(text))
+}
+
+function mealItems(record = {}) {
+  return safeArray(record?.state_after?.meal_session?.items || record?.state_after?.mealSession?.items || [], 24)
+}
+
+function complaintDerivedMealItems(record = {}) {
+  return mealItems(record).filter((item) => (
+    /\b(?:you|asked|understand|number|mean|gave)\b/i.test(String(item?.base_name || item?.label || ""))
+    || isComplaintText(item?.base_name || "")
+    || isComplaintText(item?.label || "")
+  ))
+}
+
 export function buildCoachAuditFlags(entry = {}) {
   const flags = []
   const transcriptText = collectTranscriptText(entry)
@@ -285,6 +309,7 @@ export function buildCoachAuditFlags(entry = {}) {
     .map((action) => String(action?.food_name || action?.workout_type || action?.exercise_name || ""))
     .join(" ; ")
   const mealStateAfter = entry?.state_after?.meal_session || entry?.state_after?.mealSession || null
+  const mealStateBefore = entry?.state_before?.meal_session || entry?.state_before?.mealSession || null
   const workoutStateAfter = entry?.state_after?.workout_session || entry?.state_after?.workoutSession || null
   const userMessage = cleanText(entry.user_message)
   const lastAssistantMessage = [...sanitizeConversationWindow(entry.conversation_window || [])]
@@ -297,6 +322,11 @@ export function buildCoachAuditFlags(entry = {}) {
 
   if (/\b(i told you|already said|i just said)\b/i.test(entry.user_message || "")) {
     addFlag(flags, "user_signalled_repeat", "User signalled that the coach repeated itself.", "warn")
+  }
+
+  if (isComplaintText(entry.user_message) && complaintDerivedMealItems(entry).length) {
+    addFlag(flags, "frustration_text_parsed_as_food", "User frustration text was parsed into meal state.", "error")
+    addFlag(flags, "fake_food_from_user_complaint", "Complaint text produced fake saved food items.", "error")
   }
 
   if (numericFoodSummary(summaryText)) {
@@ -332,8 +362,34 @@ export function buildCoachAuditFlags(entry = {}) {
     addFlag(flags, "parser_warning", "Meal state reported structural issues before save.", "warn")
   }
 
+  if (
+    isNumericOnlyReply(entry.user_message)
+    && mealStateBefore?.pendingClarification?.type === "quantity"
+    && mealStateAfter?.pendingClarification?.type === "quantity"
+    && cleanText(mealStateBefore?.pendingClarification?.targetReference || mealStateBefore?.pendingClarification?.targetBaseName || "")
+      !== cleanText(mealStateAfter?.pendingClarification?.targetReference || mealStateAfter?.pendingClarification?.targetBaseName || "")
+  ) {
+    addFlag(flags, "clarification_target_lost", "The pending clarification target changed after a numeric reply.", "error")
+  }
+
+  if (
+    /\d+\.\d+/.test(String(entry.user_message || ""))
+    && mealStateBefore?.pendingClarification?.type === "quantity"
+    && (!persistedActions.some((action) => action?.type?.includes("meal")) && mealStateAfter?.pendingClarification?.type === "quantity")
+  ) {
+    addFlag(flags, "decimal_quantity_unbound", "A decimal quantity reply was not bound to the asked food item.", "error")
+  }
+
   if (persistedActions.some((action) => action?.type?.includes("workout")) && !String(workoutStateAfter?.exercise_name || workoutStateAfter?.workout_type || "").trim()) {
     addFlag(flags, "orphan_workout_metrics", "Workout persisted without a stable exercise label.", "error")
+  }
+
+  if (
+    isDeleteIntent(entry.user_message)
+    && !persistedActions.some((action) => action?.type === "delete_meal_log" || action?.type === "delete_workout_log")
+    && /already saved/i.test(assistantReply)
+  ) {
+    addFlag(flags, "delete_intent_ignored", "The user asked to delete or undo a saved item but no delete action happened.", "error")
   }
 
   if (entry.duplicate_prevention_triggered) {
@@ -362,6 +418,17 @@ export function buildCoachAuditFlags(entry = {}) {
 
   if (replyClaimsPersistence(assistantReply) && persistedActions.length > 0 && duplicatePhraseSummary(summaryText)) {
     addFlag(flags, "corrupted_summary", "Saved summary looks duplicated or corrupted.", "warn")
+  }
+
+  if (
+    persistedActions.some((action) => action?.type?.includes("meal"))
+    && (
+      complaintDerivedMealItems(entry).length
+      || safeArray(mealStateAfter?.structuralIssues, 4).length
+      || numericFoodSummary(summaryText)
+    )
+  ) {
+    addFlag(flags, "corrupted_state_persisted", "A meal was persisted even though the state or summary looked structurally corrupted.", "error")
   }
 
   if ((entry.intent === "meal_logging" || entry.intent === "workout_logging") && !entry.clarification_asked && persistedActions.length === 0 && !replyClaimsPersistence(assistantReply)) {
@@ -630,6 +697,7 @@ export function buildCoachAuditDebugPrompt(record = {}) {
     `Intent: ${record.intent || "unknown"}`,
     `Persistence status: ${record.persistence_status || "unknown"}`,
     `Flags: ${safeArray(record.flags, 20).map((flag) => flag.code).join(", ") || "none"}`,
+    `Actual behaviour: ${record.assistant_reply || "(empty reply)"}`,
     "",
     "Conversation transcript:",
     ...sanitizeConversationWindow(record.conversation_window || []).map((message) => `${message.role}: ${message.content}`),
@@ -647,6 +715,12 @@ export function buildCoachAuditDebugPrompt(record = {}) {
     "",
     "Persisted actions:",
     JSON.stringify(record.persisted_actions || [], null, 2),
+    "",
+    "Expected behaviour if obvious:",
+    "- Preserve clarification target and value type across turns.",
+    "- Do not let complaint text become food or ingredients.",
+    "- Never persist structurally corrupted meal or workout state.",
+    "- Fix this generally, not as a one-off patch.",
     "",
     "Expected behaviour:",
     "Fix this generally, not as a one-off patch.",

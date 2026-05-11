@@ -831,6 +831,99 @@ test("deterministic coach suppression replies do not persist anything when OpenA
   assert.equal(coach.reply, "Okay, I won't save that.")
 })
 
+test("deterministic coach binds decimal clarification replies, ignores frustration text, and deletes the saved meal on request", async (t) => {
+  const port = randomPort()
+  const serverProcess = spawn(process.execPath, [serverEntry], {
+    cwd,
+    env: {
+      ...process.env,
+      OPENAI_COACH_PORT: String(port),
+      OPENAI_COACH_REQUIRE_AUTH: "false",
+      OPENAI_COACH_CORS_ORIGIN: "http://127.0.0.1:5173",
+      OPENFOODFACTS_ENABLED: "false",
+      OPENAI_API_KEY: "",
+      NODE_ENV: "production",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  })
+
+  t.after(async () => {
+    serverProcess.kill()
+  })
+
+  await waitForHealth(port)
+
+  const history = []
+
+  async function send(message, extra = {}) {
+    const response = await fetch(`http://127.0.0.1:${port}/api/coach`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Origin: "http://127.0.0.1:5173",
+      },
+      body: JSON.stringify({
+        message,
+        recentMessages: history,
+        ...extra,
+      }),
+    })
+    const coach = await response.json()
+    history.push({ role: "user", content: message })
+    history.push({ role: "assistant", content: coach.reply })
+    return { response, coach }
+  }
+
+  const first = await send("i had pie and egg and milk today")
+  assert.equal(first.response.status, 200)
+  assert.equal(first.coach.reply, "How many eggs did you have?")
+  assert.equal(first.coach.actions?.[0]?.type, "clarify")
+
+  const second = await send("19.2", { mealSession: first.coach.meal_session })
+  assert.equal(second.response.status, 200)
+  assert.equal(second.coach.reply, "How much milk did you have?")
+  assert.equal(second.coach.actions?.[0]?.type, "clarify")
+  assert.equal(second.coach.meal_session?.pendingClarification?.targetBaseName, "milk")
+  assert.match(second.coach.meal_session?.summary || "", /19\.2 eggs/i)
+
+  const third = await send("eggs, you asked how many eggs and I gave you a number, why can't you understand?", {
+    mealSession: second.coach.meal_session,
+  })
+  assert.equal(third.response.status, 200)
+  assert.match(third.coach.reply, /how much milk/i)
+  assert.equal(third.coach.actions?.[0]?.type, "clarify")
+  assert.equal(third.coach.meal_session?.pendingClarification?.targetBaseName, "milk")
+  assert.equal(
+    third.coach.meal_session?.items?.some((item) => /you|asked|understand|number/i.test(`${item.base_name} ${item.label}`)),
+    false
+  )
+
+  const fourth = await send("500ml", { mealSession: third.coach.meal_session })
+  assert.equal(fourth.response.status, 200)
+  assert.equal(fourth.coach.actions?.[0]?.type, "log_meal")
+  assert.equal(fourth.coach.actions?.[0]?.food_name, "1 serve pie, plus 19.2 eggs, plus 500ml milk")
+  assert.ok(Number(fourth.coach.actions?.[0]?.protein_g) > 0)
+  assert.ok(Number(fourth.coach.actions?.[0]?.calories) > 0)
+
+  const persistedMealSession = {
+    ...fourth.coach.meal_session,
+    active: false,
+    readyToLog: false,
+    persisted: true,
+    persistedMealId: "meal_delete_live",
+    persistedSummary: fourth.coach.actions?.[0]?.food_name,
+    persistedAt: "2026-05-11T00:00:00.000Z",
+    deleteRequested: false,
+    alreadyLogged: false,
+  }
+
+  const fifth = await send("no thats wrong delete it", { mealSession: persistedMealSession })
+  assert.equal(fifth.response.status, 200)
+  assert.equal(fifth.coach.actions?.[0]?.type, "delete_meal_log")
+  assert.equal(fifth.coach.actions?.[0]?.meal_id, "meal_delete_live")
+  assert.match(fifth.coach.reply, /removed .*today's nutrition log/i)
+})
+
 test("protected API endpoints require auth when production auth is enabled", async (t) => {
   const port = randomPort()
   const serverProcess = spawn(process.execPath, [serverEntry], {

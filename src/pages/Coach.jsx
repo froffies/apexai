@@ -83,6 +83,7 @@ function createEmptyMealSession() {
     persistedAt: "",
     alreadyLogged: false,
     correctionRequested: false,
+    deleteRequested: false,
     thread_messages: [],
   }
 }
@@ -416,6 +417,7 @@ function buildPersistedMealSession(session, action, mealId) {
     persistedAt: new Date().toISOString(),
     alreadyLogged: false,
     correctionRequested: false,
+    deleteRequested: false,
   }
 }
 
@@ -453,6 +455,7 @@ function hasMeaningfulMealSession(session) {
     || session.mealConversation
     || session.alreadyLogged
     || session.correctionRequested
+    || session.deleteRequested
     || session.persisted
     || session.persistedMealId
     || session.persistedSummary
@@ -1238,12 +1241,14 @@ export default function Coach() {
     const persistedActions = []
     const loggedMealIds = []
     const updatedMealIds = []
+    const deletedMealIds = []
     const loggedWorkoutIds = []
     const updatedWorkoutIds = []
     const loggedMeals = []
     const updatedMeals = []
     let latestLoggedMeal = null
     let latestUpdatedMeal = null
+    let latestDeletedMeal = null
     let latestLoggedWorkout = null
     let latestUpdatedWorkout = null
     let latestLoggedWorkoutAction = null
@@ -1258,7 +1263,7 @@ export default function Coach() {
     const nextWorkoutSession = coachResponse?.workout_session && typeof coachResponse.workout_session === "object"
       ? coachResponse.workout_session
       : null
-    const requestedMealPersistence = (coachResponse.actions || []).some((action) => action?.type === "log_meal" || action?.type === "update_meal_log")
+    const requestedMealPersistence = (coachResponse.actions || []).some((action) => action?.type === "log_meal" || action?.type === "update_meal_log" || action?.type === "delete_meal_log")
     const requestedWorkoutPersistence = (coachResponse.actions || []).some((action) => action?.type === "log_workout" || action?.type === "update_workout_log")
 
     for (const rawAction of coachResponse.actions || []) {
@@ -1470,13 +1475,33 @@ export default function Coach() {
         latestUpdatedMeal = nextMeal
         persistedActions.push({ type: "update_meal_log", meal_id: mealId, ...action })
       }
+
+      if (action.type === "delete_meal_log") {
+        const mealId = String(action.meal_id || "").trim()
+        const existingMeal = meals.find((meal) => meal.id === mealId)
+        if (!mealId || !existingMeal) {
+          rejectedActions.push("I couldn't match that delete request to a saved meal, so I left your nutrition log alone.")
+          continue
+        }
+        setMeals((current) => current.filter((meal) => meal.id !== mealId))
+        deletedMealIds.push(mealId)
+        latestDeletedMeal = existingMeal
+        persistedActions.push({
+          type: "delete_meal_log",
+          meal_id: mealId,
+          food_name: existingMeal.food_name,
+        })
+      }
     }
 
     const warnings = [...(coachResponse.warnings || []), ...rejectedActions].filter(Boolean)
     const suffix = warnings.length ? `\n\n${warnings.join(" ")}` : ""
-    const mealSaveSucceeded = loggedMealIds.length > 0 || updatedMealIds.length > 0
+    const mealSaveSucceeded = loggedMealIds.length > 0 || updatedMealIds.length > 0 || deletedMealIds.length > 0
     const workoutSaveSucceeded = loggedWorkoutIds.length > 0 || updatedWorkoutIds.length > 0
-    if (mealSaveSucceeded) {
+    if (deletedMealIds.length > 0) {
+      setMealSession(createEmptyMealSession())
+      finalMealSessionState = cloneAuditState(createEmptyMealSession())
+    } else if (mealSaveSucceeded) {
       const totalMealChanges = loggedMeals.length + updatedMeals.length
       if (totalMealChanges > 1) {
         setMealSession(createEmptyMealSession())
@@ -1531,6 +1556,8 @@ export default function Coach() {
       replyText = formatCoachMealBatchConfirmation("Updated today's nutrition", updatedMeals)
     } else if ((loggedMeals.length + updatedMeals.length) > 1) {
       replyText = formatCoachMealBatchConfirmation("Updated today's nutrition entries", [...updatedMeals, ...loggedMeals])
+    } else if (latestDeletedMeal) {
+      replyText = `Removed ${latestDeletedMeal.food_name} from today's nutrition log.`
     } else if (latestLoggedMeal) {
       replyText = formatCoachMealConfirmation("Saved to today's nutrition", latestLoggedMeal)
     } else if (latestUpdatedMeal) {
@@ -1544,6 +1571,7 @@ export default function Coach() {
       ...(attachedPlan ? { plan: attachedPlan } : {}),
       ...(loggedMealIds.length ? { loggedMealIds } : {}),
       ...(updatedMealIds.length ? { updatedMealIds } : {}),
+      ...(deletedMealIds.length ? { deletedMealIds } : {}),
       ...(loggedWorkoutIds.length ? { loggedWorkoutIds } : {}),
       ...(updatedWorkoutIds.length ? { updatedWorkoutIds } : {}),
       auditMeta: {

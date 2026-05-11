@@ -160,6 +160,59 @@ test("coach session state treats additive follow-ups on a persisted meal as upda
   assert.match(next.mealSession.summary, /chips with gravy/i)
 })
 
+test("coach session state turns post-save delete intent into a deterministic meal deletion request", () => {
+  const initial = replayCoachConversation([
+    user("i had pie and eggs and milk"),
+    assistant("How many eggs did you have?"),
+    user("19.2"),
+    assistant("How much milk did you have?"),
+    user("500ml"),
+  ])
+
+  const persistedMeal = makePersistedMealSession(initial.mealSession, "meal_delete_live")
+  const next = buildCoachSessionState({
+    recentMessages: [
+      ...initial.history,
+      assistant("Saved to today's nutrition: 1 serve pie, plus 19.2 eggs, plus 500ml milk."),
+    ],
+    currentMessage: "no thats wrong delete it",
+    mealSession: persistedMeal,
+    workoutSession: emptyWorkoutSessionState(),
+  })
+
+  assert.ok(next.mealSession)
+  assert.equal(next.mealSession.deleteRequested, true)
+  assert.equal(next.mealSession.alreadyLogged, false)
+  assert.equal(next.mealSession.persistedMealId, "meal_delete_live")
+})
+
+test("coach session state asks for the correction detail when a saved meal is rejected without saying what to change", () => {
+  const initial = replayCoachConversation([
+    user("i had pie and eggs and milk"),
+    assistant("How many eggs did you have?"),
+    user("19.2"),
+    assistant("How much milk did you have?"),
+    user("500ml"),
+  ])
+
+  const persistedMeal = makePersistedMealSession(initial.mealSession, "meal_fix_live")
+  const next = buildCoachSessionState({
+    recentMessages: [
+      ...initial.history,
+      assistant("Saved to today's nutrition: 1 serve pie, plus 19.2 eggs, plus 500ml milk."),
+    ],
+    currentMessage: "that's wrong",
+    mealSession: persistedMeal,
+    workoutSession: emptyWorkoutSessionState(),
+  })
+
+  assert.ok(next.mealSession)
+  assert.equal(next.mealSession.deleteRequested, false)
+  assert.equal(next.mealSession.readyToLog, false)
+  assert.equal(next.mealSession.correctionRequested, true)
+  assert.match(next.mealSession.clarifyQuestion, /tell me what to change|delete it/i)
+})
+
 test("pure nutrition questions do not open a meal logging clarification flow", () => {
   const next = buildCoachSessionState({
     recentMessages: [],

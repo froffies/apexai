@@ -258,19 +258,19 @@ export function normalizeAction(action) {
 }
 
 export function replyClaimsPersistence(reply) {
-  return /\b(logged|saved|tracked|added|recorded|updated)\b/i.test(String(reply || ""))
+  return /\b(logged|saved|tracked|added|recorded|updated|deleted|removed)\b/i.test(String(reply || ""))
 }
 
 export function isPersistenceAction(action) {
-  return ["log_meal", "update_meal_log", "log_workout", "update_workout_log"].includes(action?.type)
+  return ["log_meal", "update_meal_log", "delete_meal_log", "log_workout", "update_workout_log", "delete_workout_log"].includes(action?.type)
 }
 
 export function isMealPersistenceAction(action) {
-  return action?.type === "log_meal" || action?.type === "update_meal_log"
+  return action?.type === "log_meal" || action?.type === "update_meal_log" || action?.type === "delete_meal_log"
 }
 
 export function isWorkoutPersistenceAction(action) {
-  return action?.type === "log_workout" || action?.type === "update_workout_log"
+  return action?.type === "log_workout" || action?.type === "update_workout_log" || action?.type === "delete_workout_log"
 }
 
 export function hasMealMacros(action) {
@@ -326,6 +326,10 @@ export function summarizeCoachAction(action) {
 
   if (action.type === "update_meal_log") {
     return `Updated today's nutrition entry for ${String(action.food_name || "that meal").trim()}.`
+  }
+
+  if (action.type === "delete_meal_log") {
+    return `Removed ${String(action.food_name || "that meal").trim()} from today's nutrition log.`
   }
 
   if (action.type === "update_targets") {
@@ -387,10 +391,16 @@ export function shouldAllowAction(action) {
   if (!action || typeof action !== "object") return false
 
   if (isMealPersistenceAction(action)) {
+    if (action.type === "delete_meal_log") {
+      return Boolean(String(action.meal_id || "").trim())
+    }
     return hasMealMacros(action) && String(action.food_name || "").trim()
   }
 
   if (isWorkoutPersistenceAction(action)) {
+    if (action.type === "delete_workout_log") {
+      return Boolean(String(action.workout_id || "").trim())
+    }
     return Boolean(String(action.exercise_name || action.workout_type || "").trim())
   }
 
@@ -424,6 +434,15 @@ export function deterministicAlreadyLoggedReply(session, kind = "meal") {
   return kind === "meal"
     ? `I already saved ${summary} in today's nutrition log. If you want to change it, tell me what to update.`
     : `I already saved ${summary} in Workouts. If you want to change it, tell me what to update.`
+}
+
+export function buildDeterministicMealDeletionAction(mealSession) {
+  if (!mealSession?.deleteRequested || !String(mealSession?.persistedMealId || "").trim()) return null
+  return {
+    type: "delete_meal_log",
+    meal_id: String(mealSession.persistedMealId || "").trim(),
+    food_name: String(mealSession.persistedSummary || mealSession.summary || "that meal").trim() || "that meal",
+  }
 }
 
 function normalizeSessionItem(item = {}) {
