@@ -26,8 +26,18 @@ export async function requestOpenAICoach(payload) {
     })
 
     const data = await response.json().catch(() => ({}))
-    if (!response.ok) throw new Error(data.error || `AI coach request failed with ${response.status}`)
-    if (!data || typeof data.reply !== "string") throw new Error("AI coach returned an invalid response")
+    if (!response.ok) {
+      const error = Object.assign(new Error(data.error || `AI coach request failed with ${response.status}`), {
+        auditMeta: data.audit_meta || null,
+      })
+      throw error
+    }
+    if (!data || typeof data.reply !== "string") {
+      const error = Object.assign(new Error("AI coach returned an invalid response"), {
+        auditMeta: data.audit_meta || null,
+      })
+      throw error
+    }
     return data
   } finally {
     window.clearTimeout(timeout)

@@ -3,6 +3,7 @@ import { Bot, Dumbbell, Mic, MicOff, RotateCcw, Salad, Send, UserRound } from "l
 import PageHeader from "@/components/PageHeader"
 import SectionCard from "@/components/SectionCard"
 import WorkoutPlanCard from "@/components/WorkoutPlanCard"
+import { coachAuditEnabled, coachAuditNotice, sendCoachAuditEvent } from "@/lib/coachAuditClient"
 import { requestOpenAICoach } from "@/lib/openaiCoachClient"
 import {
   applyWorkoutPlanEdit,
@@ -69,6 +70,9 @@ function createEmptyMealSession() {
     suppressed: false,
     suppressionReply: "",
     referenceMeal: null,
+    pendingClarification: null,
+    pendingQuantities: [],
+    structuralIssues: [],
     mealConversation: false,
     lastMainKey: "",
     lastDrinkKey: "",
@@ -134,14 +138,14 @@ function createSubmitGuardState() {
 
 function acquireSubmitGuard(guard, content) {
   const key = normalizeSubmitContent(content)
-  if (!key) return null
-  if (guard.inFlight) return null
+  if (!key) return { accepted: false, key: null, reason: "empty" }
+  if (guard.inFlight) return { accepted: false, key, reason: "in_flight" }
   if (guard.lastCompletedKey === key && (Date.now() - guard.lastCompletedAt) < SUBMIT_DEDUPE_WINDOW_MS) {
-    return null
+    return { accepted: false, key, reason: "duplicate" }
   }
   guard.inFlight = true
   guard.currentKey = key
-  return key
+  return { accepted: true, key, reason: "accepted" }
 }
 
 function releaseSubmitGuard(guard, key, remember = false) {
@@ -167,6 +171,30 @@ const promptCards = [
 
 function supportsSpeech() {
   return typeof window !== "undefined" && ("SpeechRecognition" in window || "webkitSpeechRecognition" in window)
+}
+
+function cloneAuditState(value) {
+  return value && typeof value === "object"
+    ? JSON.parse(JSON.stringify(value))
+    : value
+}
+
+function buildAuditStateSnapshot(mealSession, workoutSession) {
+  return {
+    meal_session: cloneAuditState(mealSession),
+    workout_session: cloneAuditState(workoutSession),
+  }
+}
+
+function buildAuditConversationWindow(messages, userMessage, assistantReply = "") {
+  return [
+    ...messages.slice(-12).map((message) => ({
+      role: message.role,
+      content: String(message.content || ""),
+    })),
+    { role: "user", content: String(userMessage || "") },
+    ...(assistantReply ? [{ role: "assistant", content: String(assistantReply || "") }] : []),
+  ]
 }
 
 function hasExercises(plan) {
@@ -772,6 +800,12 @@ export default function Coach() {
   const inputRef = useRef(null)
   const bottomRef = useRef(null)
   const submitGuardRef = useRef(createSubmitGuardState())
+  const auditSessionIdRef = useRef("")
+  if (typeof window !== "undefined" && !auditSessionIdRef.current) {
+    const existingSessionId = window.sessionStorage.getItem("apexai.coachAuditSessionId")
+    auditSessionIdRef.current = existingSessionId || uid("coach_audit_session")
+    window.sessionStorage.setItem("apexai.coachAuditSessionId", auditSessionIdRef.current)
+  }
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages, thinking])
@@ -813,6 +847,36 @@ export default function Coach() {
     ...extras,
   })
 
+  const sendAuditPatch = (payload) => {
+    if (!coachAuditEnabled) return
+    void sendCoachAuditEvent(payload)
+  }
+
+  const emitCoachAuditFromMessage = (content, userMessage, assistantMessage, stateBefore) => {
+    if (!coachAuditEnabled || !assistantMessage?.auditMeta) return
+    sendAuditPatch({
+      log_id: assistantMessage.auditMeta.log_id || userMessage.id,
+      message_id: assistantMessage.auditMeta.message_id || userMessage.id,
+      session_id: assistantMessage.auditMeta.session_id || auditSessionIdRef.current,
+      user_message: content,
+      assistant_reply: assistantMessage.content,
+      intent: assistantMessage.auditMeta.intent || "general_chat",
+      route_type: assistantMessage.auditMeta.route_type || "fallback",
+      state_before: stateBefore,
+      state_after: assistantMessage.auditMeta.state_after || stateBefore,
+      conversation_window: buildAuditConversationWindow(messages, content, assistantMessage.content),
+      actions: assistantMessage.auditMeta.actions || [],
+      persisted_actions: assistantMessage.auditMeta.persisted_actions || [],
+      persistence_status: assistantMessage.auditMeta.persistence_status || "not_requested",
+      clarification_asked: Boolean(assistantMessage.auditMeta.clarification_asked),
+      duplicate_prevention_triggered: Boolean(assistantMessage.auditMeta.duplicate_prevention_triggered),
+      draft_preserved_after_failure: assistantMessage.auditMeta.draft_preserved_after_failure ?? null,
+      warnings: assistantMessage.auditMeta.warnings || [],
+      error_summary: assistantMessage.auditMeta.error_summary || "",
+      model_used: assistantMessage.auditMeta.model_used || "",
+    })
+  }
+
   const clearConversation = () => {
     setMessages([createStarterMessage()])
     setMealSession(createEmptyMealSession())
@@ -820,6 +884,10 @@ export default function Coach() {
     setInput("")
     setQuickAction(null)
     setAiError("")
+    if (typeof window !== "undefined") {
+      auditSessionIdRef.current = uid("coach_audit_session")
+      window.sessionStorage.setItem("apexai.coachAuditSessionId", auditSessionIdRef.current)
+    }
   }
 
   const startPlannedWorkout = (sourcePlan, editedExercises = null) => {
@@ -858,11 +926,31 @@ export default function Coach() {
 
   const runLocalCoachAction = (content) => {
     const lower = content.toLowerCase()
+    const localStateSnapshot = (nextMealSession = mealSession, nextWorkoutSession = workoutSession) => buildAuditStateSnapshot(nextMealSession, nextWorkoutSession)
+    const localResult = (reply, auditMeta = {}, extras = {}) => appendAssistant(reply, {
+      ...extras,
+      auditMeta: {
+        route_type: auditMeta.route_type || "deterministic",
+        intent: auditMeta.intent || "general_chat",
+        actions: auditMeta.actions || [],
+        persisted_actions: auditMeta.persisted_actions || [],
+        persistence_status: auditMeta.persistence_status || "not_requested",
+        clarification_asked: Boolean(auditMeta.clarification_asked),
+        duplicate_prevention_triggered: Boolean(auditMeta.duplicate_prevention_triggered),
+        draft_preserved_after_failure: auditMeta.draft_preserved_after_failure ?? null,
+        warnings: auditMeta.warnings || [],
+        error_summary: auditMeta.error_summary || "",
+        state_after: auditMeta.state_after || localStateSnapshot(),
+      },
+    })
 
     if (isLogLocationQuestion(content)) {
       const reference = findLatestCoachRecordReference(messages)
       if (!reference) {
-        return appendAssistant("I haven't saved anything recent enough to point to yet.")
+        return localResult("I haven't saved anything recent enough to point to yet.", {
+          route_type: "fallback",
+          intent: "app_help",
+        })
       }
 
       const destinations = []
@@ -873,22 +961,35 @@ export default function Coach() {
         destinations.push("Workouts > Recent sessions")
       }
 
-      return appendAssistant(destinations.length
+      return localResult(destinations.length
         ? `I saved that in ${destinations.join(" and ")}.`
-        : "I couldn't map that save to a coach-controlled record.")
+        : "I couldn't map that save to a coach-controlled record.", {
+        route_type: "deterministic",
+        intent: "app_help",
+      })
     }
 
     const targetUpdate = parseTargetUpdate(content)
     if (targetUpdate) {
       setProfile((current) => ({ ...current, ...targetUpdate }))
-      return appendAssistant(`Updated your targets: ${Object.entries(targetUpdate).map(([key, value]) => `${key.replace("_", " ")} ${value}`).join(", ")}.`)
+      return localResult(`Updated your targets: ${Object.entries(targetUpdate).map(([key, value]) => `${key.replace("_", " ")} ${value}`).join(", ")}.`, {
+        intent: "target_update",
+        actions: [{ type: "update_targets", ...targetUpdate }],
+        persisted_actions: [{ type: "update_targets", ...targetUpdate }],
+        persistence_status: "succeeded",
+      })
     }
 
     const recoveryCheckIn = parseRecoveryCheckIn(content)
     if (recoveryCheckIn) {
       setRecoveryLogs((current) => [recoveryCheckIn, ...current.filter((entry) => entry.date !== recoveryCheckIn.date)])
       const recoverySummary = summarizeRecovery(recoveryCheckIn)
-      return appendAssistant(`Logged your recovery check-in. ${recoverySummary.text}`)
+      return localResult(`Logged your recovery check-in. ${recoverySummary.text}`, {
+        intent: "recovery_checkin",
+        actions: [{ type: "log_recovery", ...recoveryCheckIn }],
+        persisted_actions: [{ type: "log_recovery", ...recoveryCheckIn }],
+        persistence_status: "succeeded",
+      })
     }
 
     const activeUpdate = parseActiveWorkoutUpdate(content, activeWorkout)
@@ -897,12 +998,29 @@ export default function Coach() {
         const nextWorkout = advanceActiveWorkout(activeWorkout)
         setActiveWorkout(nextWorkout)
         const nextExercise = getCurrentActiveExercise(nextWorkout)
-        return appendAssistant(nextExercise ? `Moved on. Next exercise is ${nextExercise.name} for ${nextExercise.setsReps}.` : "Moved to the next exercise.")
+        return localResult(nextExercise ? `Moved on. Next exercise is ${nextExercise.name} for ${nextExercise.setsReps}.` : "Moved to the next exercise.", {
+          intent: "workout_session_control",
+          actions: [{ type: "advance_workout" }],
+          persisted_actions: [{ type: "advance_workout" }],
+          persistence_status: "succeeded",
+        })
       }
 
       if (activeUpdate.type === "finish") {
         const minutes = finishActiveWorkout()
-        return appendAssistant(`Workout finished. I marked the session complete${minutes ? ` at ${minutes} minutes` : ""} and saved everything to Workouts.`)
+        const nextWorkoutSession = buildPersistedWorkoutSession(
+          workoutSession,
+          { workout_type: activeWorkout.name, exercise_name: currentActiveExercise?.name || "" },
+          activeWorkout.session_id
+        )
+        setWorkoutSession(nextWorkoutSession)
+        return localResult(`Workout finished. I marked the session complete${minutes ? ` at ${minutes} minutes` : ""} and saved everything to Workouts.`, {
+          intent: "workout_logging",
+          actions: [{ type: "update_workout_log", workout_id: activeWorkout.session_id, workout_type: activeWorkout.name }],
+          persisted_actions: [{ type: "update_workout_log", workout_id: activeWorkout.session_id, workout_type: activeWorkout.name }],
+          persistence_status: "succeeded",
+          state_after: localStateSnapshot(mealSession, nextWorkoutSession),
+        })
       }
 
       if (activeUpdate.type === "log_set") {
@@ -929,9 +1047,19 @@ export default function Coach() {
           const advancedWorkout = advanceActiveWorkout(nextActiveWorkout)
           setActiveWorkout(advancedWorkout)
           const nextExercise = getCurrentActiveExercise(advancedWorkout)
-          return appendAssistant(`Logged ${exercise.name} set ${setNumber}: ${activeUpdate.reps} reps at ${activeUpdate.weight_kg}kg. ${updatedSummary.completedSets}/${updatedSummary.totalSets} sets done. Next exercise: ${nextExercise?.name || "continue"}${nextExercise ? ` for ${nextExercise.setsReps}` : ""}.`)
+          return localResult(`Logged ${exercise.name} set ${setNumber}: ${activeUpdate.reps} reps at ${activeUpdate.weight_kg}kg. ${updatedSummary.completedSets}/${updatedSummary.totalSets} sets done. Next exercise: ${nextExercise?.name || "continue"}${nextExercise ? ` for ${nextExercise.setsReps}` : ""}.`, {
+            intent: "workout_logging",
+            actions: [{ type: "log_workout_set", exercise_name: exercise?.name || activeUpdate.exerciseName || "" }],
+            persisted_actions: [{ type: "log_workout_set", exercise_name: exercise?.name || activeUpdate.exerciseName || "" }],
+            persistence_status: "succeeded",
+          })
         }
-        return appendAssistant(`Logged ${exercise?.name || "set"} set ${setNumber}: ${activeUpdate.reps} reps at ${activeUpdate.weight_kg}kg. ${updatedSummary.completedSets}/${updatedSummary.totalSets} sets done.`)
+        return localResult(`Logged ${exercise?.name || "set"} set ${setNumber}: ${activeUpdate.reps} reps at ${activeUpdate.weight_kg}kg. ${updatedSummary.completedSets}/${updatedSummary.totalSets} sets done.`, {
+          intent: "workout_logging",
+          actions: [{ type: "log_workout_set", exercise_name: exercise?.name || activeUpdate.exerciseName || "" }],
+          persisted_actions: [{ type: "log_workout_set", exercise_name: exercise?.name || activeUpdate.exerciseName || "" }],
+          persistence_status: "succeeded",
+        })
       }
     }
 
@@ -939,51 +1067,97 @@ export default function Coach() {
       const weeklyPlan = buildWeeklyTrainingPlan(profile, workoutSets, workouts, exercises, workoutPlans, recoveryLogs)
       setWorkoutPlans((current) => mergeWeeklyTrainingPlan(current, weeklyPlan.plans))
       const summary = weeklyPlan.plans.map((plan) => `${plan.date}: ${plan.title}`).join("\n")
-      return appendAssistant(`I rebuilt the next 7 days around what you've already done.${weeklyPlan.missedCount ? ` I also reshuffled ${weeklyPlan.missedCount} missed session${weeklyPlan.missedCount === 1 ? "" : "s"}.` : ""}\n\n${summary}`, { plan: weeklyPlan.plans[0] || null })
+      return localResult(`I rebuilt the next 7 days around what you've already done.${weeklyPlan.missedCount ? ` I also reshuffled ${weeklyPlan.missedCount} missed session${weeklyPlan.missedCount === 1 ? "" : "s"}.` : ""}\n\n${summary}`, {
+        intent: "plan_creation",
+        actions: [{ type: "create_workout_plan", title: weeklyPlan.plans[0]?.title || "Weekly plan" }],
+        persisted_actions: [{ type: "create_workout_plan", title: weeklyPlan.plans[0]?.title || "Weekly plan" }],
+        persistence_status: "succeeded",
+      }, { plan: weeklyPlan.plans[0] || null })
     }
 
     if (isShowWorkoutRequest(content)) {
-      if (!todaysPlan) return appendAssistant("I haven't mapped today's workout yet. Ask me to build it and I'll sort it out.")
-      return appendAssistant(`Here’s the workout I’ve got for ${todaysPlan.date || "today"}. Review it below or start when you're ready.`, { plan: todaysPlan })
+      if (!todaysPlan) return localResult("I haven't mapped today's workout yet. Ask me to build it and I'll sort it out.", {
+        route_type: "fallback",
+        intent: "workout_question",
+      })
+      return localResult(`Here’s the workout I’ve got for ${todaysPlan.date || "today"}. Review it below or start when you're ready.`, {
+        route_type: "deterministic",
+        intent: "workout_question",
+      }, { plan: todaysPlan })
     }
 
     if (isShowMealPlanRequest(content)) {
-      if (!todaysMealPlan) return appendAssistant("I haven't mapped today's meals yet. Ask me to build today's meal plan and I'll put one together.")
-      return appendAssistant(formatMealPlanReply(todaysMealPlan))
+      if (!todaysMealPlan) return localResult("I haven't mapped today's meals yet. Ask me to build today's meal plan and I'll put one together.", {
+        route_type: "fallback",
+        intent: "nutrition_question",
+      })
+      return localResult(formatMealPlanReply(todaysMealPlan), {
+        route_type: "deterministic",
+        intent: "nutrition_question",
+      })
     }
 
     const planEdit = parseWorkoutPlanEdit(content, todaysPlan)
     if (planEdit && todaysPlan) {
       const updatedPlan = applyWorkoutPlanEdit(todaysPlan, planEdit)
       setWorkoutPlans((current) => upsertWorkoutPlan(current, updatedPlan))
-      return appendAssistant(`Updated today's workout. ${updatedPlan.exercises.length} exercise${updatedPlan.exercises.length === 1 ? "" : "s"} scheduled now.`, { plan: updatedPlan })
+      return localResult(`Updated today's workout. ${updatedPlan.exercises.length} exercise${updatedPlan.exercises.length === 1 ? "" : "s"} scheduled now.`, {
+        intent: "plan_creation",
+        actions: [{ type: "update_workout_plan", title: updatedPlan.title }],
+        persisted_actions: [{ type: "update_workout_plan", title: updatedPlan.title }],
+        persistence_status: "succeeded",
+      }, { plan: updatedPlan })
     }
 
     if (/(begin|start).*(workout|session)|let'?s start/.test(lower)) {
-      if (!todaysPlan) return appendAssistant("I don't have a workout ready to start yet. Ask me to build one first and I'll line it up.")
+      if (!todaysPlan) return localResult("I don't have a workout ready to start yet. Ask me to build one first and I'll line it up.", {
+        route_type: "fallback",
+        intent: "workout_question",
+      })
       const session = startPlannedWorkout(todaysPlan)
-      if (!session) return appendAssistant("I found the workout shell, but it has no exercises yet. I'll rebuild it if you ask for today's workout again.")
+      if (!session) return localResult("I found the workout shell, but it has no exercises yet. I'll rebuild it if you ask for today's workout again.", {
+        route_type: "fallback",
+        intent: "workout_question",
+      })
       const nextExercise = session.exercises[0]
-      return appendAssistant(`Started ${todaysPlan.title}. Begin with ${nextExercise?.name || "your first exercise"}${nextExercise ? ` for ${nextExercise.setsReps}` : ""}. Tell me each set as you finish it.`)
+      return localResult(`Started ${todaysPlan.title}. Begin with ${nextExercise?.name || "your first exercise"}${nextExercise ? ` for ${nextExercise.setsReps}` : ""}. Tell me each set as you finish it.`, {
+        intent: "workout_logging",
+        actions: [{ type: "start_workout", workout_type: todaysPlan.title }],
+        persisted_actions: [{ type: "start_workout", workout_type: todaysPlan.title }],
+        persistence_status: "succeeded",
+      })
     }
 
     if (activeWorkout?.id && /(what'?s next|next set|next exercise|where am i up to)/.test(lower)) {
       const nextExercise = getCurrentActiveExercise(activeWorkout)
-      return appendAssistant(nextExercise
+      return localResult(nextExercise
         ? `You're on ${nextExercise.name}. Logged ${nextExercise.logged_sets?.length || 0}/${nextExercise.target_sets || 1} sets so far. Target is ${nextExercise.setsReps}.`
-        : "Your active workout is running, but I cannot find the current exercise.")
+        : "Your active workout is running, but I cannot find the current exercise.", {
+        route_type: "deterministic",
+        intent: "workout_question",
+      })
     }
 
     if (isWorkoutPlanRequest(content)) {
       const plan = buildRecoveryAdjustedWorkoutPlan(profile, workoutSets, workouts, exercises, latestRecovery, progress, recoveryLogs)
       setWorkoutPlans((current) => upsertWorkoutPlan(current, plan))
-      return appendAssistant("I built today's workout and added it to Workouts. You can tweak it below or start when you're ready.", { plan })
+      return localResult("I built today's workout and added it to Workouts. You can tweak it below or start when you're ready.", {
+        intent: "plan_creation",
+        actions: [{ type: "create_workout_plan", title: plan.title }],
+        persisted_actions: [{ type: "create_workout_plan", title: plan.title }],
+        persistence_status: "succeeded",
+      }, { plan })
     }
 
     if (isMealPlanRequest(content)) {
       const plan = buildMealPlan(profile)
       setMealPlans((current) => upsertMealPlan(current, plan))
-      return appendAssistant(`I mapped out today's meals from the verified Australian catalogue.\n\n${formatMealPlanReply(plan)}`)
+      return localResult(`I mapped out today's meals from the verified Australian catalogue.\n\n${formatMealPlanReply(plan)}`, {
+        intent: "plan_creation",
+        actions: [{ type: "create_meal_plan", title: plan.title }],
+        persisted_actions: [{ type: "create_meal_plan", title: plan.title }],
+        persistence_status: "succeeded",
+      })
     }
 
     const workoutLog = parseWorkoutLog(content)
@@ -1000,33 +1174,57 @@ export default function Coach() {
       setWorkouts((current) => [loggedWorkout, ...current])
       const sets = makeWorkoutSetsFromLog(workoutLog, sessionId)
       setWorkoutSets((current) => [...sets, ...current])
-      setWorkoutSession(buildPersistedWorkoutSession(
+      const nextWorkoutSession = buildPersistedWorkoutSession(
         workoutSession,
         { workout_type: loggedWorkout.workout_type, exercise_name: workoutLog.exercise_name },
         sessionId
-      ))
-      return appendAssistant(`Logged ${workoutLog.exercise_name}: ${workoutLog.sets} set(s) x ${workoutLog.reps || "time"} at ${workoutLog.weight_kg || 0}kg. Workouts and analytics updated.`, {
+      )
+      setWorkoutSession(nextWorkoutSession)
+      return localResult(`Logged ${workoutLog.exercise_name}: ${workoutLog.sets} set(s) x ${workoutLog.reps || "time"} at ${workoutLog.weight_kg || 0}kg. Workouts and analytics updated.`, {
+        intent: "workout_logging",
+        actions: [{ type: "log_workout", ...workoutLog }],
+        persisted_actions: [{ type: "log_workout", ...workoutLog, workout_id: sessionId }],
+        persistence_status: "succeeded",
+        state_after: localStateSnapshot(mealSession, nextWorkoutSession),
+      }, {
         loggedWorkoutIds: [sessionId],
       })
     }
 
     const mealLog = parseMealLog(content)
     if (mealLog) {
-      if ("needsVerification" in mealLog) return appendAssistant(mealLog.reply)
+      if ("needsVerification" in mealLog) return localResult(mealLog.reply, {
+        route_type: "deterministic",
+        intent: "meal_logging",
+        actions: [{ type: "clarify", message: mealLog.reply }],
+        persisted_actions: [],
+        persistence_status: "not_requested",
+        clarification_asked: true,
+      })
       const loggedMealId = "id" in mealLog && mealLog.id ? mealLog.id : uid("meal")
       const loggedMeal = { id: loggedMealId, ...mealLog }
       setMeals((current) => [loggedMeal, ...current])
-      setMealSession(buildPersistedMealSession(
+      const nextMealSession = buildPersistedMealSession(
         mealSession,
         { food_name: loggedMeal.food_name, ...loggedMeal },
         loggedMeal.id
-      ))
-      return appendAssistant(`Logged ${loggedMeal.food_name} with verified Australian nutrition: ${loggedMeal.calories} kcal, ${loggedMeal.protein_g}g protein, ${loggedMeal.carbs_g}g carbs, ${loggedMeal.fat_g}g fat.`, {
+      )
+      setMealSession(nextMealSession)
+      return localResult(`Logged ${loggedMeal.food_name} with verified Australian nutrition: ${loggedMeal.calories} kcal, ${loggedMeal.protein_g}g protein, ${loggedMeal.carbs_g}g carbs, ${loggedMeal.fat_g}g fat.`, {
+        intent: "meal_logging",
+        actions: [{ type: "log_meal", ...loggedMeal }],
+        persisted_actions: [{ type: "log_meal", ...loggedMeal, meal_id: loggedMeal.id }],
+        persistence_status: "succeeded",
+        state_after: localStateSnapshot(nextMealSession, workoutSession),
+      }, {
         loggedMealIds: [loggedMeal.id],
       })
     }
 
-    return appendAssistant(coachReply(content, { profile, totals, todaysWorkouts }))
+    return localResult(coachReply(content, { profile, totals, todaysWorkouts }), {
+      route_type: "fallback",
+      intent: "general_chat",
+    })
   }
 
   const numberOrZero = (value) => {
@@ -1037,6 +1235,7 @@ export default function Coach() {
   const applyOpenAICoachResponse = (coachResponse) => {
     let attachedPlan = null
     const rejectedActions = []
+    const persistedActions = []
     const loggedMealIds = []
     const updatedMealIds = []
     const loggedWorkoutIds = []
@@ -1051,6 +1250,8 @@ export default function Coach() {
     let latestUpdatedWorkoutAction = null
     let duplicateMealSummary = ""
     let duplicateWorkoutSummary = ""
+    let finalMealSessionState = buildAuditStateSnapshot(mealSession, workoutSession).meal_session
+    let finalWorkoutSessionState = buildAuditStateSnapshot(mealSession, workoutSession).workout_session
     const nextMealSession = coachResponse?.meal_session && typeof coachResponse.meal_session === "object"
       ? coachResponse.meal_session
       : null
@@ -1081,7 +1282,10 @@ export default function Coach() {
         if (action.protein_target_g) updates.protein_g = Math.round(action.protein_target_g)
         if (action.carbs_target_g) updates.carbs_g = Math.round(action.carbs_target_g)
         if (action.fat_target_g) updates.fat_g = Math.round(action.fat_target_g)
-        if (Object.keys(updates).length) setProfile((current) => ({ ...current, ...updates }))
+        if (Object.keys(updates).length) {
+          setProfile((current) => ({ ...current, ...updates }))
+          persistedActions.push({ type: "update_targets", ...updates })
+        }
       }
 
       if (action.type === "create_workout_plan") {
@@ -1106,6 +1310,7 @@ export default function Coach() {
         }
         setWorkoutPlans((current) => upsertWorkoutPlan(current, plan))
         attachedPlan = attachedPlan || plan
+        persistedActions.push({ type: "create_workout_plan", title: plan.title, date: plan.date })
       }
 
       if (action.type === "create_meal_plan") {
@@ -1136,6 +1341,7 @@ export default function Coach() {
           meals,
         }
         setMealPlans((current) => upsertMealPlan(current, plan))
+        persistedActions.push({ type: "create_meal_plan", title: plan.title, date: plan.date })
       }
 
       if (action.type === "log_workout") {
@@ -1165,6 +1371,7 @@ export default function Coach() {
         loggedWorkoutIds.push(sessionId)
         latestLoggedWorkout = workoutLog
         latestLoggedWorkoutAction = action
+        persistedActions.push({ type: "log_workout", workout_id: sessionId, ...action })
       }
 
       if (action.type === "update_workout_log") {
@@ -1197,6 +1404,7 @@ export default function Coach() {
         updatedWorkoutIds.push(workoutId)
         latestUpdatedWorkout = nextWorkout
         latestUpdatedWorkoutAction = action
+        persistedActions.push({ type: "update_workout_log", workout_id: workoutId, ...action })
       }
 
       if (action.type === "log_meal") {
@@ -1224,6 +1432,7 @@ export default function Coach() {
           loggedMealIds.push(mealId)
           loggedMeals.push(nextMeal)
           latestLoggedMeal = nextMeal
+          persistedActions.push({ type: "log_meal", meal_id: mealId, ...action })
         }
       }
 
@@ -1259,6 +1468,7 @@ export default function Coach() {
         updatedMealIds.push(mealId)
         updatedMeals.push(nextMeal)
         latestUpdatedMeal = nextMeal
+        persistedActions.push({ type: "update_meal_log", meal_id: mealId, ...action })
       }
     }
 
@@ -1270,33 +1480,40 @@ export default function Coach() {
       const totalMealChanges = loggedMeals.length + updatedMeals.length
       if (totalMealChanges > 1) {
         setMealSession(createEmptyMealSession())
+        finalMealSessionState = cloneAuditState(createEmptyMealSession())
       } else {
         const persistedSource = nextMealSession || mealSession
         const persistedMeal = latestLoggedMeal || latestUpdatedMeal
         const persistedMealId = loggedMealIds[0] || updatedMealIds[0] || ""
-        setMealSession(buildPersistedMealSession(
+        const persistedMealSession = buildPersistedMealSession(
           persistedSource,
           { food_name: persistedMeal?.food_name || nextMealSession?.summary || "", ...(persistedMeal || {}) },
           persistedMealId
-        ))
+        )
+        setMealSession(persistedMealSession)
+        finalMealSessionState = cloneAuditState(persistedMealSession)
       }
     } else if (nextMealSession && (nextMealSession.active || nextMealSession.mealConversation || nextMealSession.summary)) {
       setMealSession(nextMealSession)
+      finalMealSessionState = cloneAuditState(nextMealSession)
     }
     if (workoutSaveSucceeded) {
       const persistedSource = nextWorkoutSession || workoutSession
       const persistedWorkout = latestLoggedWorkout || latestUpdatedWorkout
       const persistedWorkoutId = loggedWorkoutIds[0] || updatedWorkoutIds[0] || ""
-      setWorkoutSession(buildPersistedWorkoutSession(
+      const persistedWorkoutSession = buildPersistedWorkoutSession(
         persistedSource,
         {
           workout_type: persistedWorkout?.workout_type || nextWorkoutSession?.summary || "",
           exercise_name: latestLoggedWorkoutAction?.exercise_name || latestUpdatedWorkoutAction?.exercise_name || "",
         },
         persistedWorkoutId
-      ))
+      )
+      setWorkoutSession(persistedWorkoutSession)
+      finalWorkoutSessionState = cloneAuditState(persistedWorkoutSession)
     } else if (nextWorkoutSession && (nextWorkoutSession.active || nextWorkoutSession.workoutConversation || nextWorkoutSession.summary)) {
       setWorkoutSession(nextWorkoutSession)
+      finalWorkoutSessionState = cloneAuditState(nextWorkoutSession)
     }
 
     let replyText = coachResponse.reply
@@ -1329,6 +1546,25 @@ export default function Coach() {
       ...(updatedMealIds.length ? { updatedMealIds } : {}),
       ...(loggedWorkoutIds.length ? { loggedWorkoutIds } : {}),
       ...(updatedWorkoutIds.length ? { updatedWorkoutIds } : {}),
+      auditMeta: {
+        ...(coachResponse.audit_meta || {}),
+        route_type: coachResponse?.audit_meta?.route_type || "ai-assisted",
+        intent: coachResponse?.audit_meta?.intent || "general_chat",
+        actions: coachResponse.actions || [],
+        persisted_actions: persistedActions,
+        persistence_status: requestedMealPersistence || requestedWorkoutPersistence
+          ? (mealSaveSucceeded || workoutSaveSucceeded ? "succeeded" : duplicateMealSummary || duplicateWorkoutSummary ? "duplicate_prevented" : "failed_persistence")
+          : "not_requested",
+        clarification_asked: (coachResponse.actions || []).some((action) => action?.type === "clarify"),
+        duplicate_prevention_triggered: Boolean(duplicateMealSummary || duplicateWorkoutSummary),
+        draft_preserved_after_failure: null,
+        warnings,
+        error_summary: "",
+        state_after: {
+          meal_session: finalMealSessionState,
+          workout_session: finalWorkoutSessionState,
+        },
+      },
     })
   }
 
@@ -1336,12 +1572,40 @@ export default function Coach() {
     const content = String(rawContent || "").trim()
     if (!content || thinking) return
 
-    const guardKey = acquireSubmitGuard(submitGuardRef.current, content)
-    if (!guardKey) return
+    const submitAttempt = acquireSubmitGuard(submitGuardRef.current, content)
+    if (!submitAttempt.accepted) {
+      if (coachAuditEnabled && submitAttempt.reason === "duplicate") {
+        const duplicateEventId = uid("coach_audit")
+        sendAuditPatch({
+          log_id: duplicateEventId,
+          message_id: duplicateEventId,
+          session_id: auditSessionIdRef.current,
+          user_message: content,
+          assistant_reply: "",
+          intent: "general_chat",
+          route_type: "deterministic",
+          state_before: buildAuditStateSnapshot(mealSession, workoutSession),
+          state_after: buildAuditStateSnapshot(mealSession, workoutSession),
+          conversation_window: buildAuditConversationWindow(messages, content, ""),
+          actions: [],
+          persisted_actions: [],
+          persistence_status: "not_requested",
+          clarification_asked: false,
+          duplicate_prevention_triggered: true,
+          draft_preserved_after_failure: null,
+          warnings: [],
+          error_summary: "",
+          model_used: "",
+        })
+      }
+      return
+    }
+    const guardKey = submitAttempt.key
 
     let rememberSubmit = false
     let startedThinking = false
     const userMessage = { id: uid("chat"), role: "user", content, timestamp: new Date().toISOString() }
+    const stateBefore = buildAuditStateSnapshot(mealSession, workoutSession)
     try {
       setInput("")
       setQuickAction(null)
@@ -1350,7 +1614,23 @@ export default function Coach() {
 
       const workoutFollowUp = incompleteWorkoutPrompt(content, activeWorkout)
       if (workoutFollowUp) {
-        setMessages((current) => [...current, appendAssistant(workoutFollowUp)])
+        const assistantMessage = appendAssistant(workoutFollowUp, {
+          auditMeta: {
+            route_type: "deterministic",
+            intent: "workout_logging",
+            actions: [{ type: "clarify", message: workoutFollowUp }],
+            persisted_actions: [],
+            persistence_status: "not_requested",
+            clarification_asked: true,
+            duplicate_prevention_triggered: false,
+            draft_preserved_after_failure: null,
+            warnings: [],
+            error_summary: "",
+            state_after: stateBefore,
+          },
+        })
+        setMessages((current) => [...current, assistantMessage])
+        emitCoachAuditFromMessage(content, userMessage, assistantMessage, stateBefore)
         rememberSubmit = true
         return
       }
@@ -1358,6 +1638,7 @@ export default function Coach() {
       if (isLogLocationQuestion(content) || shouldUseLocalCoach(content, { activeWorkout, todaysPlan })) {
         const assistantMessage = runLocalCoachAction(content)
         setMessages((current) => [...current, assistantMessage])
+        emitCoachAuditFromMessage(content, userMessage, assistantMessage, stateBefore)
         rememberSubmit = true
         return
       }
@@ -1391,24 +1672,65 @@ export default function Coach() {
         recentMessages: messages.slice(-20),
         mealSession: hasMeaningfulMealSession(mealSession) ? mealSession : {},
         workoutSession: hasMeaningfulWorkoutSession(workoutSession) ? workoutSession : {},
+        auditMeta: {
+          log_id: userMessage.id,
+          message_id: userMessage.id,
+          session_id: auditSessionIdRef.current,
+        },
       })
       if (!coachResponse) {
-        const assistantMessage = appendAssistant("I couldn't get a clean answer from the live coach, so I left your data alone. Please try that again.")
+        const assistantMessage = appendAssistant("I couldn't get a clean answer from the live coach, so I left your data alone. Please try that again.", {
+          auditMeta: {
+            log_id: userMessage.id,
+            message_id: userMessage.id,
+            session_id: auditSessionIdRef.current,
+            route_type: "failed",
+            intent: "general_chat",
+            actions: [],
+            persisted_actions: [],
+            persistence_status: "failed_before_persistence",
+            clarification_asked: false,
+            duplicate_prevention_triggered: false,
+            draft_preserved_after_failure: true,
+            warnings: [],
+            error_summary: "AI coach returned an invalid response",
+            state_after: stateBefore,
+          },
+        })
         setAiError("The live coach sent back something unusable, so nothing changed.")
         setInput(content)
         setMessages((current) => [...current, assistantMessage])
+        emitCoachAuditFromMessage(content, userMessage, assistantMessage, stateBefore)
         return
       }
       const assistantMessage = applyOpenAICoachResponse(coachResponse)
       setMessages((current) => [...current, assistantMessage])
+      emitCoachAuditFromMessage(content, userMessage, assistantMessage, stateBefore)
       rememberSubmit = true
     } catch (error) {
       setAiError(formatCoachRequestError(error))
       setInput(content)
+      const assistantMessage = appendAssistant("I couldn't reach the live coach just now, so I left your data alone. Please retry in a moment.", {
+        auditMeta: {
+          ...(error?.auditMeta || { log_id: userMessage.id, message_id: userMessage.id, session_id: auditSessionIdRef.current }),
+          route_type: error?.auditMeta?.route_type || "failed",
+          intent: error?.auditMeta?.intent || "general_chat",
+          actions: [],
+          persisted_actions: [],
+          persistence_status: "failed_before_persistence",
+          clarification_asked: false,
+          duplicate_prevention_triggered: false,
+          draft_preserved_after_failure: true,
+          warnings: [],
+          error_summary: error instanceof Error ? error.message : "Coach request failed",
+          state_after: stateBefore,
+        },
+      })
       setMessages((current) => [
         ...current,
-        appendAssistant("I couldn't reach the live coach just now, so I left your data alone. Please retry in a moment."),
+        assistantMessage,
       ])
+      emitCoachAuditFromMessage(content, userMessage, assistantMessage, stateBefore)
     } finally {
       if (startedThinking) {
         setThinking(false)
@@ -1503,6 +1825,13 @@ export default function Coach() {
           </button>
         ) : null}
       />
+
+      {coachAuditEnabled && (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
+          <p className="font-semibold">Beta testing notice</p>
+          <p className="mt-1">{coachAuditNotice}</p>
+        </div>
+      )}
 
       <SectionCard
         tone="subtle"

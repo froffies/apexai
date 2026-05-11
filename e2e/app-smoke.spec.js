@@ -170,8 +170,82 @@ test("core screens render without horizontal overflow and expose key UX surfaces
   await expectNoHorizontalOverflow(page)
 
   await page.goto("/Coach")
+  await expect(page.getByText(/^Beta testing notice$/)).toBeVisible()
   await page.getByRole("button", { name: /^Schedule$/ }).click()
   await expect(page.getByText(/plan this training week/i)).toBeVisible()
+  await expectNoHorizontalOverflow(page)
+})
+
+test("admin coach audit page renders mocked logs and copies a debug prompt", async ({ page }) => {
+  await seedOnboardedProfile(page)
+  await page.addInitScript(() => {
+    window.__auditClipboard = ""
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: async (text) => {
+          window.__auditClipboard = text
+        },
+      },
+    })
+  })
+
+  await page.route("**/api/coach/audit**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        records: [
+          {
+            log_id: "chat_1",
+            created_at: new Date().toISOString(),
+            user_id: "local-user",
+            user_email: "local@apexai.app",
+            session_id: "session_1",
+            message_id: "chat_1",
+            user_message: "i had egg and cake",
+            assistant_reply: "Saved to today's nutrition: 18 eggs and cake.",
+            intent: "meal_logging",
+            route_type: "ai-assisted",
+            state_before: { meal_session: { active: true, clarifyQuestion: "How many eggs did you have?" } },
+            state_after: { meal_session: { active: false, summary: "18 eggs and cake" } },
+            conversation_window: [{ role: "assistant", content: "How many eggs did you have?" }],
+            actions: [{ type: "log_meal", food_name: "18 eggs and cake" }],
+            persisted_actions: [{ type: "log_meal", food_name: "18 eggs and cake" }],
+            persistence_status: "succeeded",
+            latency_ms: 812,
+            warnings: [],
+            flags: [{ code: "user_signalled_repeat", label: "User signalled repeat", severity: "warn" }],
+            duplicate_prevention_triggered: false,
+            draft_preserved_after_failure: null,
+            model_used: "gpt-4o-mini",
+          },
+        ],
+        summary: {
+          total: 1,
+          flagged: 1,
+          failures: 0,
+          duplicate_prevention_events: 0,
+          parser_warnings: 0,
+          clarification_loops: 0,
+          fake_save_blocked: 0,
+          by_flag: { user_signalled_repeat: 1 },
+          repeated_clarifications: {},
+          common_unknown_inputs: {},
+        },
+        capabilities: { enabled: true, writable: true },
+      }),
+    })
+  })
+
+  await page.goto("/admin/coach-audit")
+  await expect(page.getByRole("heading", { name: /coach audit/i })).toBeVisible()
+  await expect(page.getByText(/testing-only monitor/i)).toBeVisible()
+  await expect(page.getByRole("button", { name: /i had egg and cake/i })).toBeVisible()
+
+  await page.getByRole("button", { name: /copy debug prompt/i }).click()
+  const clipboard = await page.evaluate(() => window.__auditClipboard)
+  await expect(clipboard).toContain("Fix this generally, not as a one-off patch.")
   await expectNoHorizontalOverflow(page)
 })
 

@@ -30,6 +30,7 @@ const Challenges = lazy(() => import('@/pages/Challenges'));
 const ShoppingList = lazy(() => import('@/pages/ShoppingList'));
 const Recipes = lazy(() => import('@/pages/Recipes'));
 const Analytics = lazy(() => import('@/pages/Analytics'));
+const CoachAudit = lazy(() => import('@/pages/CoachAudit'));
 
 function TabStackProvider({ children }) {
   const location = useLocation();
@@ -132,6 +133,7 @@ const AuthenticatedApp = () => {
         <Route path="/Challenges" element={<LayoutWrapper currentPageName="Challenges"><Challenges /></LayoutWrapper>} />
         <Route path="/ShoppingList" element={<LayoutWrapper currentPageName="ShoppingList"><ShoppingList /></LayoutWrapper>} />
         <Route path="/Analytics" element={<LayoutWrapper currentPageName="Analytics"><Analytics /></LayoutWrapper>} />
+        <Route path="/admin/coach-audit" element={<LayoutWrapper currentPageName="CoachAudit"><CoachAudit /></LayoutWrapper>} />
         <Route path="*" element={<PageNotFound />} />
       </Routes>
     </Suspense>

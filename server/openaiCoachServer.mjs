@@ -6,6 +6,17 @@ import { createClient } from "@supabase/supabase-js"
 import { searchVerifiedFoods, verifiedFoods } from "../src/lib/nutritionDatabase.js"
 import { buildCoachSessionState } from "./coachSessionState.mjs"
 import {
+  buildCoachAuditResponseMeta,
+  coachAuditCapabilities,
+  detectCoachAuditIntent,
+  isCoachAuditAdminUser,
+  listCoachAuditRecords,
+  normalizeAuditClientPatch,
+  persistCoachAuditRecord,
+  sanitizeCoachStateSnapshot,
+  summarizeCoachAuditRecords,
+} from "./coachAudit.mjs"
+import {
   buildDeterministicMealActions,
   buildDeterministicWorkoutAction,
   deterministicAlreadyLoggedReply,
@@ -54,6 +65,7 @@ const openFoodFactsTimeoutMs = Number(process.env.OPENFOODFACTS_TIMEOUT_MS || 10
 const foodLookupCacheTtlMs = Number(process.env.FOOD_LOOKUP_CACHE_TTL_MS || 15 * 60_000)
 const foodLookupCacheMaxEntries = Number(process.env.FOOD_LOOKUP_CACHE_MAX_ENTRIES || 200)
 const foodLookupCache = new Map()
+const auditCapabilities = coachAuditCapabilities(adminSupabase)
 
 const coachResponseSchema = {
   type: "object",
@@ -408,6 +420,42 @@ function safeRecentArray(value, limit) {
   return Array.isArray(value) ? value.slice(-limit) : []
 }
 
+function buildCoachConversationWindow(recentMessages = [], currentMessage = "", assistantReply = "") {
+  return [
+    ...safeRecentArray(recentMessages, 12),
+    ...(currentMessage ? [{ role: "user", content: String(currentMessage || "") }] : []),
+    ...(assistantReply ? [{ role: "assistant", content: String(assistantReply || "") }] : []),
+  ]
+}
+
+function isPersistenceAction(action) {
+  return [
+    "log_meal",
+    "update_meal_log",
+    "log_workout",
+    "update_workout_log",
+    "create_workout_plan",
+    "create_meal_plan",
+    "update_targets",
+  ].includes(String(action?.type || ""))
+}
+
+function createAuditLogId() {
+  return `audit_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+}
+
+function normalizeIncomingAuditMeta(value = {}) {
+  const raw = value && typeof value === "object" ? value : {}
+  const logId = String(raw.log_id || raw.message_id || createAuditLogId()).trim()
+  return {
+    log_id: logId,
+    message_id: String(raw.message_id || logId).trim(),
+    session_id: String(raw.session_id || "").trim(),
+    app_version: String(raw.app_version || "").trim(),
+    commit_sha: String(raw.commit_sha || "").trim(),
+  }
+}
+
 function normalizeRecentMessages(value, currentMessage, limit = 18) {
   const messages = safeRecentArray(value, limit)
   if (!messages.length) return messages
@@ -447,6 +495,7 @@ function validateCoachBody(body) {
   if (body.coachContext !== undefined) assertObject(body.coachContext, "coachContext")
   if (body.mealSession !== undefined) assertObject(body.mealSession, "mealSession")
   if (body.workoutSession !== undefined) assertObject(body.workoutSession, "workoutSession")
+  if (body.auditMeta !== undefined) assertObject(body.auditMeta, "auditMeta")
   for (const key of ["recentMessages", "meals", "workouts", "workoutSets", "workoutPlans", "mealPlans", "recoveryLogs"]) {
     if (body[key] !== undefined && !Array.isArray(body[key])) {
       const error = new Error(`${key} must be an array`)
@@ -506,6 +555,16 @@ function validateTelemetryBody(body) {
   }
 }
 
+function validateCoachAuditEventBody(body) {
+  assertObject(body, "request body")
+  assertString(body.log_id || body.message_id || "", "log_id", 160)
+  if (body.route_type !== undefined && !["deterministic", "ai-assisted", "fallback", "failed"].includes(String(body.route_type))) {
+    const error = new Error("route_type is invalid")
+    error.status = 400
+    throw error
+  }
+}
+
 function createHttpError(status, message, options = {}) {
   const error = new Error(message)
   error.status = status
@@ -526,7 +585,10 @@ function sendError(response, request, error, fallbackMessage) {
   sendJson(
     response,
     status,
-    { error: sanitizeErrorMessage(error, fallbackMessage) },
+    {
+      error: sanitizeErrorMessage(error, fallbackMessage),
+      ...(error?.auditMeta ? { audit_meta: error.auditMeta } : {}),
+    },
     requestResponseOrigin(request)
   )
 }
@@ -744,190 +806,258 @@ function normalizeSingleOpenFoodFactsProduct(product, sourceType = "barcode_labe
 }
 
 async function handleCoach(request, response) {
-  await verifyRequestAuth(request)
-  const body = await readRequestBody(request)
-  validateCoachBody(body)
+  const user = await verifyRequestAuth(request)
+  const startedAt = Date.now()
+  let body = {}
+  let contextualRecentMessages = []
+  let mealContext = null
+  let workoutContext = null
+  let candidateFoodMatches = {}
+  let incomingAuditMeta = normalizeIncomingAuditMeta()
+  let stateBefore = sanitizeCoachStateSnapshot({})
 
-  const contextualRecentMessages = needsRecentChatContext(body.message)
-    ? normalizeRecentMessages(body.recentMessages, body.message, 18)
-    : []
-  const { mealSession: rawMealContext, workoutSession: workoutContext } = buildCoachSessionState({
-    recentMessages: contextualRecentMessages,
-    currentMessage: body.message,
-    mealSession: body.mealSession || null,
-    workoutSession: body.workoutSession || null,
-    recentMeals: safeArray(body.meals, 12),
-  })
-  const mealContext = rawMealContext
-    && (
-      safeArray(rawMealContext.items, 16).length
-      || rawMealContext.readyToLog
-      || rawMealContext.alreadyLogged
-      || rawMealContext.persisted
-      || rawMealContext.suppressed
-      || rawMealContext.clarifyQuestion
-    )
-    ? rawMealContext
-    : null
-
-  const candidateFoodMatches = {}
-  const candidateFoodTerms = mealContext
-    ? buildMealCandidateFoodTerms(mealContext)
-    : shouldHydrateCoachFoodMatches(body.message, body.recentMessages)
-      ? buildCoachCandidateFoodTerms(body.message, body.recentMessages)
-      : []
-  if (candidateFoodTerms.length) {
-    const foodLookups = await Promise.all(candidateFoodTerms.map(async (term) => [term, (await lookupFoodsBroad(term)).slice(0, 6)]))
-    for (const [term, matches] of foodLookups) {
-      candidateFoodMatches[term] = matches
-    }
-  }
-
-  if (mealContext?.alreadyLogged) {
-    sendJson(response, 200, {
-      reply: deterministicAlreadyLoggedReply(mealContext, "meal"),
-      actions: [],
-      warnings: [],
-      meal_session: mealContext,
-      workout_session: workoutContext,
-    }, requestResponseOrigin(request))
-    return
-  }
-
-  if (mealContext?.suppressed) {
-    sendJson(response, 200, {
-      reply: mealContext.suppressionReply || "Okay, I won't save that.",
-      actions: [],
-      warnings: [],
-      meal_session: mealContext,
-      workout_session: workoutContext,
-    }, requestResponseOrigin(request))
-    return
-  }
-
-  if (workoutContext?.alreadyLogged) {
-    sendJson(response, 200, {
-      reply: deterministicAlreadyLoggedReply(workoutContext, "workout"),
-      actions: [],
-      warnings: [],
-      meal_session: mealContext,
-      workout_session: workoutContext,
-    }, requestResponseOrigin(request))
-    return
-  }
-
-  if (workoutContext?.suppressed) {
-    sendJson(response, 200, {
-      reply: workoutContext.suppressionReply || "Okay, I won't save that.",
-      actions: [],
-      warnings: [],
-      meal_session: mealContext,
-      workout_session: workoutContext,
-    }, requestResponseOrigin(request))
-    return
-  }
-
-  if (mealContext?.readyToLog) {
-    const mealActions = buildDeterministicMealActions({
-      mealSession: mealContext,
-      explicitActions: [],
-      prompt: body.message,
-      candidateFoodMatches,
-      allowAnswerOnly: mealContext?.answerOnly,
+  const queueAuditRecord = (record) => {
+    if (!auditCapabilities.writable || !user?.id) return
+    void persistCoachAuditRecord(adminSupabase, user, record).catch((error) => {
+      console.warn(`Coach audit logging failed: ${error instanceof Error ? error.message : "unknown error"}`)
     })
-    if (mealContext?.answerOnly && mealActions[0]) {
+  }
+
+  try {
+    body = await readRequestBody(request)
+    validateCoachBody(body)
+    incomingAuditMeta = normalizeIncomingAuditMeta(body.auditMeta)
+    stateBefore = sanitizeCoachStateSnapshot({
+      meal_session: body.mealSession || null,
+      workout_session: body.workoutSession || null,
+    })
+
+    contextualRecentMessages = needsRecentChatContext(body.message)
+      ? normalizeRecentMessages(body.recentMessages, body.message, 18)
+      : []
+
+    const coachState = buildCoachSessionState({
+      recentMessages: contextualRecentMessages,
+      currentMessage: body.message,
+      mealSession: body.mealSession || null,
+      workoutSession: body.workoutSession || null,
+      recentMeals: safeArray(body.meals, 12),
+    })
+    const rawMealContext = coachState.mealSession
+    workoutContext = coachState.workoutSession
+    mealContext = rawMealContext
+      && (
+        safeArray(rawMealContext.items, 16).length
+        || rawMealContext.readyToLog
+        || rawMealContext.alreadyLogged
+        || rawMealContext.persisted
+        || rawMealContext.suppressed
+        || rawMealContext.clarifyQuestion
+      )
+      ? rawMealContext
+      : null
+
+    candidateFoodMatches = {}
+    const candidateFoodTerms = mealContext
+      ? buildMealCandidateFoodTerms(mealContext)
+      : shouldHydrateCoachFoodMatches(body.message, body.recentMessages)
+        ? buildCoachCandidateFoodTerms(body.message, body.recentMessages)
+        : []
+    if (candidateFoodTerms.length) {
+      const foodLookups = await Promise.all(candidateFoodTerms.map(async (term) => [term, (await lookupFoodsBroad(term)).slice(0, 6)]))
+      for (const [term, matches] of foodLookups) {
+        candidateFoodMatches[term] = matches
+      }
+    }
+
+    const sendCoachPayload = (payload, routeType) => {
+      const auditRecord = {
+        ...incomingAuditMeta,
+        created_at: new Date().toISOString(),
+        user_id: user?.id || "",
+        user_email: user?.email || "",
+        user_message: body.message,
+        assistant_reply: payload.reply,
+        intent: detectCoachAuditIntent({
+          message: body.message,
+          mealContext,
+          workoutContext,
+          routeType,
+          actions: payload.actions || [],
+        }),
+        route_type: routeType,
+        state_before: stateBefore,
+        state_after: sanitizeCoachStateSnapshot({
+          meal_session: payload.meal_session || mealContext,
+          workout_session: payload.workout_session || workoutContext,
+        }),
+        conversation_window: buildCoachConversationWindow(contextualRecentMessages, body.message, payload.reply),
+        actions: payload.actions || [],
+        persisted_actions: [],
+        persistence_status: (payload.actions || []).some(isPersistenceAction)
+          ? "pending_client"
+          : mealContext?.alreadyLogged || workoutContext?.alreadyLogged
+            ? "already_logged"
+            : mealContext?.suppressed || workoutContext?.suppressed
+              ? "suppressed"
+              : "not_requested",
+        clarification_asked: (payload.actions || []).some((action) => action?.type === "clarify"),
+        duplicate_prevention_triggered: false,
+        draft_preserved_after_failure: null,
+        latency_ms: Date.now() - startedAt,
+        warnings: payload.warnings || [],
+        error_summary: "",
+        model_used: routeType === "ai-assisted" ? model : "",
+      }
+
+      queueAuditRecord(auditRecord)
       sendJson(response, 200, {
-        reply: formatDeterministicMealAnswer(mealActions[0]),
+        ...payload,
+        ...(auditCapabilities.enabled ? { audit_meta: buildCoachAuditResponseMeta(auditRecord) } : {}),
+      }, requestResponseOrigin(request))
+    }
+
+    if (mealContext?.alreadyLogged) {
+      sendCoachPayload({
+        reply: deterministicAlreadyLoggedReply(mealContext, "meal"),
         actions: [],
         warnings: [],
         meal_session: mealContext,
         workout_session: workoutContext,
-      }, requestResponseOrigin(request))
+      }, "deterministic")
       return
     }
-    if (mealActions.length) {
-      sendJson(response, 200, {
-        reply: summarizeCoachActions(mealActions) || summarizeCoachAction(mealActions[0]),
-        actions: mealActions,
+
+    if (mealContext?.suppressed) {
+      sendCoachPayload({
+        reply: mealContext.suppressionReply || "Okay, I won't save that.",
+        actions: [],
         warnings: [],
         meal_session: mealContext,
         workout_session: workoutContext,
-      }, requestResponseOrigin(request))
+      }, "deterministic")
       return
     }
-  }
 
-  if (!mealContext && workoutContext?.readyToLog) {
-    const workoutAction = buildDeterministicWorkoutAction({ workoutSession: workoutContext, explicitActions: [] })
-    sendJson(response, 200, {
-      reply: summarizeCoachAction(workoutAction),
-      actions: workoutAction ? [workoutAction] : [],
-      warnings: [],
-      meal_session: mealContext,
-      workout_session: workoutContext,
-    }, requestResponseOrigin(request))
-    return
-  }
+    if (workoutContext?.alreadyLogged) {
+      sendCoachPayload({
+        reply: deterministicAlreadyLoggedReply(workoutContext, "workout"),
+        actions: [],
+        warnings: [],
+        meal_session: mealContext,
+        workout_session: workoutContext,
+      }, "deterministic")
+      return
+    }
 
-  const mealClarifyAction = deterministicClarifyActionFromSession(mealContext)
-  if (mealClarifyAction) {
-    const clarifyMessage = mealClarifyAction.message || "I need a bit more detail before I can log that meal."
-    sendJson(response, 200, {
-      reply: clarifyMessage,
-      actions: [mealClarifyAction],
-      warnings: [],
-      meal_session: mealContext,
-      workout_session: workoutContext,
-    }, requestResponseOrigin(request))
-    return
-  }
+    if (workoutContext?.suppressed) {
+      sendCoachPayload({
+        reply: workoutContext.suppressionReply || "Okay, I won't save that.",
+        actions: [],
+        warnings: [],
+        meal_session: mealContext,
+        workout_session: workoutContext,
+      }, "deterministic")
+      return
+    }
 
-  const workoutClarifyAction = deterministicClarifyActionFromSession(workoutContext)
-  if (workoutClarifyAction) {
-    sendJson(response, 200, {
-      reply: workoutClarifyAction.message,
-      actions: [workoutClarifyAction],
-      warnings: [],
-      meal_session: mealContext,
-      workout_session: workoutContext,
-    }, requestResponseOrigin(request))
-    return
-  }
+    if (mealContext?.readyToLog) {
+      const mealActions = buildDeterministicMealActions({
+        mealSession: mealContext,
+        explicitActions: [],
+        prompt: body.message,
+        candidateFoodMatches,
+        allowAnswerOnly: mealContext?.answerOnly,
+      })
+      if (mealContext?.answerOnly && mealActions[0]) {
+        sendCoachPayload({
+          reply: formatDeterministicMealAnswer(mealActions[0]),
+          actions: [],
+          warnings: [],
+          meal_session: mealContext,
+          workout_session: workoutContext,
+        }, "deterministic")
+        return
+      }
+      if (mealActions.length) {
+        sendCoachPayload({
+          reply: summarizeCoachActions(mealActions) || summarizeCoachAction(mealActions[0]),
+          actions: mealActions,
+          warnings: [],
+          meal_session: mealContext,
+          workout_session: workoutContext,
+        }, "deterministic")
+        return
+      }
+    }
 
-  if (!client) {
-    throw createHttpError(503, "Live coach is unavailable right now.", {
-      expose: true,
-      logMessage: "OPENAI_API_KEY is not set for the coach server",
-    })
-  }
+    if (!mealContext && workoutContext?.readyToLog) {
+      const workoutAction = buildDeterministicWorkoutAction({ workoutSession: workoutContext, explicitActions: [] })
+      sendCoachPayload({
+        reply: summarizeCoachAction(workoutAction),
+        actions: workoutAction ? [workoutAction] : [],
+        warnings: [],
+        meal_session: mealContext,
+        workout_session: workoutContext,
+      }, "deterministic")
+      return
+    }
 
-  if (mealContext) {
-    const mealPayload = {
-      current_date: new Date().toISOString().slice(0, 10),
-    user_message: String(body.message || ""),
-    profile: body.profile || {},
-    coach_context: body.coachContext || {},
-    meal_context: mealContext,
-    recent_messages: safeRecentArray(mealContext.thread_messages, 8),
-    recent_meals: safeArray(body.meals, 6),
-    candidate_food_matches: candidateFoodMatches,
-  }
+    const mealClarifyAction = deterministicClarifyActionFromSession(mealContext)
+    if (mealClarifyAction) {
+      sendCoachPayload({
+        reply: mealClarifyAction.message || "I need a bit more detail before I can log that meal.",
+        actions: [mealClarifyAction],
+        warnings: [],
+        meal_session: mealContext,
+        workout_session: workoutContext,
+      }, "deterministic")
+      return
+    }
 
-    const completion = await client.chat.completions.create({
-      model,
-      max_completion_tokens: 350,
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: mealCoachInstructions },
-        { role: "user", content: JSON.stringify(mealPayload) },
-      ],
-    })
+    const workoutClarifyAction = deterministicClarifyActionFromSession(workoutContext)
+    if (workoutClarifyAction) {
+      sendCoachPayload({
+        reply: workoutClarifyAction.message,
+        actions: [workoutClarifyAction],
+        warnings: [],
+        meal_session: mealContext,
+        workout_session: workoutContext,
+      }, "deterministic")
+      return
+    }
 
-    const parsed = JSON.parse(completion.choices[0]?.message?.content || "{}")
-    sendJson(
-      response,
-      200,
-      {
+    if (!client) {
+      throw createHttpError(503, "Live coach is unavailable right now.", {
+        expose: true,
+        logMessage: "OPENAI_API_KEY is not set for the coach server",
+      })
+    }
+
+    if (mealContext) {
+      const mealPayload = {
+        current_date: new Date().toISOString().slice(0, 10),
+        user_message: String(body.message || ""),
+        profile: body.profile || {},
+        coach_context: body.coachContext || {},
+        meal_context: mealContext,
+        recent_messages: safeRecentArray(mealContext.thread_messages, 8),
+        recent_meals: safeArray(body.meals, 6),
+        candidate_food_matches: candidateFoodMatches,
+      }
+
+      const completion = await client.chat.completions.create({
+        model,
+        max_completion_tokens: 350,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: mealCoachInstructions },
+          { role: "user", content: JSON.stringify(mealPayload) },
+        ],
+      })
+
+      const parsed = JSON.parse(completion.choices[0]?.message?.content || "{}")
+      sendCoachPayload({
         ...normalizeCoachResponse(parsed, {
           prompt: body.message,
           recentMessages: contextualRecentMessages,
@@ -938,55 +1068,90 @@ async function handleCoach(request, response) {
         }),
         meal_session: mealContext,
         workout_session: workoutContext,
-      },
-      requestResponseOrigin(request)
-    )
-    return
+      }, "ai-assisted")
+      return
+    }
+
+    const payload = {
+      current_date: new Date().toISOString().slice(0, 10),
+      user_message: String(body.message || ""),
+      profile: body.profile || {},
+      coach_context: body.coachContext || {},
+      recent_messages: contextualRecentMessages,
+      recent_meals: safeArray(body.meals, 12),
+      recent_workouts: safeArray(body.workouts, 12),
+      recent_workout_sets: safeArray(body.workoutSets, 24),
+      workout_plans: safeArray(body.workoutPlans, 6),
+      meal_plans: safeArray(body.mealPlans, 6),
+      recovery_logs: safeArray(body.recoveryLogs, 6),
+      active_workout: body.activeWorkout || null,
+      verified_food_catalogue: verifiedFoods,
+      candidate_food_matches: candidateFoodMatches,
+      meal_context: mealContext,
+      workout_context: workoutContext,
+    }
+
+    const completion = await client.chat.completions.create({
+      model,
+      max_completion_tokens: 500,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: coachInstructions },
+        { role: "user", content: JSON.stringify(payload) },
+      ],
+    })
+
+    const parsed = JSON.parse(completion.choices[0]?.message?.content || "{}")
+    sendCoachPayload({
+      ...normalizeCoachResponse(parsed, {
+        prompt: body.message,
+        recentMessages: contextualRecentMessages,
+        recentMeals: safeArray(body.meals, 12),
+        recentWorkouts: safeArray(body.workouts, 12),
+        mealContext,
+        workoutContext,
+      }),
+      meal_session: mealContext,
+      workout_session: workoutContext,
+    }, "ai-assisted")
+  } catch (error) {
+    if (auditCapabilities.writable && user?.id) {
+      const failureRecord = {
+        ...incomingAuditMeta,
+        created_at: new Date().toISOString(),
+        user_id: user.id,
+        user_email: user.email || "",
+        user_message: body?.message || "",
+        assistant_reply: "",
+        intent: detectCoachAuditIntent({
+          message: body?.message || "",
+          mealContext,
+          workoutContext,
+          routeType: "failed",
+        }),
+        route_type: "failed",
+        state_before: stateBefore,
+        state_after: sanitizeCoachStateSnapshot({
+          meal_session: mealContext,
+          workout_session: workoutContext,
+        }),
+        conversation_window: buildCoachConversationWindow(contextualRecentMessages, body?.message || "", ""),
+        actions: [],
+        persisted_actions: [],
+        persistence_status: "failed_before_persistence",
+        clarification_asked: false,
+        duplicate_prevention_triggered: false,
+        draft_preserved_after_failure: null,
+        latency_ms: Date.now() - startedAt,
+        warnings: [],
+        error_summary: error instanceof Error ? error.message : "Coach request failed",
+        model_used: "",
+      }
+      error.auditMeta = buildCoachAuditResponseMeta(failureRecord)
+      queueAuditRecord(failureRecord)
+    }
+    throw error
   }
-
-  const payload = {
-    current_date: new Date().toISOString().slice(0, 10),
-    user_message: String(body.message || ""),
-    profile: body.profile || {},
-    coach_context: body.coachContext || {},
-    recent_messages: contextualRecentMessages,
-    recent_meals: safeArray(body.meals, 12),
-    recent_workouts: safeArray(body.workouts, 12),
-    recent_workout_sets: safeArray(body.workoutSets, 24),
-    workout_plans: safeArray(body.workoutPlans, 6),
-    meal_plans: safeArray(body.mealPlans, 6),
-    recovery_logs: safeArray(body.recoveryLogs, 6),
-    active_workout: body.activeWorkout || null,
-    verified_food_catalogue: verifiedFoods,
-    candidate_food_matches: candidateFoodMatches,
-    meal_context: mealContext,
-    workout_context: workoutContext,
-  }
-
-
-  const completion = await client.chat.completions.create({
-    model,
-    max_completion_tokens: 500,
-    response_format: { type: "json_object" },
-    messages: [
-      { role: "system", content: coachInstructions },
-      { role: "user", content: JSON.stringify(payload) },
-    ],
-  })
-
-  const parsed = JSON.parse(completion.choices[0]?.message?.content || "{}")
-  sendJson(response, 200, {
-    ...normalizeCoachResponse(parsed, {
-      prompt: body.message,
-      recentMessages: contextualRecentMessages,
-      recentMeals: safeArray(body.meals, 12),
-      recentWorkouts: safeArray(body.workouts, 12),
-      mealContext,
-      workoutContext,
-    }),
-    meal_session: mealContext,
-    workout_session: workoutContext,
-  }, requestResponseOrigin(request))
 }
 
 function verifiedNutritionResult(food) {
@@ -1205,6 +1370,56 @@ async function handleTelemetry(request, response) {
   sendJson(response, 202, { accepted: true }, requestResponseOrigin(request))
 }
 
+async function handleCoachAuditEvent(request, response) {
+  const user = await verifyBearerUser(request)
+  const body = await readRequestBody(request)
+  validateCoachAuditEventBody(body)
+
+  if (!auditCapabilities.enabled || !auditCapabilities.writable) {
+    sendJson(response, 202, { accepted: false, disabled: true }, requestResponseOrigin(request))
+    return
+  }
+
+  const normalized = normalizeAuditClientPatch(body, user)
+  const stored = await persistCoachAuditRecord(adminSupabase, user, normalized)
+  sendJson(response, 202, {
+    accepted: true,
+    stored: Boolean(stored),
+    audit_meta: stored ? buildCoachAuditResponseMeta(stored) : buildCoachAuditResponseMeta(normalized),
+  }, requestResponseOrigin(request))
+}
+
+async function handleCoachAuditList(request, response) {
+  if (!auditCapabilities.enabled || !auditCapabilities.writable) {
+    throw createHttpError(404, "Coach audit is not enabled for this environment.")
+  }
+
+  const user = await verifyBearerUser(request)
+  if (!isCoachAuditAdminUser(user)) {
+    throw createHttpError(403, "Coach audit is restricted to admin testers.")
+  }
+
+  const url = new URL(request.url, `http://${request.headers.host || "127.0.0.1"}`)
+  const filters = {
+    limit: url.searchParams.get("limit") || "120",
+    user: url.searchParams.get("user") || "",
+    route_type: url.searchParams.get("route_type") || "",
+    date_from: url.searchParams.get("date_from") || "",
+    date_to: url.searchParams.get("date_to") || "",
+    failed: url.searchParams.get("failed") || "",
+    warnings: url.searchParams.get("warnings") || "",
+    flag: url.searchParams.get("flag") || "",
+    search: url.searchParams.get("search") || "",
+  }
+
+  const records = await listCoachAuditRecords(adminSupabase, filters)
+  sendJson(response, 200, {
+    records,
+    summary: summarizeCoachAuditRecords(records),
+    capabilities: auditCapabilities,
+  }, requestResponseOrigin(request))
+}
+
 const server = http.createServer(async (request, response) => {
   const corsAllowed = applyCors(request)
   if (!corsAllowed) {
@@ -1220,7 +1435,7 @@ const server = http.createServer(async (request, response) => {
   }
 
   if (request.method === "GET" && request.url === "/health") {
-    sendJson(response, 200, { ok: true, model, openaiConfigured: Boolean(client), authRequired: requireAuth, supabaseConfigured: Boolean(serverSupabase), adminConfigured: Boolean(adminSupabase), corsOrigins: configuredCorsOrigins }, requestResponseOrigin(request))
+    sendJson(response, 200, { ok: true, model, openaiConfigured: Boolean(client), authRequired: requireAuth, supabaseConfigured: Boolean(serverSupabase), adminConfigured: Boolean(adminSupabase), coachAuditEnabled: auditCapabilities.enabled, corsOrigins: configuredCorsOrigins }, requestResponseOrigin(request))
     return
   }
 
@@ -1233,6 +1448,32 @@ const server = http.createServer(async (request, response) => {
       const status = error.status || 500
       logRequest(request, status, "handler=coach")
       sendError(response, request, error, "Live coach is unavailable right now.")
+    }
+    return
+  }
+
+  if (request.method === "POST" && request.url === "/api/coach/audit/event") {
+    try {
+      checkRateLimit(request)
+      await handleCoachAuditEvent(request, response)
+      logRequest(request, 202, "handler=coach-audit-event")
+    } catch (error) {
+      const status = error.status || 500
+      logRequest(request, status, "handler=coach-audit-event")
+      sendError(response, request, error, "Coach audit event failed.")
+    }
+    return
+  }
+
+  if (request.method === "GET" && request.url.startsWith("/api/coach/audit")) {
+    try {
+      checkRateLimit(request)
+      await handleCoachAuditList(request, response)
+      logRequest(request, 200, "handler=coach-audit-list")
+    } catch (error) {
+      const status = error.status || 500
+      logRequest(request, status, "handler=coach-audit-list")
+      sendError(response, request, error, "Coach audit is unavailable right now.")
     }
     return
   }
