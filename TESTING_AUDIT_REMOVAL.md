@@ -3,7 +3,7 @@
 This Coach audit system is temporary and intended only for beta testing.
 
 ## 1. Disable it immediately
-Turn off these environment variables:
+The current beta build enables Coach audit by default. Turn it off explicitly with:
 
 - Frontend: `VITE_ENABLE_COACH_AUDIT=false`
 - Backend: `ENABLE_COACH_AUDIT=false`

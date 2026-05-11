@@ -4,6 +4,7 @@ import path from "node:path"
 const AUDIT_STORAGE_PREFIX = "coach_audit:"
 const AUDIT_SCHEMA_VERSION = 1
 const MAX_AUDIT_LOGS = 400
+const DEFAULT_BETA_ADMIN_EMAILS = ["coach-audit-admin@apexai.app"]
 
 function parseCsv(value) {
   return String(value || "")
@@ -44,7 +45,11 @@ const commitSha =
   || readGitHeadSha()
   || "unknown"
 
-const adminEmailAllowlist = parseCsv(process.env.COACH_AUDIT_ADMIN_EMAILS || process.env.VITE_COACH_AUDIT_ADMIN_EMAILS)
+const adminEmailAllowlist = parseCsv(
+  process.env.COACH_AUDIT_ADMIN_EMAILS
+  || process.env.VITE_COACH_AUDIT_ADMIN_EMAILS
+  || DEFAULT_BETA_ADMIN_EMAILS.join(",")
+)
 const adminIdAllowlist = parseCsv(process.env.COACH_AUDIT_ADMIN_IDS)
 
 function cleanText(value) {
@@ -470,7 +475,7 @@ async function withAuditStorageTimeout(promise, timeoutMs = 1200) {
 }
 
 export function isCoachAuditEnabled() {
-  return process.env.ENABLE_COACH_AUDIT === "true"
+  return process.env.ENABLE_COACH_AUDIT !== "false"
 }
 
 export function coachAuditCapabilities(adminSupabase = null) {

@@ -1,5 +1,7 @@
 import { getCloudAccessToken } from "@/lib/cloudSync"
 
+const DEFAULT_BETA_ADMIN_EMAILS = ["coach-audit-admin@apexai.app"]
+
 function defaultCoachAuditUrl() {
   const coachUrl = import.meta.env.VITE_OPENAI_COACH_URL || ""
   if (coachUrl) return coachUrl.replace(/\/api\/coach$/, "/api/coach/audit")
@@ -15,8 +17,11 @@ function parseCsv(value) {
     .filter(Boolean)
 }
 
-export const coachAuditEnabled = import.meta.env.VITE_ENABLE_COACH_AUDIT === "true"
-const adminEmailAllowlist = parseCsv(import.meta.env.VITE_COACH_AUDIT_ADMIN_EMAILS)
+export const coachAuditEnabled = import.meta.env.VITE_ENABLE_COACH_AUDIT !== "false"
+const adminEmailAllowlist = parseCsv(
+  import.meta.env.VITE_COACH_AUDIT_ADMIN_EMAILS
+  || DEFAULT_BETA_ADMIN_EMAILS.join(",")
+)
 const adminIdAllowlist = parseCsv(import.meta.env.VITE_COACH_AUDIT_ADMIN_IDS)
 export const coachAuditNotice =
   "Beta testing notice: Coach conversations may be reviewed to improve logging accuracy and app reliability. Don't enter private medical, financial, or highly sensitive information."
@@ -111,4 +116,3 @@ export function buildCoachAuditDebugPrompt(record = {}) {
     "Preserve state integrity, avoid fake confirmations, and keep logging deterministic.",
   ].join("\n")
 }
-
