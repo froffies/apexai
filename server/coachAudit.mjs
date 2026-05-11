@@ -307,6 +307,35 @@ function complaintDerivedMealItems(record = {}) {
   ))
 }
 
+function itemMatchesClarificationTarget(item = {}, clarification = null) {
+  if (!clarification || typeof clarification !== "object" || !item || typeof item !== "object") return false
+  const candidates = [
+    clarification.targetReference,
+    clarification.targetBaseName,
+    clarification.targetLabel,
+  ]
+    .map((value) => cleanText(value))
+    .filter(Boolean)
+
+  if (!candidates.length) return false
+
+  const itemNames = [
+    item.reference,
+    item.base_name,
+    item.label,
+  ]
+    .map((value) => cleanText(value))
+    .filter(Boolean)
+
+  return itemNames.some((value) => candidates.includes(value))
+}
+
+function clarificationTargetSatisfied(mealState = null, clarification = null) {
+  const matchedItem = safeArray(mealState?.items, 24).find((item) => itemMatchesClarificationTarget(item, clarification))
+  const quantityAmount = Number(matchedItem?.quantity?.amount)
+  return Boolean(matchedItem && Number.isFinite(quantityAmount))
+}
+
 export function buildCoachAuditFlags(entry = {}) {
   const flags = []
   const transcriptText = collectTranscriptText(entry)
@@ -319,11 +348,20 @@ export function buildCoachAuditFlags(entry = {}) {
   const mealStateBefore = entry?.state_before?.meal_session || entry?.state_before?.mealSession || null
   const workoutStateAfter = entry?.state_after?.workout_session || entry?.state_after?.workoutSession || null
   const userMessage = cleanText(entry.user_message)
-  const lastAssistantMessage = [...sanitizeConversationWindow(entry.conversation_window || [])]
+  const previousAssistantMessage = sanitizeConversationWindow(entry.conversation_window || [])
+    .slice(0, -1)
     .reverse()
     .find((message) => message.role === "assistant")
+  const clarificationTargetMoved = (
+    isNumericOnlyReply(entry.user_message)
+    && mealStateBefore?.pendingClarification?.type === "quantity"
+    && mealStateAfter?.pendingClarification?.type === "quantity"
+    && cleanText(mealStateBefore?.pendingClarification?.targetReference || mealStateBefore?.pendingClarification?.targetBaseName || "")
+      !== cleanText(mealStateAfter?.pendingClarification?.targetReference || mealStateAfter?.pendingClarification?.targetBaseName || "")
+  )
+  const priorTargetSatisfied = clarificationTargetSatisfied(mealStateAfter, mealStateBefore?.pendingClarification)
 
-  if (entry.clarification_asked && lastAssistantMessage && cleanText(lastAssistantMessage.content) === cleanText(assistantReply)) {
+  if (entry.clarification_asked && previousAssistantMessage && cleanText(previousAssistantMessage.content) === cleanText(assistantReply)) {
     addFlag(flags, "clarification_loop", "Coach repeated the same clarification.", "warn")
   }
 
@@ -369,20 +407,16 @@ export function buildCoachAuditFlags(entry = {}) {
     addFlag(flags, "parser_warning", "Meal state reported structural issues before save.", "warn")
   }
 
-  if (
-    isNumericOnlyReply(entry.user_message)
-    && mealStateBefore?.pendingClarification?.type === "quantity"
-    && mealStateAfter?.pendingClarification?.type === "quantity"
-    && cleanText(mealStateBefore?.pendingClarification?.targetReference || mealStateBefore?.pendingClarification?.targetBaseName || "")
-      !== cleanText(mealStateAfter?.pendingClarification?.targetReference || mealStateAfter?.pendingClarification?.targetBaseName || "")
-  ) {
+  if (clarificationTargetMoved && !priorTargetSatisfied) {
     addFlag(flags, "clarification_target_lost", "The pending clarification target changed after a numeric reply.", "error")
   }
 
   if (
     /\d+\.\d+/.test(String(entry.user_message || ""))
     && mealStateBefore?.pendingClarification?.type === "quantity"
-    && (!persistedActions.some((action) => action?.type?.includes("meal")) && mealStateAfter?.pendingClarification?.type === "quantity")
+    && !persistedActions.some((action) => action?.type?.includes("meal"))
+    && mealStateAfter?.pendingClarification?.type === "quantity"
+    && !priorTargetSatisfied
   ) {
     addFlag(flags, "decimal_quantity_unbound", "A decimal quantity reply was not bound to the asked food item.", "error")
   }

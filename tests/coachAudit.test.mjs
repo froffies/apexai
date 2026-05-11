@@ -95,6 +95,57 @@ test("buildCoachAuditFlags catches clarification target loss and unbound decimal
   assert.ok(flags.some((flag) => flag.code === "decimal_quantity_unbound"))
 })
 
+test("buildCoachAuditFlags does not flag a decimal reply when it binds to the asked item and moves on cleanly", () => {
+  const flags = buildCoachAuditFlags({
+    user_message: "19.2",
+    assistant_reply: "How much milk did you have?",
+    persisted_actions: [],
+    route_type: "deterministic",
+    persistence_status: "not_requested",
+    state_before: {
+      meal_session: {
+        items: [
+          { base_name: "pie", label: "Pie" },
+          { base_name: "egg", label: "Eggs" },
+          { base_name: "milk", label: "Milk" },
+        ],
+        pendingClarification: {
+          type: "quantity",
+          targetReference: "egg",
+          targetBaseName: "egg",
+          targetLabel: "Eggs",
+          expectedValueType: "number",
+        },
+      },
+    },
+    state_after: {
+      meal_session: {
+        items: [
+          { base_name: "pie", label: "Pie", quantity: { amount: 1, unit: "serve", text: "1 serve" } },
+          { base_name: "egg", label: "Eggs", quantity: { amount: 19.2, unit: "egg", text: "19.2 eggs" } },
+          { base_name: "milk", label: "Milk" },
+        ],
+        pendingClarification: {
+          type: "quantity",
+          targetReference: "milk",
+          targetBaseName: "milk",
+          targetLabel: "Milk",
+          expectedValueType: "number",
+        },
+      },
+    },
+    conversation_window: [
+      { role: "assistant", content: "How many eggs did you have?" },
+      { role: "user", content: "19.2" },
+      { role: "assistant", content: "How much milk did you have?" },
+    ],
+  })
+
+  assert.equal(flags.some((flag) => flag.code === "clarification_loop"), false)
+  assert.equal(flags.some((flag) => flag.code === "clarification_target_lost"), false)
+  assert.equal(flags.some((flag) => flag.code === "decimal_quantity_unbound"), false)
+})
+
 test("buildCoachAuditFlags catches complaint-derived foods, corrupted persistence, and ignored delete intent", () => {
   const persistedFlags = buildCoachAuditFlags({
     user_message: "eggs, you asked how many eggs and I gave you a number, why can't you understand?",
