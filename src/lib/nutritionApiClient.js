@@ -9,6 +9,18 @@ function defaultNutritionUrl() {
 
 function defaultNutritionChefUrl() {
   if (typeof window === "undefined") return "http://127.0.0.1:8787/api/nutrition/chef"
+  // In local dev the host-based fallback is fine.
+  // In production (Vercel) window.location.hostname is the frontend domain, not the Render
+  // backend, so derive the base from VITE_OPENAI_COACH_URL instead.
+  const coachUrl = import.meta.env.VITE_OPENAI_COACH_URL || ""
+  if (coachUrl) {
+    try {
+      const base = new URL(coachUrl)
+      return `${base.protocol}//${base.host}/api/nutrition/chef`
+    } catch {
+      // malformed env var - fall through to host-based default
+    }
+  }
   const host = window.location.hostname || "127.0.0.1"
   return `${window.location.protocol}//${host}:8787/api/nutrition/chef`
 }
