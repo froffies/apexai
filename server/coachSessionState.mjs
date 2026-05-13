@@ -8,6 +8,7 @@ const MEAL_FINALISE_PATTERN = /^(?:i just did|i already did|that'?s it|thats it|
 const MEAL_REFERENCE_PATTERN = /\b(?:the eggs?|the tea|the coffee|the toast|the beans?|the chicken|the rice|the butter|the oil)\b/i
 const SUPPRESS_SESSION_PATTERN = /\b(?:don't|dont|do not|stop|no)\s+(?:log|save|track|record|add)\b/i
 const REPEAT_RECENT_MEAL_PATTERN = /\b(?:same as yesterday|same as last time|same as before|repeat that(?: meal)?|same thing as yesterday)\b/i
+const MEAL_LOG_QUERY_PATTERN = /^(?:what(?:'s|s| is)?|show|list|see|view|display)\b.*\b(?:today'?s?|todays?|my)\b.*\b(?:nutrition|food|meal|meals|log)\b/i
 const WORKOUT_START_PATTERN = /\b(?:workout|train(?:ed|ing)?|lift(?:ed|ing)?|exercise|exercises|session|cardio|bench|squat|deadlift|row|rows|press|curls?|pulldown|pull ups?|push ups?|pullups?|pushups?|situps?|sit ups?|burpees?|dips?|lunge|lunges|treadmill|bike|run|running|walk|walking|rower|elliptical|stairmaster|km|min|minutes|sets?|reps?|kg)\b/i
 const WORKOUT_CORRECTION_PATTERN = /\b(?:actually|correction|change(?:\s+that)?|update(?:\s+that)?|make that|not\b|instead|sorry|i meant)\b/i
 const WORKOUT_DELETE_PATTERN = /\b(?:delete|remove|undo|erase)\b(?:\s+(?:it|that|this|workout|session|log))?/i
@@ -238,13 +239,29 @@ function repeatRecentMealRequested(message) {
   return REPEAT_RECENT_MEAL_PATTERN.test(cleanText(message))
 }
 
+function mealLogQueryRequested(message) {
+  return MEAL_LOG_QUERY_PATTERN.test(cleanText(message))
+}
+
 function isExplicitMealStart(message) {
   return MEAL_EXPLICIT_START_PATTERN.test(String(message || "").trim())
+}
+
+function looksLikeWorkoutOnlyTurn(message) {
+  const normalized = cleanText(message)
+  if (!normalized || isExplicitMealStart(message)) return false
+  const parsed = parseWorkoutMessage(message)
+  return WORKOUT_START_PATTERN.test(normalized)
+    || workoutReferenceMessage(normalized)
+    || hasWorkoutMetricDetail(parsed)
+    || Number(parsed?.duration_seconds || 0) > 0
+    || Number(parsed?.distance_km || 0) > 0
 }
 
 function isRedundantPersistedMealFollowUp(message, session) {
   const normalized = cleanText(message)
   if (!session?.persisted || !normalized) return false
+  if (mealLogQueryRequested(normalized) || looksLikeWorkoutOnlyTurn(message)) return false
   if (mealCorrectionRequested(normalized)) return false
   if (mealRejectionRequested(normalized)) return false
   if (mealDeleteRequested(normalized)) return false
@@ -418,6 +435,9 @@ function buildMealSessionState(recentMessages = [], currentMessage = "", existin
       }
     }
   }
+
+  if (mealLogQueryRequested(currentMessage)) return null
+  if (looksLikeWorkoutOnlyTurn(currentMessage)) return null
 
   if (prior.persisted && deleteRequested) {
     return {

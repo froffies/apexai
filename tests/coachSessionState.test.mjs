@@ -666,6 +666,48 @@ test("coach session state does not let a failed general log query seed the next 
   assert.equal(next.workoutSession.reps, 14)
 })
 
+test("coach session state does not reopen a persisted meal when the user asks about today's log, and the next workout turn still routes to workouts", () => {
+  const mealConversation = replayCoachConversation([
+    user("i had milk and steak"),
+    assistant("How much milk did you have?"),
+    user("970ml"),
+    assistant("How much steak did you have?"),
+    user("3 steaks"),
+  ])
+
+  const persistedMeal = makePersistedMealSession(mealConversation.mealSession, "meal_recent")
+  const logQuery = buildCoachSessionState({
+    recentMessages: [
+      ...mealConversation.history,
+      assistant("Saved to today's nutrition: 970ml milk, plus 3 steaks."),
+    ],
+    currentMessage: "whats in todays log",
+    mealSession: persistedMeal,
+    workoutSession: emptyWorkoutSessionState(),
+  })
+
+  assert.equal(logQuery.mealSession, null)
+  assert.equal(logQuery.workoutSession, null)
+
+  const nextWorkoutTurn = buildCoachSessionState({
+    recentMessages: [
+      ...mealConversation.history,
+      assistant("Saved to today's nutrition: 970ml milk, plus 3 steaks."),
+      user("whats in todays log"),
+      assistant("I couldn't reach the live coach just now, so I left your data alone. Please retry in a moment."),
+    ],
+    currentMessage: "i did 14 pushups",
+    mealSession: persistedMeal,
+    workoutSession: emptyWorkoutSessionState(),
+  })
+
+  assert.equal(nextWorkoutTurn.mealSession, null)
+  assert.ok(nextWorkoutTurn.workoutSession)
+  assert.equal(nextWorkoutTurn.workoutSession.readyToLog, true)
+  assert.equal(nextWorkoutTurn.workoutSession.exercise_name, "Pushups")
+  assert.equal(nextWorkoutTurn.workoutSession.reps, 14)
+})
+
 test("coach session state preserves unusual but valid quantities instead of rejecting them", () => {
   const { mealSession } = replayCoachConversation([
     user("i had 5 tins of heinz baked beans"),

@@ -1086,6 +1086,100 @@ test("deterministic coach routes workout-only turns to workouts even after a fai
   assert.equal(Array.isArray(coach.meal_session?.items) ? coach.meal_session.items.length : 0, 0)
 })
 
+test("deterministic coach does not treat today's-log queries as meal updates and still routes the next workout turn correctly", async (t) => {
+  const port = randomPort()
+  const serverProcess = spawn(process.execPath, [serverEntry], {
+    cwd,
+    env: {
+      ...process.env,
+      OPENAI_COACH_PORT: String(port),
+      OPENAI_COACH_REQUIRE_AUTH: "false",
+      OPENAI_COACH_CORS_ORIGIN: "http://127.0.0.1:5173",
+      OPENFOODFACTS_ENABLED: "false",
+      OPENAI_API_KEY: "",
+      NODE_ENV: "production",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  })
+
+  t.after(async () => {
+    serverProcess.kill()
+  })
+
+  await waitForHealth(port)
+
+  const persistedMealSession = {
+    active: false,
+    mealConversation: false,
+    readyToLog: false,
+    persisted: true,
+    persistedMealId: "meal_recent",
+    persistedSummary: "970ml milk, plus 3 steaks",
+    persistedAt: "2026-05-13T00:00:00.000Z",
+    summary: "970ml milk, plus 3 steaks",
+    items: [
+      { base_name: "milk", label: "Milk", category: "drink", quantity: { amount: 970, unit: "ml", text: "970ml", modifier: "" }, preparation: [], exclusions: [], attached_to: null, relation: null },
+      { base_name: "steak", label: "Steaks", category: "food", quantity: { amount: 3, unit: "steak", text: "3 steaks", modifier: "" }, preparation: [], exclusions: [], attached_to: null, relation: null },
+    ],
+  }
+
+  const firstResponse = await fetch(`http://127.0.0.1:${port}/api/coach`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Origin: "http://127.0.0.1:5173",
+    },
+    body: JSON.stringify({
+      message: "whats in todays log",
+      recentMessages: [
+        { role: "user", content: "i had milk and steak" },
+        { role: "assistant", content: "How much milk did you have?" },
+        { role: "user", content: "970ml" },
+        { role: "assistant", content: "How much steak did you have?" },
+        { role: "user", content: "3 steaks" },
+        { role: "assistant", content: "Saved to today's nutrition: 970ml milk, plus 3 steaks." },
+      ],
+      mealSession: persistedMealSession,
+      workoutSession: {},
+    }),
+  })
+  const firstCoach = await firstResponse.json()
+  assert.equal(firstResponse.status, 200)
+  assert.equal((firstCoach.actions || []).some((action) => action?.type === "log_meal" || action?.type === "update_meal_log"), false)
+  assert.equal(Boolean(firstCoach.meal_session?.readyToLog), false)
+  assert.equal(String(firstCoach.meal_session?.summary || ""), "")
+
+  const secondResponse = await fetch(`http://127.0.0.1:${port}/api/coach`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Origin: "http://127.0.0.1:5173",
+    },
+    body: JSON.stringify({
+      message: "i did 14 pushups",
+      recentMessages: [
+        { role: "user", content: "i had milk and steak" },
+        { role: "assistant", content: "How much milk did you have?" },
+        { role: "user", content: "970ml" },
+        { role: "assistant", content: "How much steak did you have?" },
+        { role: "user", content: "3 steaks" },
+        { role: "assistant", content: "Saved to today's nutrition: 970ml milk, plus 3 steaks." },
+        { role: "user", content: "whats in todays log" },
+        { role: "assistant", content: "I couldn't reach the live coach just now, so I left your data alone. Please retry in a moment." },
+      ],
+      mealSession: persistedMealSession,
+      workoutSession: {},
+    }),
+  })
+  const secondCoach = await secondResponse.json()
+  assert.equal(secondResponse.status, 200)
+  assert.equal(secondCoach.actions?.[0]?.type, "log_workout")
+  assert.equal(secondCoach.actions?.[0]?.exercise_name, "Pushups")
+  assert.equal(secondCoach.actions?.[0]?.reps, 14)
+  assert.equal(Boolean(secondCoach.meal_session?.readyToLog), false)
+  assert.equal(String(secondCoach.meal_session?.summary || ""), "")
+})
+
 test("deterministic coach keeps recent clarification context for complaint turns when a meal session is already active", async (t) => {
   const port = randomPort()
   const serverProcess = spawn(process.execPath, [serverEntry], {
