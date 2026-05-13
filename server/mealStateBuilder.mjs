@@ -204,10 +204,13 @@ const ASSISTANT_MEAL_PATTERN = /\b(what type|what kind|how much|how many|milk|su
 const SUPPRESS_LOG_PATTERN = /\b(?:don't|dont|do not|stop|no)\s+(?:log|save|track|record|add)\b/i
 const NUTRITION_QUESTION_PATTERN = /\b(calories|calorie|macro|macros|protein|carbs|fat|estimate|estimated|calculate)\b/i
 const QUESTION_PREFIX_PATTERN = /^(?:how many|how much|what(?:'s| is)?|can you|could you|please calculate|calculate|estimate)\b/i
-const WORKOUT_ONLY_PATTERN = /\b(bench press|incline bench|overhead press|shoulder press|preacher curl|bicep curl|tricep pushdown|lat pulldown|pull up|push up|squat|deadlift|rdl|lunge|leg press|seated row|barbell row|row|rows|treadmill|bike|rower|elliptical|stairmaster|sets?|reps?)\b/i
+const WORKOUT_ONLY_PATTERN = /\b(bench press|incline bench|overhead press|shoulder press|preacher curl|bicep curl|tricep pushdown|lat pulldown|pull ups?|push ups?|pullups?|pushups?|situps?|sit ups?|burpees?|dips?|squat|squats|deadlift|rdl|lunge|lunges|leg press|seated row|barbell row|row|rows|treadmill|bike|rower|elliptical|stairmaster|sets?|reps?)\b/i
 const WORKOUT_X_PATTERN = /\b\d+(?:\.\d+)?\s*kg\b\s*x\s*\d+\s*x\s*\d+\b/i
 const WORKOUT_CARDIO_PATTERN = /\b\d+\s*(?:min|mins|minutes)\s*(?:incline treadmill|treadmill|bike|rower|elliptical|stairmaster|run|walk)\b/i
+const MEAL_LOG_QUERY_PATTERN = /^(?:what(?:'s| is)?|show|list|see|view|display)\b.*\b(?:today'?s?|todays?|my)\b.*\b(?:nutrition|food|meal|meals|log)\b/i
 const REMOVAL_PATTERN = /^(?:actually\s+)?(?:remove|without|skip|delete|drop)\s+(?<item>.+)$|^(?:actually\s+)?no\s+(?<item2>.+)$/i
+const TARGETED_REPLACEMENT_PATTERN = /^(?:actually\s+)?(?:update|change|make)\s+(?:the\s+)?(?<target>.+?)\s+to\s+(?<replacement>.+)$/i
+const TARGETED_SWAP_PATTERN = /^(?:actually\s+)?replace\s+(?<target>.+?)\s+with\s+(?<replacement>.+)$/i
 const REST_PATTERN = /^(?:the\s+)?rest(?:\s+of\s+(?:it|them))?(?:\s+was|\s+were)?\s+(?<details>.+)$/i
 const REST_REFERENCE_ONLY_PATTERN = /^(?:the\s+)?rest(?:\s+of\s+(?:it|them))?$/i
 const META_COMPLAINT_PATTERN = /\b(?:you asked|i gave you|why can(?:'|’)t you understand|why cant you understand|i told you|already said|what do you mean|i just answered|you just asked)\b/i
@@ -355,6 +358,7 @@ function uniqueNormalizedValues(values = []) {
 
 function normalizeLabel(label) {
   return cleanText(label)
+    .replace(/^(?:but|and)\s+(?:i\s+)?(?:had|ate|drank)\s+/, "")
     .replace(/^(?:i had|had|i ate|ate|i drank|drank|log|track|save|add|include)\s+/, "")
     .replace(/\b(?:please|thanks|thank you)\b/g, "")
     .replace(/[?!.,]+$/g, "")
@@ -536,6 +540,10 @@ function detectSuppressedLogging(text) {
   return SUPPRESS_LOG_PATTERN.test(cleanText(text))
 }
 
+function looksLikeMealLogQuery(text) {
+  return MEAL_LOG_QUERY_PATTERN.test(cleanText(text))
+}
+
 export function detectQuestionOnlyTurn(text) {
   const raw = String(text || "").trim()
   const normalized = cleanText(raw)
@@ -548,6 +556,7 @@ export function detectQuestionOnlyTurn(text) {
 function looksLikeMealContinuation(text, state, threadHint = false) {
   const normalized = cleanText(text)
   if (!normalized) return false
+  if (looksLikeMealLogQuery(normalized)) return false
   if (detectSuppressedLogging(normalized)) return true
   if (detectQuestionOnlyTurn(text) && (threadHint || state.items.length)) return true
   if (looksLikeWorkoutOnly(normalized)) return false
@@ -597,6 +606,7 @@ function shouldContinueExistingSession(existingSession, currentMessage, recentMe
   if (!existingSession?.active || !Array.isArray(existingSession.items) || !existingSession.items.length) return false
   const normalized = cleanText(currentMessage)
   if (!normalized) return false
+  if (looksLikeMealLogQuery(normalized)) return false
   if (isExplicitMealStart(normalized)) return false
   if (looksLikeWorkoutOnly(normalized)) return false
   if (detectSuppressedLogging(currentMessage)) return true
@@ -621,9 +631,10 @@ function extractMealThread(recentMessages = [], currentMessage = "", existingSes
   const questionOnlyCurrent = detectQuestionOnlyTurn(currentMessage)
   const history = Array.isArray(recentMessages) ? recentMessages.filter((entry) => typeof entry?.content === "string") : []
   const workoutOnly = looksLikeWorkoutOnly(normalizedCurrent)
-  if (questionOnlyCurrent && !existingSession?.active && !existingSession?.persisted) return []
+  if ((questionOnlyCurrent || looksLikeMealLogQuery(normalizedCurrent)) && !existingSession?.active && !existingSession?.persisted) return []
   const hasMealHistory = history.some((entry) => (
     entry?.role === "user"
+    && !looksLikeMealLogQuery(entry.content || "")
     && (isExplicitMealStart(entry.content) || looksFoodishPhrase(entry.content) || MEAL_REFERENCE_PATTERN.test(cleanText(entry.content || "")))
   ))
   const shouldTrack = isExplicitMealStart(normalizedCurrent)
@@ -1086,6 +1097,13 @@ function parseDrinkDetailOnly(state, text) {
 
   let changed = false
   const updates = cloneItem(state.items[fallbackIndex])
+  const explicitBase = deriveBaseName(normalized)
+  const explicitCategory = explicitBase ? detectCategory(explicitBase) : ""
+  const quantityOnlyReply = parseQuantityOnly(normalized)
+  const hasDrinkDescriptor = /\b(tea|coffee|milk|sugar|earl grey|flat white|long black|cappuccino|latte|espresso|no sugar|without sugar|no milk|without milk)\b/.test(normalized)
+  if (!quantityOnlyReply && !hasDrinkDescriptor && explicitBase && explicitCategory !== "drink" && explicitBase !== cleanText(updates.baseName || updates.key || updates.label || "")) {
+    return false
+  }
 
   if (/\bearl grey\b/.test(normalized)) {
     updates.baseName = "earl grey tea"
@@ -1707,6 +1725,7 @@ function parseSubjectAttachmentClause(state, clause) {
   const subjectText = stripCorrectionLead(subjectMatch.groups.subject || "")
     .replace(/^(?:the|my|our|that|those|these)\s+/, "")
     .trim()
+  if (/^(?:but\s+)?(?:i|we|you)\b/.test(subjectText)) return null
   if (!subjectText || hasDigits(subjectText) || looksLikeWorkoutOnly(subjectText)) return null
   if (REST_PATTERN.test(subjectText) || REST_REFERENCE_ONLY_PATTERN.test(subjectText) || /^(?:rest|remainder)$/i.test(subjectText)) return null
 
@@ -2214,6 +2233,17 @@ function mergeClauseIntoState(state, clause) {
 
   if (looksLikeMetaConversationTurn(clauseText)) {
     return false
+  }
+
+  const targetedReplacement = normalized.match(TARGETED_REPLACEMENT_PATTERN) || normalized.match(TARGETED_SWAP_PATTERN)
+  if (targetedReplacement?.groups?.target && targetedReplacement?.groups?.replacement) {
+    const targetBase = deriveBaseName(targetedReplacement.groups.target || "")
+    const replacementText = String(targetedReplacement.groups.replacement || "").trim()
+    if (targetBase && replacementText) {
+      const removed = removeItemsMatchingBaseName(state, targetBase)
+      const replaced = mergeClauseIntoState(state, replacementText)
+      return removed || replaced
+    }
   }
 
   if (detectSuppressedLogging(normalized)) {

@@ -543,6 +543,129 @@ test("coach session state keeps persisted meal state isolated from a new fragmen
   assert.equal(secondWorkoutTurn.workoutSession.reps, 6)
 })
 
+test("coach session state keeps a new explicit meal isolated from the previously saved meal", () => {
+  const initial = replayCoachConversation([
+    user("i had egg"),
+    assistant("How many eggs did you have?"),
+    user("i had 18 fried eggs and 14 hard boiled"),
+    assistant("What were the fried eggs cooked in?"),
+    user("120g of butter"),
+  ])
+
+  const persistedMeal = makePersistedMealSession(initial.mealSession, "meal_original")
+  const next = buildCoachSessionState({
+    recentMessages: [
+      ...initial.history,
+      assistant("Saved to today's nutrition: 18 fried eggs cooked in 120g butter, plus 14 hard boiled eggs."),
+    ],
+    currentMessage: "i had milk and steak",
+    mealSession: persistedMeal,
+    workoutSession: emptyWorkoutSessionState(),
+  })
+
+  assert.ok(next.mealSession)
+  assert.equal(next.mealSession.persisted, false)
+  assert.equal(next.mealSession.persistedMealId, "")
+  assert.match(next.mealSession.clarifyQuestion, /how much milk/i)
+  assert.match(next.mealSession.summary, /milk/i)
+  assert.match(next.mealSession.summary, /steak/i)
+  assert.doesNotMatch(next.mealSession.summary, /fried eggs|hard boiled eggs|butter/i)
+})
+
+test("coach session state treats quantified follow-ups on a saved meal as updates instead of already-logged repeats", () => {
+  const initial = replayCoachConversation([
+    user("i had milk and steak"),
+    assistant("How much milk did you have?"),
+    user("970ml"),
+  ])
+
+  const persistedMeal = makePersistedMealSession(initial.mealSession, "meal_milk_steak")
+  const next = buildCoachSessionState({
+    recentMessages: [
+      ...initial.history,
+      assistant("Saved to today's nutrition: 970ml milk, plus 1 serve steak."),
+    ],
+    currentMessage: "but i had 3 steaks",
+    mealSession: persistedMeal,
+    workoutSession: emptyWorkoutSessionState(),
+  })
+
+  assert.ok(next.mealSession)
+  assert.equal(next.mealSession.alreadyLogged, false)
+  assert.equal(next.mealSession.correctionRequested, true)
+  assert.equal(next.mealSession.readyToLog, true)
+  assert.match(next.mealSession.summary, /3 steaks/i)
+  assert.doesNotMatch(next.mealSession.summary, /1 serve steak/i)
+})
+
+test("coach session state replaces a targeted saved-meal item instead of appending a duplicate correction item", () => {
+  const initial = replayCoachConversation([
+    user("i had milk and steak"),
+    assistant("How much milk did you have?"),
+    user("970ml"),
+  ])
+
+  const persistedMeal = makePersistedMealSession(initial.mealSession, "meal_replace_steak")
+  const next = buildCoachSessionState({
+    recentMessages: [
+      ...initial.history,
+      assistant("Saved to today's nutrition: 970ml milk, plus 1 serve steak."),
+    ],
+    currentMessage: "update the steak to 350g rump",
+    mealSession: persistedMeal,
+    workoutSession: emptyWorkoutSessionState(),
+  })
+
+  assert.ok(next.mealSession)
+  assert.equal(next.mealSession.correctionRequested, true)
+  assert.equal(next.mealSession.readyToLog, true)
+  assert.equal(next.mealSession.summary, "970ml milk, plus 350g rump")
+  assert.equal(next.mealSession.items.some((item) => String(item.base_name || item.baseName || "").toLowerCase() === "steak"), false)
+})
+
+test("coach session state treats item-level remove requests on saved meals as updates instead of deleting the whole meal", () => {
+  const initial = replayCoachConversation([
+    user("i had milk and steak"),
+    assistant("How much milk did you have?"),
+    user("970ml"),
+  ])
+
+  const persistedMeal = makePersistedMealSession(initial.mealSession, "meal_remove_steak")
+  const next = buildCoachSessionState({
+    recentMessages: [
+      ...initial.history,
+      assistant("Saved to today's nutrition: 970ml milk, plus 1 serve steak."),
+    ],
+    currentMessage: "remove 1 serve steak",
+    mealSession: persistedMeal,
+    workoutSession: emptyWorkoutSessionState(),
+  })
+
+  assert.ok(next.mealSession)
+  assert.equal(next.mealSession.deleteRequested, false)
+  assert.equal(next.mealSession.correctionRequested, true)
+  assert.equal(next.mealSession.readyToLog, true)
+  assert.equal(next.mealSession.summary, "970ml milk")
+})
+
+test("coach session state does not let a failed general log query seed the next workout turn as meal text", () => {
+  const next = buildCoachSessionState({
+    recentMessages: [
+      user("whats in todays log"),
+      assistant("I couldn't reach the live coach just now, so I left your data alone. Please retry in a moment."),
+    ],
+    currentMessage: "i did 14 pushups",
+    mealSession: emptyMealSessionState(),
+    workoutSession: emptyWorkoutSessionState(),
+  })
+
+  assert.equal(next.mealSession, null)
+  assert.ok(next.workoutSession)
+  assert.equal(next.workoutSession.readyToLog, true)
+  assert.equal(next.workoutSession.exercise_name, "Pushups")
+  assert.equal(next.workoutSession.reps, 14)
+})
+
 test("coach session state preserves unusual but valid quantities instead of rejecting them", () => {
   const { mealSession } = replayCoachConversation([
     user("i had 5 tins of heinz baked beans"),

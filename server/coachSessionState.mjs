@@ -8,7 +8,7 @@ const MEAL_FINALISE_PATTERN = /^(?:i just did|i already did|that'?s it|thats it|
 const MEAL_REFERENCE_PATTERN = /\b(?:the eggs?|the tea|the coffee|the toast|the beans?|the chicken|the rice|the butter|the oil)\b/i
 const SUPPRESS_SESSION_PATTERN = /\b(?:don't|dont|do not|stop|no)\s+(?:log|save|track|record|add)\b/i
 const REPEAT_RECENT_MEAL_PATTERN = /\b(?:same as yesterday|same as last time|same as before|repeat that(?: meal)?|same thing as yesterday)\b/i
-const WORKOUT_START_PATTERN = /\b(?:workout|train(?:ed|ing)?|lift(?:ed|ing)?|exercise|exercises|session|cardio|bench|squat|deadlift|row|rows|press|curls?|pulldown|pull ups?|push ups?|lunge|treadmill|bike|run|running|walk|walking|rower|elliptical|stairmaster|km|min|minutes|sets?|reps?|kg)\b/i
+const WORKOUT_START_PATTERN = /\b(?:workout|train(?:ed|ing)?|lift(?:ed|ing)?|exercise|exercises|session|cardio|bench|squat|deadlift|row|rows|press|curls?|pulldown|pull ups?|push ups?|pullups?|pushups?|situps?|sit ups?|burpees?|dips?|lunge|lunges|treadmill|bike|run|running|walk|walking|rower|elliptical|stairmaster|km|min|minutes|sets?|reps?|kg)\b/i
 const WORKOUT_CORRECTION_PATTERN = /\b(?:actually|correction|change(?:\s+that)?|update(?:\s+that)?|make that|not\b|instead|sorry|i meant)\b/i
 const WORKOUT_DELETE_PATTERN = /\b(?:delete|remove|undo|erase)\b(?:\s+(?:it|that|this|workout|session|log))?/i
 const WORKOUT_FINALISE_PATTERN = /^(?:i just did|i already did|that'?s it|thats it|log it|save it|go ahead|yes|yeah|yep|okay|ok)$/i
@@ -23,10 +23,22 @@ const WORKOUT_EXERCISES = [
   "barbell row",
   "bent over row",
   "row",
-  "pull up",
+  "pullups",
   "pull ups",
-  "push up",
+  "pull up",
+  "pullup",
+  "pushups",
   "push ups",
+  "push up",
+  "pushup",
+  "situp",
+  "situps",
+  "sit up",
+  "sit ups",
+  "burpee",
+  "burpees",
+  "dip",
+  "dips",
   "lat pulldown",
   "deadlift",
   "romanian deadlift",
@@ -56,6 +68,9 @@ const CORRECTION_LEAD_PATTERNS = [
   /^(?:i meant|it was|it is)\s+/i,
   /^(?:make that|change that(?: to)?|update that(?: to)?|instead)\s+/i,
 ]
+
+const GENERIC_MEAL_DELETE_PATTERN = /^(?:actually\s+)?(?:delete|remove|undo|erase)(?:\s+(?:it|that|this|meal|log))?$/i
+const REJECTION_DELETE_PATTERN = /^(?:no|nah)\s+(?:that'?s wrong|thats wrong|wrong meal|logged wrong)\s+(?:delete|remove|undo|erase)(?:\s+(?:it|that|this|meal|log))?$/i
 
 function cleanText(value) {
   return String(value || "")
@@ -187,6 +202,11 @@ function mealDeleteRequested(message) {
   return MEAL_DELETE_PATTERN.test(cleanText(message))
 }
 
+function genericMealDeleteRequested(message) {
+  const normalized = cleanText(message)
+  return GENERIC_MEAL_DELETE_PATTERN.test(normalized) || REJECTION_DELETE_PATTERN.test(normalized)
+}
+
 function mealRejectionRequested(message) {
   return MEAL_REJECTION_PATTERN.test(cleanText(message))
 }
@@ -245,7 +265,9 @@ function isRedundantPersistedMealFollowUp(message, session) {
   if (isExplicitMealStart(message)) {
     return referencesKnownItems && summaryIncludesNumbers(numbers, summaryText, quantitySet)
   }
-  return referencesKnownItems
+  if (!referencesKnownItems) return false
+  if (!numbers.length) return true
+  return summaryIncludesNumbers(numbers, summaryText, quantitySet)
 }
 
 function persistedMealFollowUpLooksLikeUpdate(message, session, nextSummary = "") {
@@ -378,7 +400,7 @@ function looksLikeFullMealCorrectionRestatement(message) {
 function buildMealSessionState(recentMessages = [], currentMessage = "", existingSession = null, recentMeals = []) {
   const prior = normalizeMealSession(existingSession)
   const normalizedCurrent = cleanText(currentMessage)
-  const deleteRequested = Boolean(prior.persistedMealId && mealDeleteRequested(currentMessage))
+  const deleteRequested = Boolean(prior.persistedMealId && genericMealDeleteRequested(currentMessage))
   const rejectionRequested = Boolean(prior.persistedMealId && mealRejectionRequested(currentMessage))
   const correctionRequested = Boolean(prior.persistedMealId && mealCorrectionRequested(currentMessage))
   const fullCorrectionRestatement = Boolean(
@@ -414,7 +436,7 @@ function buildMealSessionState(recentMessages = [], currentMessage = "", existin
   }
 
   const startedNewMeal = prior.persisted && isExplicitMealStart(currentMessage) && !correctionRequested
-  const historyForNext = fullCorrectionRestatement ? [] : recentMessages
+  const historyForNext = (fullCorrectionRestatement || startedNewMeal) ? [] : recentMessages
   const shouldSeedPersistedSession = !fullCorrectionRestatement && (prior.active || (prior.persisted && !startedNewMeal))
   const seededSession = shouldSeedPersistedSession ? seedLegacyMealSession(prior) : null
   const next = buildLegacyMealContext(historyForNext, currentMessage, seededSession)
@@ -669,6 +691,21 @@ function parseWorkoutMessage(message) {
       reps: 0,
       weight_kg: 0,
       duration_seconds: Number(durationOnly.groups.minutes) * 60,
+      distance_km: 0,
+    }
+  }
+
+  const countedBodyweightPattern = text.match(/^(?:i\s+did\s+)?(?<reps>\d+(?:\.\d+)?)\s*(?<exercise>pushups?|push ups?|pullups?|pull ups?|situps?|sit ups?|burpees?|dips?|lunges?|squats?)\b/)
+  if (countedBodyweightPattern?.groups) {
+    const exercise = normalizeExerciseName(countedBodyweightPattern.groups.exercise)
+    return {
+      exercise_name: exercise,
+      workout_type: exercise,
+      muscle_group: "full_body",
+      sets: 1,
+      reps: Number(countedBodyweightPattern.groups.reps || 0),
+      weight_kg: 0,
+      duration_seconds: 0,
       distance_km: 0,
     }
   }

@@ -1585,6 +1585,288 @@ test("coach reconciles stale meal log actions into one corrected saved meal", as
   await expect(todayMealsSection.getByText("17 fried eggs cooked in 100g salted butter, plus 250ml Earl Grey tea with no milk and no sugar")).toHaveCount(0)
 })
 
+test("coach keeps separate meals isolated and does not turn a failed log query into nutrition junk before the next workout", async ({ page }) => {
+  await seedOnboardedProfile(page)
+  await page.route("**/api/coach", async (route) => {
+    const body = route.request().postDataJSON()
+    const message = String(body.message || "").toLowerCase().trim()
+    const mealSession = body.mealSession || {}
+    const workoutSession = body.workoutSession || {}
+
+    if (message === "i had egg") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          reply: "How many eggs did you have?",
+          actions: [{ type: "clarify", message: "How many eggs did you have?" }],
+          warnings: [],
+          meal_session: {
+            active: true,
+            mealConversation: true,
+            readyToLog: false,
+            clarificationAttempts: 0,
+            clarificationCounts: {},
+            summary: "eggs",
+            clarifyQuestion: "How many eggs did you have?",
+            items: [
+              { base_name: "egg", label: "Egg", category: "food", quantity: null, preparation: [], exclusions: [], attached_to: null, relation: null },
+            ],
+          },
+          workout_session: {},
+        }),
+      })
+      return
+    }
+
+    if (message === "i had 18 fried eggs and 14 hard boiled") {
+      expect(mealSession.summary || "").toMatch(/eggs/i)
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          reply: "What were the fried eggs cooked in?",
+          actions: [{ type: "clarify", message: "What were the fried eggs cooked in?" }],
+          warnings: [],
+          meal_session: {
+            active: true,
+            mealConversation: true,
+            readyToLog: false,
+            clarificationAttempts: 1,
+            clarificationCounts: { "egg:quantity": 1 },
+            summary: "18 fried eggs, plus 14 hard boiled eggs",
+            clarifyQuestion: "What were the fried eggs cooked in?",
+            items: [
+              { base_name: "egg", label: "Eggs", category: "food", quantity: { amount: 18, unit: "egg", text: "18 eggs", modifier: "" }, preparation: ["fried"], exclusions: [], attached_to: null, relation: null },
+              { base_name: "egg", label: "Eggs", category: "food", quantity: { amount: 14, unit: "egg", text: "14 eggs", modifier: "" }, preparation: ["hard boiled"], exclusions: [], attached_to: null, relation: null },
+            ],
+          },
+          workout_session: {},
+        }),
+      })
+      return
+    }
+
+    if (message === "120g of butter") {
+      expect(mealSession.summary || "").toMatch(/18 fried eggs, plus 14 hard boiled eggs/i)
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          reply: "Saved to today's nutrition: 18 fried eggs cooked in 120g butter, plus 14 hard boiled eggs.",
+          actions: [
+            {
+              type: "log_meal",
+              food_name: "18 fried eggs cooked in 120g butter, plus 14 hard boiled eggs",
+              meal_type: "breakfast",
+              quantity: "1 meal",
+              calories: 3228,
+              protein_g: 203,
+              carbs_g: 18,
+              fat_g: 261,
+              estimated: true,
+              nutrition_source: "Coach estimate from accumulated meal details across chat",
+            },
+          ],
+          warnings: [],
+          meal_session: {
+            ...mealSession,
+            active: true,
+            mealConversation: true,
+            readyToLog: true,
+            summary: "18 fried eggs cooked in 120g butter, plus 14 hard boiled eggs",
+            clarifyQuestion: "",
+          },
+          workout_session: {},
+        }),
+      })
+      return
+    }
+
+    if (message === "i had milk and steak") {
+      expect(mealSession.persistedSummary || "").toMatch(/18 fried eggs cooked in 120g butter, plus 14 hard boiled eggs/i)
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          reply: "How much milk did you have?",
+          actions: [{ type: "clarify", message: "How much milk did you have?" }],
+          warnings: [],
+          meal_session: {
+            active: true,
+            mealConversation: true,
+            persisted: false,
+            persistedMealId: "",
+            readyToLog: false,
+            clarificationAttempts: 0,
+            clarificationCounts: {},
+            summary: "milk, plus steak",
+            clarifyQuestion: "How much milk did you have?",
+            items: [
+              { base_name: "milk", label: "Milk", category: "drink", quantity: null, preparation: [], exclusions: [], attached_to: null, relation: null },
+              { base_name: "steak", label: "Steak", category: "food", quantity: null, preparation: [], exclusions: [], attached_to: null, relation: null },
+            ],
+          },
+          workout_session: {},
+        }),
+      })
+      return
+    }
+
+    if (message === "970ml") {
+      expect(mealSession.summary || "").toBe("milk, plus steak")
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          reply: "How much steak did you have?",
+          actions: [{ type: "clarify", message: "How much steak did you have?" }],
+          warnings: [],
+          meal_session: {
+            ...mealSession,
+            readyToLog: false,
+            clarificationAttempts: 1,
+            clarificationCounts: { "milk:quantity": 1 },
+            summary: "970ml milk, plus 1 serve steak",
+            clarifyQuestion: "How much steak did you have?",
+            items: [
+              { base_name: "milk", label: "Milk", category: "drink", quantity: { amount: 970, unit: "ml", text: "970ml", modifier: "" }, preparation: [], exclusions: [], attached_to: null, relation: null },
+              { base_name: "steak", label: "Steak", category: "food", quantity: null, preparation: [], exclusions: [], attached_to: null, relation: null },
+            ],
+          },
+          workout_session: {},
+        }),
+      })
+      return
+    }
+
+    if (message === "but i had 3 steaks") {
+      expect(mealSession.summary || "").toBe("970ml milk, plus 1 serve steak")
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          reply: "Saved to today's nutrition: 970ml milk, plus 3 steaks.",
+          actions: [
+            {
+              type: "log_meal",
+              food_name: "970ml milk, plus 3 steaks",
+              meal_type: "snack",
+              quantity: "1 meal",
+              calories: 1375,
+              protein_g: 110,
+              carbs_g: 48,
+              fat_g: 78,
+              estimated: true,
+              nutrition_source: "Coach estimate from accumulated meal details across chat",
+            },
+          ],
+          warnings: [],
+          meal_session: {
+            ...mealSession,
+            active: true,
+            mealConversation: true,
+            readyToLog: true,
+            correctionRequested: true,
+            summary: "970ml milk, plus 3 steaks",
+            clarifyQuestion: "",
+            items: [
+              { base_name: "milk", label: "Milk", category: "drink", quantity: { amount: 970, unit: "ml", text: "970ml", modifier: "" }, preparation: [], exclusions: [], attached_to: null, relation: null },
+              { base_name: "steak", label: "Steaks", category: "food", quantity: { amount: 3, unit: "steak", text: "3 steaks", modifier: "" }, preparation: [], exclusions: [], attached_to: null, relation: null },
+            ],
+          },
+          workout_session: {},
+        }),
+      })
+      return
+    }
+
+    if (message === "whats in todays log") {
+      await route.fulfill({
+        status: 500,
+        contentType: "application/json",
+        body: JSON.stringify({
+          error: "Live coach unavailable",
+        }),
+      })
+      return
+    }
+
+    if (message === "i did 14 pushups") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          reply: "Saved to workouts: Pushups for 1 set of 14.",
+          actions: [
+            {
+              type: "log_workout",
+              exercise_name: "Pushups",
+              workout_type: "Pushups",
+              muscle_group: "full_body",
+              sets: 1,
+              reps: 14,
+              weight_kg: 0,
+              duration_seconds: 0,
+            },
+          ],
+          warnings: [],
+          meal_session: {},
+          workout_session: {
+            ...workoutSession,
+            active: true,
+            workoutConversation: true,
+            readyToLog: true,
+            exercise_name: "Pushups",
+            workout_type: "Pushups",
+            muscle_group: "full_body",
+            sets: 1,
+            reps: 14,
+            weight_kg: 0,
+            duration_seconds: 0,
+            distance_km: 0,
+            summary: "Pushups for 1 set of 14",
+            clarifyQuestion: "",
+          },
+        }),
+      })
+      return
+    }
+
+    throw new Error(`Unexpected coach message in regression flow: ${message}`)
+  })
+
+  await page.goto("/Coach")
+  const composer = page.getByPlaceholder(/log bench 80kg for 4 sets of 6/i)
+  for (const message of [
+    "i had egg",
+    "i had 18 fried eggs and 14 hard boiled",
+    "120g of butter",
+    "i had milk and steak",
+    "970ml",
+    "but i had 3 steaks",
+    "whats in todays log",
+    "i did 14 pushups",
+  ]) {
+    await composer.fill(message)
+    await page.getByRole("button", { name: /^Send$/i }).click()
+  }
+
+  await expect(page.getByText(/saved to today's nutrition: 18 fried eggs cooked in 120g butter, plus 14 hard boiled eggs\./i)).toBeVisible()
+  await expect(page.getByText(/saved to today's nutrition: 970ml milk, plus 3 steaks\./i)).toBeVisible()
+  await expect(page.getByText(/i couldn't reach the live coach just now, so i left your data alone\./i)).toBeVisible()
+  await expect(page.getByText(/saved to workouts: pushups for 1 set of 14\./i)).toBeVisible()
+
+  await page.goto("/Nutrition")
+  const todayMealsSection = page.locator("section").filter({ has: page.getByRole("heading", { name: /today's meals/i }) })
+  await expect(todayMealsSection.getByText("18 fried eggs cooked in 120g butter, plus 14 hard boiled eggs")).toBeVisible()
+  await expect(todayMealsSection.getByText("970ml milk, plus 3 steaks")).toBeVisible()
+  await expect(todayMealsSection.getByText(/whats in todays|pushups/i)).toHaveCount(0)
+
+  await page.goto("/Workouts")
+  await expect(page.getByText(/pushups/i).first()).toBeVisible()
+})
+
 test("coach sends arbitrary food detail messages to the live coach instead of tripping the local build-block fallback", async ({ page }) => {
   await seedOnboardedProfile(page)
   let requestCount = 0
