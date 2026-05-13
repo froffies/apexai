@@ -3,11 +3,36 @@ import fsp from "node:fs/promises"
 import path from "node:path"
 import process from "node:process"
 import { spawn } from "node:child_process"
+import { createClient } from "@supabase/supabase-js"
 import { chromium, expect } from "@playwright/test"
 import { buildCoachAuditFlags, detectCoachAuditIntent } from "../server/coachAudit.mjs"
 import { emptyMealSessionState, emptyWorkoutSessionState } from "../server/coachSessionState.mjs"
 
 const rootDir = process.cwd()
+
+function loadDotEnvIntoProcess(filePath = path.join(rootDir, ".env")) {
+  if (!fs.existsSync(filePath)) return
+  const contents = fs.readFileSync(filePath, "utf8")
+  for (const rawLine of contents.split(/\r?\n/)) {
+    const line = rawLine.trim()
+    if (!line || line.startsWith("#")) continue
+    const separatorIndex = line.indexOf("=")
+    if (separatorIndex <= 0) continue
+    const key = line.slice(0, separatorIndex).trim()
+    if (!key || process.env[key] !== undefined) continue
+    let value = line.slice(separatorIndex + 1).trim()
+    if (
+      (value.startsWith('"') && value.endsWith('"'))
+      || (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1)
+    }
+    process.env[key] = value
+  }
+}
+
+loadDotEnvIntoProcess()
+
 const runRoot = path.join(rootDir, "tmp", "coach-soak-runs")
 const failureRoot = path.join(runRoot, "failures")
 const localCoachPort = Number(process.env.COACH_SOAK_LOCAL_PORT || 8787)
@@ -19,6 +44,10 @@ const workoutCaseCount = Math.max(1, Number(process.env.COACH_SOAK_WORKOUT_CASES
 const mixedCaseCount = Math.max(1, Number(process.env.COACH_SOAK_MIXED_CASES || 10))
 const liveBaseUrl = String(process.env.COACH_SOAK_LIVE_BASE_URL || "https://apexai-bay.vercel.app").trim()
 const liveCoachUrl = String(process.env.COACH_SOAK_LIVE_COACH_URL || "https://apexai-coach.onrender.com/api/coach").trim()
+const liveRequestMinIntervalMs = Math.max(900, Number(process.env.COACH_SOAK_LIVE_MIN_INTERVAL_MS || 1100))
+const liveSupabaseUrl = String(process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "").trim()
+const liveSupabaseAnonKey = String(process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || "").trim()
+const liveSupabaseServiceRoleKey = String(process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim()
 const soakProfile = {
   name: "Casey",
   goal: "fat_loss",
@@ -145,6 +174,10 @@ function createStore() {
     nextWorkoutNumber: 1,
     nextWorkoutSetNumber: 1,
   }
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 function createConversationState() {
@@ -445,6 +478,174 @@ async function requestLocalCoach(conversationState, store, message) {
     payload: lastPayload,
     requestBody: body,
   }
+}
+
+function requireLiveConfig() {
+  if (!liveSupabaseUrl) throw new Error("VITE_SUPABASE_URL or SUPABASE_URL is required for live soak mode.")
+  if (!liveSupabaseAnonKey) throw new Error("VITE_SUPABASE_ANON_KEY or SUPABASE_ANON_KEY is required for live soak mode.")
+  if (!liveSupabaseServiceRoleKey) throw new Error("SUPABASE_SERVICE_ROLE_KEY is required for live soak mode.")
+}
+
+function createLiveSupabaseClients() {
+  requireLiveConfig()
+  return {
+    authClient: createClient(liveSupabaseUrl, liveSupabaseAnonKey, {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+        detectSessionInUrl: false,
+      },
+    }),
+    adminClient: createClient(liveSupabaseUrl, liveSupabaseServiceRoleKey, {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+        detectSessionInUrl: false,
+      },
+    }),
+  }
+}
+
+async function findSupabaseUserByEmail(adminClient, email) {
+  const normalizedEmail = cleanText(email)
+  let page = 1
+  while (page <= 10) {
+    const { data, error } = await adminClient.auth.admin.listUsers({ page, perPage: 200 })
+    if (error) throw error
+    const users = Array.isArray(data?.users) ? data.users : []
+    const match = users.find((user) => cleanText(user?.email || "") === normalizedEmail)
+    if (match) return match
+    if (users.length < 200) break
+    page += 1
+  }
+  return null
+}
+
+async function ensureLiveTestUser(live) {
+  const explicitEmail = String(process.env.E2E_SUPABASE_EMAIL || "").trim()
+  const explicitPassword = String(process.env.E2E_SUPABASE_PASSWORD || "").trim()
+  const customEmail = String(process.env.COACH_SOAK_LIVE_EMAIL || "").trim()
+  const customPassword = String(process.env.COACH_SOAK_LIVE_PASSWORD || "").trim()
+  const usingExplicitCreds = Boolean(explicitEmail && explicitPassword)
+  const email = usingExplicitCreds
+    ? explicitEmail
+    : customEmail || "coach-soak-live@apexai.app"
+  const password = usingExplicitCreds
+    ? explicitPassword
+    : customPassword || `CoachSoak!${Date.now()}Aa1`
+
+  if (!usingExplicitCreds && !customPassword) {
+    const existingUser = await findSupabaseUserByEmail(live.adminClient, email)
+    if (existingUser?.id) {
+      const { error } = await live.adminClient.auth.admin.deleteUser(existingUser.id)
+      if (error) throw error
+    }
+    const { data, error } = await live.adminClient.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+      user_metadata: { full_name: "Coach Soak" },
+    })
+    if (error) throw error
+    live.userId = data?.user?.id || ""
+  }
+
+  live.email = email
+  live.password = password
+  return live
+}
+
+async function refreshLiveAuthToken(live) {
+  const { data, error } = await live.authClient.auth.signInWithPassword({
+    email: live.email,
+    password: live.password,
+  })
+  if (error) throw error
+  live.accessToken = String(data?.session?.access_token || "")
+  live.refreshToken = String(data?.session?.refresh_token || "")
+  live.userId = String(data?.user?.id || live.userId || "")
+  if (!live.accessToken || !live.userId) {
+    throw new Error("Live soak sign-in did not return a usable access token.")
+  }
+  return live.accessToken
+}
+
+async function getLiveAuthToken(live) {
+  if (live.accessToken) return live.accessToken
+  return refreshLiveAuthToken(live)
+}
+
+async function resetLiveUserState(live) {
+  if (!live.userId) await refreshLiveAuthToken(live)
+  const { error } = await live.adminClient
+    .from("user_app_state")
+    .delete()
+    .eq("user_id", live.userId)
+  if (error) throw error
+}
+
+async function throttleLiveRequest(live) {
+  const waitMs = Math.max(0, live.nextRequestAt - Date.now())
+  if (waitMs > 0) await sleep(waitMs)
+  live.nextRequestAt = Date.now() + liveRequestMinIntervalMs
+}
+
+async function requestLiveCoach(conversationState, store, message, live) {
+  const recentMessages = conversationState.recentMessages.slice(-18)
+  const body = {
+    message,
+    profile: soakProfile,
+    coachContext: buildCoachContext(store),
+    recentMessages,
+    meals: store.meals,
+    workouts: store.workouts,
+    workoutSets: store.workoutSets,
+    mealSession: conversationState.mealSession,
+    workoutSession: conversationState.workoutSession,
+  }
+  const startedAt = Date.now()
+  let lastResponse = null
+  let lastPayload = {}
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await throttleLiveRequest(live)
+    const token = await getLiveAuthToken(live)
+    const response = await fetch(live.coachUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(body),
+    })
+    const payload = await response.json().catch(() => ({}))
+    lastResponse = response
+    lastPayload = payload
+    if (response.ok) break
+    if (response.status === 401 && attempt < 2) {
+      live.accessToken = ""
+      live.refreshToken = ""
+      await refreshLiveAuthToken(live)
+      continue
+    }
+    if ((response.status === 429 || response.status === 503) && attempt < 2) {
+      const retryAfterSeconds = Number(response.headers.get("retry-after") || 0)
+      const retryDelayMs = retryAfterSeconds > 0 ? retryAfterSeconds * 1000 : response.status === 429 ? 65_000 : 1_000
+      await sleep(retryDelayMs)
+      continue
+    }
+    break
+  }
+  return {
+    ok: lastResponse?.ok || false,
+    status: lastResponse?.status || 0,
+    latencyMs: Date.now() - startedAt,
+    payload: lastPayload,
+    requestBody: body,
+  }
+}
+
+async function verifyLiveRun() {
+  return { consoleErrors: [], mode: "api-only" }
 }
 
 function buildLocalAuditEntry({
@@ -1078,7 +1279,7 @@ function pickCase(rng, builders, store) {
   return randomChoice(rng, builders)(rng, store)
 }
 
-async function runCase(caseConfig, store, seed) {
+async function runCase(caseConfig, store, seed, requestCoach) {
   const conversationState = {
     ...createConversationState(),
     ...(caseConfig.initialConversationState ? clone(caseConfig.initialConversationState) : {}),
@@ -1094,7 +1295,7 @@ async function runCase(caseConfig, store, seed) {
       meal_session: clone(conversationState.mealSession),
       workout_session: clone(conversationState.workoutSession),
     }
-    const requestResult = await requestLocalCoach(conversationState, store, message)
+    const requestResult = await requestCoach(conversationState, store, message)
     if (!requestResult.ok) {
       throw Object.assign(new Error(`coach request failed with ${requestResult.status}`), {
         status: requestResult.status,
@@ -1472,7 +1673,7 @@ function countConversationTurns(results, kind) {
   return results.filter((entry) => entry.kind === kind).length
 }
 
-async function runSingleSoakPass({ runIndex, seed, browser }) {
+async function runSingleSoakPass({ runIndex, seed, requestCoach, verifyRun, browser = null }) {
   const rng = createRng(seed)
   const store = createStore()
   const results = []
@@ -1487,7 +1688,7 @@ async function runSingleSoakPass({ runIndex, seed, browser }) {
 
   for (const caseConfig of conversationPlan) {
     try {
-      const result = await runCase(caseConfig, store, seed)
+      const result = await runCase(caseConfig, store, seed, requestCoach)
       results.push(result)
     } catch (error) {
       const failureDir = path.join(failureRoot, `run-${String(runIndex).padStart(3, "0")}-${seed}-${caseConfig.label}`)
@@ -1514,7 +1715,9 @@ async function runSingleSoakPass({ runIndex, seed, browser }) {
     }
   }
 
-  const uiVerification = await verifyUiForRun(browser, store, runDir)
+  const uiVerification = verifyRun
+    ? await verifyRun(browser, store, runDir)
+    : { consoleErrors: [], mode: "none" }
   const runArtifact = {
     runIndex,
     seed,
@@ -1534,7 +1737,7 @@ async function runSingleSoakPass({ runIndex, seed, browser }) {
       workoutDelta: entry.workoutDelta,
       auditFlags: entry.turnResults.flatMap((turn) => turn.auditFlags),
       falsePositiveFlags: entry.turnResults.flatMap((turn) => turn.falsePositiveFlags),
-      uiVerification: true,
+      uiVerification: uiVerification.mode || "none",
       pass: true,
     })),
     summary: {
@@ -1570,7 +1773,13 @@ async function runLocalSoak() {
       runIndex += 1
       const seed = createSeed(runIndex)
       try {
-        const { runArtifact } = await runSingleSoakPass({ runIndex, seed, browser })
+        const { runArtifact } = await runSingleSoakPass({
+          runIndex,
+          seed,
+          browser,
+          requestCoach: requestLocalCoach,
+          verifyRun: verifyUiForRun,
+        })
         totalConversations += runArtifact.conversationsTested.length
         streak += 1
         streakSeeds.push(seed)
@@ -1603,7 +1812,65 @@ async function runLocalSoak() {
 }
 
 async function runLiveSoak() {
-  throw new Error("Live soak mode is not configured in this environment yet. Set up disposable live test-user credentials and browser-driven cleanup before using COACH_SOAK_TARGET=live.")
+  await ensureDirectory(runRoot)
+  await ensureDirectory(failureRoot)
+  const live = {
+    ...createLiveSupabaseClients(),
+    coachUrl: liveCoachUrl,
+    baseUrl: liveBaseUrl,
+    email: "",
+    password: "",
+    accessToken: "",
+    refreshToken: "",
+    userId: "",
+    nextRequestAt: 0,
+  }
+  await ensureLiveTestUser(live)
+  await refreshLiveAuthToken(live)
+
+  let streak = 0
+  let runIndex = 0
+  let totalConversations = 0
+  let failureCount = 0
+  const streakSeeds = []
+
+  while (streak < requiredStreak) {
+    runIndex += 1
+    const seed = createSeed(runIndex)
+    try {
+      await resetLiveUserState(live)
+      const { runArtifact } = await runSingleSoakPass({
+        runIndex,
+        seed,
+        requestCoach: (conversationState, store, message) => requestLiveCoach(conversationState, store, message, live),
+        verifyRun: verifyLiveRun,
+      })
+      totalConversations += runArtifact.conversationsTested.length
+      streak += 1
+      streakSeeds.push(seed)
+      if (streakSeeds.length > requiredStreak) streakSeeds.shift()
+    } catch (error) {
+      failureCount += 1
+      streak = 0
+      streakSeeds.length = 0
+      throw Object.assign(error, {
+        totalRunsAttempted: runIndex,
+        totalConversations,
+        failuresBeforeExit: failureCount,
+      })
+    }
+  }
+
+  return {
+    target: "live",
+    finalCleanStreakCount: streak,
+    totalRunsAttempted: runIndex,
+    totalConversationsTested: totalConversations,
+    finalSeeds: streakSeeds,
+    failuresFoundBeforeCleanStreak: failureCount,
+    liveBaseUrl,
+    liveCoachUrl,
+  }
 }
 
 async function main() {
