@@ -1,3 +1,5 @@
+import { getCloudAccessToken } from "@/lib/cloudSync"
+
 const storageKey = "apexai.telemetry.buffer"
 const maxEvents = 100
 const installFlagKey = "__apexaiTelemetryInstalled"
@@ -33,13 +35,17 @@ async function sendTelemetryEvent(event) {
 
   const payload = safeStringify(event)
   try {
-    if (navigator.sendBeacon) {
+    const token = await getCloudAccessToken().catch(() => "")
+    if (!token && navigator.sendBeacon) {
       navigator.sendBeacon(endpoint, new Blob([payload], { type: "application/json" }))
       return
     }
     await fetch(endpoint, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
       body: payload,
       keepalive: true,
     })

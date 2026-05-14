@@ -7,6 +7,41 @@ const hasCloudAuthEnv = Boolean(
   && process.env.E2E_SUPABASE_PASSWORD
 )
 
+async function fillStable(page, label, value) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const input = page.getByLabel(label)
+    try {
+      await expect(input).toBeVisible()
+      await input.fill(value)
+      await expect(input).toHaveValue(value)
+      return
+    } catch (error) {
+      if (attempt === 2) throw error
+    }
+  }
+}
+
+async function completeOnboardingIfNeeded(page) {
+  await page.waitForURL(/(\/|\/onboarding)$/)
+  if (!/\/onboarding$/.test(page.url())) return
+
+  await expect(page.getByRole("heading", { name: /personal details/i })).toBeVisible()
+  await fillStable(page, "Name", "Cloud Casey")
+  await fillStable(page, "Age", "31")
+  await fillStable(page, "Weight kg", "84")
+  await fillStable(page, "Height cm", "179")
+  await page.getByRole("button", { name: /continue/i }).click()
+
+  await expect(page.getByRole("heading", { name: /goal and training setup/i })).toBeVisible()
+  await fillStable(page, "Training days", "4")
+  await fillStable(page, "Target weight kg", "78")
+  await page.getByRole("button", { name: /review plan/i }).click()
+
+  await expect(page.getByRole("heading", { name: /your starting plan/i })).toBeVisible()
+  await page.getByRole("button", { name: /save profile and enter dashboard|enter dashboard/i }).first().click()
+  await expect(page).toHaveURL(/\/$/)
+}
+
 test("cloud auth sign-in flow works when Supabase credentials are configured", async ({ page }) => {
   test.skip(!hasCloudAuthEnv, "Cloud auth E2E is opt-in and requires Supabase test credentials.")
 
@@ -33,18 +68,7 @@ test("cloud auth users can reach Profile, save changes, and sign out cleanly", a
   await page.getByRole("button", { name: /^sign in$/i }).click()
   await expect(page.getByRole("heading", { name: /sign in to continue/i })).toHaveCount(0)
 
-  if (/\/onboarding$/.test(page.url())) {
-    await page.getByLabel("Name").fill("Cloud Casey")
-    await page.getByLabel("Age").fill("31")
-    await page.getByLabel("Weight kg").fill("84")
-    await page.getByLabel("Height cm").fill("179")
-    await page.getByRole("button", { name: /continue/i }).click()
-    await page.getByLabel("Training days").fill("4")
-    await page.getByLabel("Target weight kg").fill("78")
-    await page.getByRole("button", { name: /review plan/i }).click()
-    await page.getByRole("button", { name: /save profile and enter dashboard|enter dashboard/i }).first().click()
-    await expect(page).toHaveURL(/\/$/)
-  }
+  await completeOnboardingIfNeeded(page)
 
   await page.getByRole("link", { name: /^Profile$/i }).first().click()
   await expect(page.getByRole("heading", { name: /profile and targets/i })).toBeVisible()

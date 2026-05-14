@@ -44,6 +44,7 @@ export function AuthProvider({ children }) {
   const [localMode, setLocalMode] = useState(() => localModeAllowed && window.localStorage.getItem("apexai.localMode") === "true")
   const [user, setUser] = useState(cloudConfigured && !(localModeAllowed && localMode) ? null : localUser)
   const [isLoadingAuth, setIsLoadingAuth] = useState(cloudConfigured && !(localModeAllowed && localMode))
+  const [isLoadingPublicSettings, setIsLoadingPublicSettings] = useState(cloudConfigured && !(localModeAllowed && localMode))
   const [cloudStatus, setCloudStatus] = useState(cloudConfigured ? cloudStatusMessages.ready : cloudStatusMessages.local)
 
   useEffect(() => {
@@ -59,6 +60,7 @@ export function AuthProvider({ children }) {
     if (!cloudConfigured || localMode || !supabase) {
       setCloudUser(null)
       setIsLoadingAuth(false)
+      setIsLoadingPublicSettings(false)
       return undefined
     }
 
@@ -66,12 +68,15 @@ export function AuthProvider({ children }) {
 
     const syncCloudState = async (mappedUser) => {
       if (!mappedUser || !mounted) return
+      if (mounted) setIsLoadingPublicSettings(true)
       try {
         const hydratedCount = await withTimeout(hydrateCloudState(), 8000)
         if (!hydratedCount) await withTimeout(syncAllLocalToCloud(), 8000)
         if (mounted) setCloudStatus(cloudStatusMessages.active)
       } catch {
         if (mounted) setCloudStatus(cloudStatusMessages.syncDelay)
+      } finally {
+        if (mounted) setIsLoadingPublicSettings(false)
       }
     }
 
@@ -84,11 +89,15 @@ export function AuthProvider({ children }) {
         setCloudUser(mappedUser)
         if (mounted) setIsLoadingAuth(false)
         if (mappedUser) void syncCloudState(mappedUser)
-        else if (mounted) setCloudStatus(cloudStatusMessages.ready)
+        else if (mounted) {
+          setCloudStatus(cloudStatusMessages.ready)
+          setIsLoadingPublicSettings(false)
+        }
       } catch {
         if (mounted) {
           setCloudStatus(cloudStatusMessages.authIssue)
           setIsLoadingAuth(false)
+          setIsLoadingPublicSettings(false)
         }
       } finally {
         if (mounted) setIsLoadingAuth(false)
@@ -105,7 +114,10 @@ export function AuthProvider({ children }) {
       setCloudUser(mappedUser)
       setIsLoadingAuth(false)
       if (mappedUser) void syncCloudState(mappedUser)
-      else if (mounted) setCloudStatus(cloudStatusMessages.signOut)
+      else if (mounted) {
+        setCloudStatus(cloudStatusMessages.signOut)
+        setIsLoadingPublicSettings(false)
+      }
     })
 
     return () => {
@@ -178,7 +190,7 @@ export function AuthProvider({ children }) {
       user,
       isAuthenticated: Boolean(user),
       isLoadingAuth,
-      isLoadingPublicSettings: false,
+      isLoadingPublicSettings,
       authChecked: !isLoadingAuth,
       authError: cloudConfigured && !localMode && !isLoadingAuth && !user ? { type: "auth_required", message: "Sign in required" } : null,
       appPublicSettings: { mode: cloudConfigured && !localMode ? "cloud" : "local" },
@@ -198,7 +210,7 @@ export function AuthProvider({ children }) {
       navigateToLogin: () => undefined,
       logout,
     }),
-    [cloudConfigured, cloudStatus, isLoadingAuth, localMode, localModeAllowed, user]
+    [cloudConfigured, cloudStatus, isLoadingAuth, isLoadingPublicSettings, localMode, localModeAllowed, user]
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

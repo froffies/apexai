@@ -62,6 +62,11 @@ const rateLimitWindowMs = Number(process.env.RATE_LIMIT_WINDOW_MS || 60_000)
 const rateLimitMaxRequests = Number(process.env.RATE_LIMIT_MAX_REQUESTS || (nodeEnv === "production" ? 60 : 180))
 const rateLimitBuckets = new Map()
 const telemetryLogFile = process.env.TELEMETRY_LOG_FILE || path.join(process.cwd(), "server-data", "telemetry.ndjson")
+const telemetryStoragePrefix = process.env.TELEMETRY_STORAGE_PREFIX || "telemetry_event:"
+const telemetrySink = String(
+  process.env.TELEMETRY_SINK
+  || (nodeEnv === "production" && adminSupabase ? "supabase_state" : "file")
+).trim().toLowerCase()
 const telemetryRateLimitMaxRequests = Number(process.env.TELEMETRY_RATE_LIMIT_MAX_REQUESTS || (nodeEnv === "production" ? 300 : 2000))
 const openFoodFactsTimeoutMs = Number(process.env.OPENFOODFACTS_TIMEOUT_MS || 1000)
 const foodLookupCacheTtlMs = Number(process.env.FOOD_LOOKUP_CACHE_TTL_MS || 15 * 60_000)
@@ -784,6 +789,47 @@ function buildOfflineCoachFallbackReply(message) {
   return "Tell me what happened today, what you ate, what you trained, or what you want to change, and I'll help you sort the next move."
 }
 
+async function persistTelemetryToFile(entry) {
+  fs.mkdirSync(path.dirname(telemetryLogFile), { recursive: true })
+  fs.appendFileSync(telemetryLogFile, `${JSON.stringify(entry)}\n`, "utf8")
+  return { sink: "file", persisted: true }
+}
+
+async function persistTelemetryToSupabaseState(entry) {
+  if (!adminSupabase || !entry.user_id) return { sink: "supabase_state", persisted: false, reason: "missing_user_or_admin" }
+  const storageKey = `${telemetryStoragePrefix}${entry.id}`
+  const { error } = await adminSupabase.from("user_app_state").upsert(
+    {
+      user_id: entry.user_id,
+      storage_key: storageKey,
+      value: entry,
+      schema_version: 1,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "user_id,storage_key" }
+  )
+  if (error) throw error
+  return { sink: "supabase_state", persisted: true, storage_key: storageKey }
+}
+
+async function persistTelemetryEntry(entry) {
+  if (telemetrySink === "supabase_state") {
+    const result = await persistTelemetryToSupabaseState(entry)
+    if (result.persisted) return result
+    return persistTelemetryToFile(entry)
+  }
+  if (telemetrySink === "file") {
+    return persistTelemetryToFile(entry)
+  }
+  try {
+    const result = await persistTelemetryToSupabaseState(entry)
+    if (result.persisted) return result
+  } catch {
+    // Fall through to file.
+  }
+  return persistTelemetryToFile(entry)
+}
+
 function shouldHydrateCoachFoodMatches(message, recentMessages = []) {
   if (!isLikelyCoachFoodTurn(message, recentMessages)) return false
   if (looksLikeBarcode(message)) return true
@@ -1430,9 +1476,8 @@ async function handleTelemetry(request, response) {
     user_agent: String(request.headers["user-agent"] || ""),
   }
 
-  fs.mkdirSync(path.dirname(telemetryLogFile), { recursive: true })
-  fs.appendFileSync(telemetryLogFile, `${JSON.stringify(entry)}\n`, "utf8")
-  sendJson(response, 202, { accepted: true }, requestResponseOrigin(request))
+  const persistence = await persistTelemetryEntry(entry)
+  sendJson(response, 202, { accepted: true, sink: persistence.sink }, requestResponseOrigin(request))
 }
 
 async function handleCoachAuditEvent(request, response) {
@@ -1500,7 +1545,7 @@ const server = http.createServer(async (request, response) => {
   }
 
   if (request.method === "GET" && request.url === "/health") {
-    sendJson(response, 200, { ok: true, model, openaiConfigured: Boolean(client), authRequired: requireAuth, supabaseConfigured: Boolean(serverSupabase), adminConfigured: Boolean(adminSupabase), coachAuditEnabled: auditCapabilities.enabled, corsOrigins: configuredCorsOrigins }, requestResponseOrigin(request))
+    sendJson(response, 200, { ok: true, model, openaiConfigured: Boolean(client), authRequired: requireAuth, supabaseConfigured: Boolean(serverSupabase), adminConfigured: Boolean(adminSupabase), coachAuditEnabled: auditCapabilities.enabled, telemetrySink, corsOrigins: configuredCorsOrigins }, requestResponseOrigin(request))
     return
   }
 

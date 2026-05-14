@@ -54,6 +54,7 @@ test("local API server exposes health, local nutrition, telemetry, and sanitized
       OPENAI_COACH_REQUIRE_AUTH: "false",
       OPENAI_COACH_CORS_ORIGIN: "http://127.0.0.1:5173",
       OPENFOODFACTS_ENABLED: "false",
+      TELEMETRY_SINK: "file",
       TELEMETRY_LOG_FILE: telemetryFile,
       OPENAI_API_KEY: "",
       NODE_ENV: "production",
@@ -88,6 +89,7 @@ test("local API server exposes health, local nutrition, telemetry, and sanitized
   const health = await healthResponse.json()
   assert.equal(health.ok, true)
   assert.equal(health.authRequired, false)
+  assert.equal(health.telemetrySink, "file")
   assert.match(healthResponse.headers.get("access-control-allow-methods") || "", /GET/)
   assert.equal(healthResponse.headers.get("cache-control"), "no-store")
   assert.equal(healthResponse.headers.get("x-content-type-options"), "nosniff")
@@ -116,6 +118,7 @@ test("local API server exposes health, local nutrition, telemetry, and sanitized
   const telemetry = await telemetryResponse.json()
   assert.equal(telemetryResponse.status, 202)
   assert.equal(telemetry.accepted, true)
+  assert.equal(telemetry.sink, "file")
   const telemetryContent = await fs.readFile(telemetryFile, "utf8")
   assert.match(telemetryContent, /test_event/)
 

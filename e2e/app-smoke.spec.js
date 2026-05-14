@@ -250,7 +250,6 @@ test("admin coach audit page renders mocked logs and copies a debug prompt", asy
 })
 
 test("dedicated log routes hide the mobile tab chrome", async ({ page, isMobile }) => {
-  test.skip(!isMobile, "This regression only matters on the mobile shell.")
   await seedState(page, {
     "apexai.profile": onboardedProfile,
     "apexai.activeWorkout": {
@@ -266,7 +265,12 @@ test("dedicated log routes hide the mobile tab chrome", async ({ page, isMobile 
 
   await page.goto("/Workouts")
   await expect(page.getByTestId("active-workout-bar")).toBeVisible()
-  await expect(page.getByRole("navigation", { name: /primary tabs/i })).toBeVisible()
+  if (isMobile) {
+    await expect(page.getByRole("navigation", { name: /primary tabs/i })).toBeVisible()
+  } else {
+    await expect(page.getByRole("navigation", { name: /primary tabs/i })).toHaveCount(0)
+    await expect(page.getByRole("navigation", { name: /primary sidebar links/i })).toBeVisible()
+  }
 
   await page.goto("/workouts/log")
   await expect(page.getByRole("navigation", { name: /primary tabs/i })).toHaveCount(0)

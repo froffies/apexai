@@ -11,13 +11,49 @@ export default defineConfig({
   build: {
     rollupOptions: {
       output: {
-        manualChunks: {
-          "vendor-react": ["react", "react-dom", "react-router-dom"],
-          "vendor-data": ["@supabase/supabase-js", "@tanstack/react-query"],
-          "vendor-ui": ["lucide-react"],
-          "vendor-charts": ["recharts"],
-          "vendor-native": ["@capacitor/core", "@capacitor/app", "@capacitor/haptics", "@capacitor/local-notifications", "@capacitor/share"],
-        }
+        manualChunks(id) {
+          const normalizedId = id.split(path.sep).join("/")
+          if (normalizedId.includes("/node_modules/react/") || normalizedId.includes("/node_modules/react-dom/") || normalizedId.includes("/node_modules/react-router-dom/")) {
+            return "vendor-react"
+          }
+          if (normalizedId.includes("/node_modules/@supabase/supabase-js/") || normalizedId.includes("/node_modules/@tanstack/react-query/")) {
+            return "vendor-data"
+          }
+          if (normalizedId.includes("/node_modules/lucide-react/")) {
+            return "vendor-ui"
+          }
+          if (normalizedId.includes("/node_modules/recharts/")) {
+            return "vendor-charts"
+          }
+          if (
+            normalizedId.includes("/node_modules/@capacitor/core/")
+            || normalizedId.includes("/node_modules/@capacitor/app/")
+            || normalizedId.includes("/node_modules/@capacitor/haptics/")
+            || normalizedId.includes("/node_modules/@capacitor/local-notifications/")
+            || normalizedId.includes("/node_modules/@capacitor/share/")
+          ) {
+            return "vendor-native"
+          }
+          if (
+            normalizedId.includes("/src/lib/AuthContext.jsx")
+            || normalizedId.includes("/src/lib/cloudSync.js")
+            || normalizedId.includes("/src/lib/supabaseClient.js")
+            || normalizedId.includes("/src/lib/accountApiClient.js")
+            || normalizedId.includes("/src/lib/telemetry.js")
+            || normalizedId.includes("/src/lib/query-client.js")
+            || normalizedId.includes("/src/components/AuthScreen.jsx")
+          ) {
+            return "app-auth"
+          }
+          if (
+            normalizedId.includes("/src/lib/appStorage.js")
+            || normalizedId.includes("/src/lib/useLocalStorage.js")
+            || normalizedId.includes("/src/lib/fitnessDefaults.js")
+            || normalizedId.includes("/src/lib/tabStack.js")
+          ) {
+            return "app-state"
+          }
+        },
       }
     }
   },
