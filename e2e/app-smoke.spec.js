@@ -117,6 +117,7 @@ test("onboarding review explains the target method and offers optional starter p
 })
 
 test("onboarding can skip starter workout and nutrition plans while still saving the profile", async ({ page }) => {
+  test.slow()
   await page.goto("/onboarding")
 
   await page.getByLabel("Name").fill("Casey")
@@ -129,8 +130,12 @@ test("onboarding can skip starter workout and nutrition plans while still saving
   await page.getByLabel("Target weight kg").fill("78")
   await page.getByRole("button", { name: /review plan/i }).click()
 
-  await page.getByRole("button", { name: /decide later/i }).first().click()
-  await page.getByRole("button", { name: /decide later/i }).last().click()
+  const skipButtons = page.getByRole("button", { name: /decide later/i })
+  await expect(skipButtons).toHaveCount(2)
+  await skipButtons.nth(0).click()
+  await expect(skipButtons.nth(0)).toHaveAttribute("aria-pressed", "true")
+  await skipButtons.nth(1).click()
+  await expect(skipButtons.nth(1)).toHaveAttribute("aria-pressed", "true")
   await page.getByRole("button", { name: /save profile and enter dashboard/i }).click()
 
   await expect(page).toHaveURL(/\/$/)

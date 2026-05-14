@@ -1,8 +1,33 @@
+import fs from "node:fs"
+import path from "node:path"
 import { expect, test } from "@playwright/test"
 
+function readDotEnv() {
+  try {
+    const envPath = path.join(process.cwd(), ".env")
+    const raw = fs.readFileSync(envPath, "utf8")
+    return Object.fromEntries(
+      raw
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line && !line.startsWith("#") && line.includes("="))
+        .map((line) => {
+          const [key, ...valueParts] = line.split("=")
+          return [key, valueParts.join("=").replace(/^["']|["']$/g, "")]
+        })
+    )
+  } catch {
+    return {}
+  }
+}
+
+const dotEnv = readDotEnv()
+const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || dotEnv.VITE_SUPABASE_URL || dotEnv.SUPABASE_URL || ""
+const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || dotEnv.VITE_SUPABASE_ANON_KEY || dotEnv.SUPABASE_ANON_KEY || ""
+
 const hasCloudAuthEnv = Boolean(
-  process.env.VITE_SUPABASE_URL
-  && process.env.VITE_SUPABASE_ANON_KEY
+  supabaseUrl
+  && supabaseAnonKey
   && process.env.E2E_SUPABASE_EMAIL
   && process.env.E2E_SUPABASE_PASSWORD
 )

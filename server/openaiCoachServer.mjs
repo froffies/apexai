@@ -63,9 +63,10 @@ const rateLimitMaxRequests = Number(process.env.RATE_LIMIT_MAX_REQUESTS || (node
 const rateLimitBuckets = new Map()
 const telemetryLogFile = process.env.TELEMETRY_LOG_FILE || path.join(process.cwd(), "server-data", "telemetry.ndjson")
 const telemetryStoragePrefix = process.env.TELEMETRY_STORAGE_PREFIX || "telemetry_event:"
+const telemetryTableName = process.env.TELEMETRY_TABLE_NAME || "telemetry_events"
 const telemetrySink = String(
   process.env.TELEMETRY_SINK
-  || (nodeEnv === "production" && adminSupabase ? "supabase_state" : "file")
+  || (nodeEnv === "production" && adminSupabase ? "supabase_auto" : "file")
 ).trim().toLowerCase()
 const telemetryRateLimitMaxRequests = Number(process.env.TELEMETRY_RATE_LIMIT_MAX_REQUESTS || (nodeEnv === "production" ? 300 : 2000))
 const openFoodFactsTimeoutMs = Number(process.env.OPENFOODFACTS_TIMEOUT_MS || 1000)
@@ -812,22 +813,74 @@ async function persistTelemetryToSupabaseState(entry) {
   return { sink: "supabase_state", persisted: true, storage_key: storageKey }
 }
 
+function isMissingSupabaseTableError(error) {
+  const code = String(error?.code || "").toUpperCase()
+  const message = String(error?.message || "")
+  return code === "PGRST205"
+    || code === "42P01"
+    || /relation .* does not exist/i.test(message)
+    || /could not find the table/i.test(message)
+}
+
+async function persistTelemetryToSupabaseTable(entry) {
+  if (!adminSupabase || !entry.user_id) return { sink: "supabase_table", persisted: false, reason: "missing_user_or_admin" }
+  const { error } = await adminSupabase.from(telemetryTableName).upsert(
+    {
+      id: entry.id,
+      user_id: entry.user_id,
+      event_type: entry.type,
+      level: entry.level || "info",
+      payload: entry.payload || {},
+      raw_event: entry,
+      created_at: entry.created_at || new Date().toISOString(),
+    },
+    { onConflict: "id" }
+  )
+  if (error) {
+    if (isMissingSupabaseTableError(error)) {
+      return { sink: "supabase_table", persisted: false, reason: "table_unavailable", table: telemetryTableName, error_code: error.code || "" }
+    }
+    throw error
+  }
+  return { sink: "supabase_table", persisted: true, table: telemetryTableName }
+}
+
 async function persistTelemetryEntry(entry) {
+  if (telemetrySink === "supabase_table") {
+    const result = await persistTelemetryToSupabaseTable(entry)
+    if (result.persisted) return result
+    const fallback = await persistTelemetryToSupabaseState(entry)
+    if (fallback.persisted) return { ...fallback, preferred_sink: "supabase_table", fallback_reason: result.reason || "unavailable" }
+    return { ...(await persistTelemetryToFile(entry)), preferred_sink: "supabase_table", fallback_reason: result.reason || fallback.reason || "unavailable" }
+  }
   if (telemetrySink === "supabase_state") {
     const result = await persistTelemetryToSupabaseState(entry)
     if (result.persisted) return result
     return persistTelemetryToFile(entry)
   }
+  if (telemetrySink === "supabase_auto") {
+    try {
+      const tableResult = await persistTelemetryToSupabaseTable(entry)
+      if (tableResult.persisted) return { ...tableResult, preferred_sink: "supabase_table" }
+      const stateResult = await persistTelemetryToSupabaseState(entry)
+      if (stateResult.persisted) return { ...stateResult, preferred_sink: "supabase_table", fallback_reason: tableResult.reason || "unavailable" }
+    } catch {
+      // Fall through to file.
+    }
+    return { ...(await persistTelemetryToFile(entry)), preferred_sink: "supabase_table", fallback_reason: "unavailable" }
+  }
   if (telemetrySink === "file") {
     return persistTelemetryToFile(entry)
   }
   try {
-    const result = await persistTelemetryToSupabaseState(entry)
-    if (result.persisted) return result
+    const tableResult = await persistTelemetryToSupabaseTable(entry)
+    if (tableResult.persisted) return { ...tableResult, preferred_sink: "supabase_table" }
+    const stateResult = await persistTelemetryToSupabaseState(entry)
+    if (stateResult.persisted) return { ...stateResult, preferred_sink: "supabase_table", fallback_reason: tableResult.reason || "unavailable" }
   } catch {
     // Fall through to file.
   }
-  return persistTelemetryToFile(entry)
+  return { ...(await persistTelemetryToFile(entry)), preferred_sink: "supabase_table", fallback_reason: "unavailable" }
 }
 
 function shouldHydrateCoachFoodMatches(message, recentMessages = []) {
@@ -1477,7 +1530,12 @@ async function handleTelemetry(request, response) {
   }
 
   const persistence = await persistTelemetryEntry(entry)
-  sendJson(response, 202, { accepted: true, sink: persistence.sink }, requestResponseOrigin(request))
+  sendJson(response, 202, {
+    accepted: true,
+    sink: persistence.sink,
+    preferredSink: persistence.preferred_sink || persistence.sink,
+    fallbackReason: persistence.fallback_reason || null,
+  }, requestResponseOrigin(request))
 }
 
 async function handleCoachAuditEvent(request, response) {
@@ -1545,7 +1603,7 @@ const server = http.createServer(async (request, response) => {
   }
 
   if (request.method === "GET" && request.url === "/health") {
-    sendJson(response, 200, { ok: true, model, openaiConfigured: Boolean(client), authRequired: requireAuth, supabaseConfigured: Boolean(serverSupabase), adminConfigured: Boolean(adminSupabase), coachAuditEnabled: auditCapabilities.enabled, telemetrySink, corsOrigins: configuredCorsOrigins }, requestResponseOrigin(request))
+    sendJson(response, 200, { ok: true, model, openaiConfigured: Boolean(client), authRequired: requireAuth, supabaseConfigured: Boolean(serverSupabase), adminConfigured: Boolean(adminSupabase), coachAuditEnabled: auditCapabilities.enabled, telemetrySink, telemetryTableName, corsOrigins: configuredCorsOrigins }, requestResponseOrigin(request))
     return
   }
 

@@ -119,6 +119,8 @@ test("local API server exposes health, local nutrition, telemetry, and sanitized
   assert.equal(telemetryResponse.status, 202)
   assert.equal(telemetry.accepted, true)
   assert.equal(telemetry.sink, "file")
+  assert.equal(telemetry.preferredSink, "file")
+  assert.equal(telemetry.fallbackReason, null)
   const telemetryContent = await fs.readFile(telemetryFile, "utf8")
   assert.match(telemetryContent, /test_event/)
 
@@ -136,6 +138,75 @@ test("local API server exposes health, local nutrition, telemetry, and sanitized
   assert.match(coach.reply, /tell me what happened today|help you sort the next move/i)
 
   assert.match(output, /ApexAI OpenAI coach server listening/i)
+})
+
+test("telemetry auto mode falls back to file when Supabase persistence is unavailable", async (t) => {
+  const port = randomPort()
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "apexai-server-telemetry-auto-"))
+  const telemetryFile = path.join(tempDir, "telemetry.ndjson")
+  const serverProcess = spawn(process.execPath, [serverEntry], {
+    cwd,
+    env: {
+      ...process.env,
+      OPENAI_COACH_PORT: String(port),
+      OPENAI_COACH_REQUIRE_AUTH: "false",
+      OPENAI_COACH_CORS_ORIGIN: "http://127.0.0.1:5173",
+      OPENFOODFACTS_ENABLED: "false",
+      TELEMETRY_SINK: "supabase_auto",
+      TELEMETRY_LOG_FILE: telemetryFile,
+      OPENAI_API_KEY: "",
+      SUPABASE_URL: "",
+      SUPABASE_ANON_KEY: "",
+      SUPABASE_SERVICE_ROLE_KEY: "",
+      NODE_ENV: "production",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  })
+
+  let output = ""
+  serverProcess.stdout.on("data", (chunk) => {
+    output += chunk.toString()
+  })
+  serverProcess.stderr.on("data", (chunk) => {
+    output += chunk.toString()
+  })
+
+  t.after(async () => {
+    serverProcess.kill()
+    await fs.rm(tempDir, { recursive: true, force: true })
+  })
+
+  try {
+    await waitForHealth(port)
+  } catch (error) {
+    const exit = await waitForServerExit(serverProcess)
+    const details = exit
+      ? `server exited early (code=${exit.code}, signal=${exit.signal})`
+      : "server stayed alive but never became healthy"
+    throw new Error(`${error.message}\n${details}\n--- server output ---\n${output || "(no output)"}`)
+  }
+
+  const healthResponse = await fetch(`http://127.0.0.1:${port}/health`)
+  const health = await healthResponse.json()
+  assert.equal(health.telemetrySink, "supabase_auto")
+  assert.equal(health.telemetryTableName, "telemetry_events")
+
+  const telemetryResponse = await fetch(`http://127.0.0.1:${port}/api/telemetry`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Origin: "http://127.0.0.1:5173",
+    },
+    body: JSON.stringify({ type: "auto_fallback_event", level: "info", payload: { scope: "server-test" } }),
+  })
+  const telemetry = await telemetryResponse.json()
+  assert.equal(telemetryResponse.status, 202)
+  assert.equal(telemetry.accepted, true)
+  assert.equal(telemetry.sink, "file")
+  assert.equal(telemetry.preferredSink, "supabase_table")
+  assert.match(String(telemetry.fallbackReason || ""), /missing_user_or_admin|unavailable/i)
+  const telemetryContent = await fs.readFile(telemetryFile, "utf8")
+  assert.match(telemetryContent, /auto_fallback_event/)
 })
 
 test("deterministic coach logging still works when OpenAI is unavailable", async (t) => {
