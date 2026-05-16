@@ -380,6 +380,61 @@ test("pure nutrition questions do not open a meal logging clarification flow", (
   assert.equal(next.workoutSession, null)
 })
 
+test("comparative food questions do not open a meal clarification flow", () => {
+  const cases = [
+    "is brown rice better than white?",
+    "is chicken better than beef",
+    "are oats good for you",
+    "is coffee bad for you",
+  ]
+
+  for (const currentMessage of cases) {
+    const next = buildCoachSessionState({
+      recentMessages: [],
+      currentMessage,
+      mealSession: emptyMealSessionState(),
+      workoutSession: emptyWorkoutSessionState(),
+    })
+
+    assert.equal(next.mealSession, null, currentMessage)
+    assert.equal(next.workoutSession, null, currentMessage)
+  }
+})
+
+test("vague meal references with time language do not open a fake meal clarification flow", () => {
+  const cases = [
+    "i had that for lunch yesterday",
+    "i had lunch already",
+    "already ate dinner",
+    "i ate the same as last time",
+  ]
+
+  for (const currentMessage of cases) {
+    const next = buildCoachSessionState({
+      recentMessages: [],
+      currentMessage,
+      mealSession: emptyMealSessionState(),
+      workoutSession: emptyWorkoutSessionState(),
+    })
+
+    assert.equal(next.mealSession, null, currentMessage)
+    assert.equal(next.workoutSession, null, currentMessage)
+  }
+})
+
+test("explicit meals with real food plus time references still parse normally", () => {
+  const next = buildCoachSessionState({
+    recentMessages: [],
+    currentMessage: "i had 200g steak yesterday",
+    mealSession: emptyMealSessionState(),
+    workoutSession: emptyWorkoutSessionState(),
+  })
+
+  assert.ok(next.mealSession)
+  assert.equal(next.workoutSession, null)
+  assert.match(next.mealSession.summary.toLowerCase(), /200g steak/)
+})
+
 test("contextless do-not-log turns stay deterministic instead of falling through to the live coach", () => {
   const next = buildCoachSessionState({
     recentMessages: [],

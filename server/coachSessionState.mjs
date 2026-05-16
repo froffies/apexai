@@ -9,6 +9,9 @@ const MEAL_REFERENCE_PATTERN = /\b(?:the eggs?|the tea|the coffee|the toast|the 
 const SUPPRESS_SESSION_PATTERN = /\b(?:don't|dont|do not|stop|no)\s+(?:log|save|track|record|add)\b/i
 const REPEAT_RECENT_MEAL_PATTERN = /\b(?:same as yesterday|same as last time|same as before|repeat that(?: meal)?|same thing as yesterday)\b/i
 const MEAL_LOG_QUERY_PATTERN = /^(?:what(?:'s|s| is)?|show|list|see|view|display)\b.*\b(?:today'?s?|todays?|my)\b.*\b(?:nutrition|food|meal|meals|log)\b/i
+const NUTRITION_QUESTION_PATTERN = /^(?:is|are|does|do|can|should|will|would|what(?:'s|s| is)?|how(?:'s|s| is| much| many)?|which|why)\b.{0,80}?\b(?:better|best|worse|good|bad|healthy|unhealthy|high|low|more|less|enough|too much|work|help|cause|prevent|affect)\b/i
+const VAGUE_TIME_REF_PATTERN = /\b(?:yesterday|last night|last week|earlier today|before|already|just ate|just had)\b/i
+const VAGUE_REFERENCE_PATTERN = /^(?:(?:i\s+)?(?:had|ate|drank|eaten))\s+(?:that|the same|same thing|it|the usual|the same as|lunch already|dinner already|breakfast already|that already)\b/i
 const WORKOUT_REROUTE_PATTERN = /^(?:log|save|add|track|put)\s+(?:it|that|this)\s+(?:in|as|to|under)\s+(?:a\s+|my\s+)?(?:workout|workouts|training|exercise|gym|weights)/i
 const WORKOUT_START_PATTERN = /\b(?:workout|train(?:ed|ing)?|lift(?:ed|ing)?|exercise|exercises|session|cardio|bench|squat|deadlift|row|rows|press|curls?|pulldown|pull ups?|push ups?|pullups?|pushups?|situps?|sit ups?|burpees?|dips?|lunge|lunges|treadmill|bike|run|running|walk|walking|rower|elliptical|stairmaster|km|min|minutes|sets?|reps?|kg)\b/i
 const WORKOUT_CORRECTION_PATTERN = /\b(?:actually|correction|change(?:\s+that)?|update(?:\s+that)?|make that|not\b|instead|sorry|i meant)\b/i
@@ -441,6 +444,9 @@ function buildMealSessionState(recentMessages = [], currentMessage = "", existin
 
   if (mealLogQueryRequested(currentMessage)) return null
   if (looksLikeWorkoutOnlyTurn(currentMessage)) return null
+  if (!prior.active && !prior.persisted && NUTRITION_QUESTION_PATTERN.test(cleanText(currentMessage))) return null
+  if (!prior.active && !prior.persisted && VAGUE_REFERENCE_PATTERN.test(cleanText(currentMessage))) return null
+  if (!prior.active && !prior.persisted && VAGUE_TIME_REF_PATTERN.test(cleanText(currentMessage)) && !isExplicitMealStart(currentMessage)) return null
 
   if (prior.persisted && deleteRequested) {
     return {
