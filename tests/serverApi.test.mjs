@@ -361,6 +361,106 @@ test("deterministic coach route will not persist orphan numeric entities when a 
   assert.equal(coach.reply, "I'm asking how many eggs you had.")
 })
 
+test("deterministic coach route answers daily nutrition totals and target checks from coach context", async (t) => {
+  const port = randomPort()
+  const serverProcess = spawn(process.execPath, [serverEntry], {
+    cwd,
+    env: {
+      ...process.env,
+      OPENAI_COACH_PORT: String(port),
+      OPENAI_COACH_REQUIRE_AUTH: "false",
+      OPENAI_COACH_CORS_ORIGIN: "http://127.0.0.1:5173",
+      OPENFOODFACTS_ENABLED: "false",
+      OPENAI_API_KEY: "",
+      NODE_ENV: "production",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  })
+
+  t.after(async () => {
+    serverProcess.kill()
+  })
+
+  await waitForHealth(port)
+
+  const basePayload = {
+    profile: {
+      daily_calories: 2200,
+      protein_g: 180,
+      carbs_g: 200,
+      fat_g: 70,
+    },
+    coachContext: {
+      today: "2026-05-17",
+      profile: {
+        daily_calories: 2200,
+        protein_g: 180,
+        carbs_g: 200,
+        fat_g: 70,
+      },
+      nutrition_today: {
+        calories_logged: 412,
+        protein_g_logged: 44,
+        carbs_g_logged: 0,
+        fat_g_logged: 26,
+        calories_remaining: 1788,
+        protein_g_remaining: 136,
+        carbs_g_remaining: 200,
+        fat_g_remaining: 44,
+      },
+    },
+    meals: [
+      {
+        id: "meal_live_test",
+        date: "2026-05-17",
+        meal_type: "lunch",
+        food_name: "200g salmon",
+        quantity: "200g",
+        calories: 412,
+        protein_g: 44,
+        carbs_g: 0,
+        fat_g: 26,
+      },
+    ],
+  }
+
+  const caloriesResponse = await fetch(`http://127.0.0.1:${port}/api/coach`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Origin: "http://127.0.0.1:5173",
+    },
+    body: JSON.stringify({
+      ...basePayload,
+      message: "whats my total calories so far today",
+    }),
+  })
+  const caloriesCoach = await caloriesResponse.json()
+  assert.equal(caloriesResponse.status, 200)
+  assert.equal(caloriesCoach.actions?.length || 0, 0)
+  assert.match(caloriesCoach.reply, /412 kcal/i)
+  assert.match(caloriesCoach.reply, /1788 kcal/i)
+  assert.doesNotMatch(caloriesCoach.reply, /\blogged\b/i)
+
+  const fatResponse = await fetch(`http://127.0.0.1:${port}/api/coach`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Origin: "http://127.0.0.1:5173",
+    },
+    body: JSON.stringify({
+      ...basePayload,
+      message: "am i over my fat target",
+    }),
+  })
+  const fatCoach = await fatResponse.json()
+  assert.equal(fatResponse.status, 200)
+  assert.equal(fatCoach.actions?.length || 0, 0)
+  assert.match(fatCoach.reply, /26g fat/i)
+  assert.match(fatCoach.reply, /44g fat/i)
+  assert.doesNotMatch(fatCoach.reply, /\b(saved|logged|tracked)\b/i)
+})
+
 test("deterministic coach logging can emit separate breakfast and lunch meal actions when OpenAI is unavailable", async (t) => {
   const port = randomPort()
   const serverProcess = spawn(process.execPath, [serverEntry], {

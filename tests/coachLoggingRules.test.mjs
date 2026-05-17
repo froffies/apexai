@@ -1,6 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import {
+  buildDeterministicNutritionStatusReply,
   buildDeterministicMealAction,
   buildDeterministicMealActions,
   buildDeterministicWorkoutAction,
@@ -220,6 +221,61 @@ test("coach logging rules can build a deterministic macro answer without creatin
   assert.ok(action)
   assert.equal(action.type, "log_meal")
   assert.match(formatDeterministicMealAnswer(action), /if you want it saved, tell me to log it/i)
+})
+
+test("coach logging rules can answer daily calorie and target questions without persistence wording", () => {
+  const caloriesReply = buildDeterministicNutritionStatusReply({
+    message: "whats my total calories so far today",
+    coachContext: {
+      today: "2026-05-17",
+      profile: {
+        daily_calories: 2200,
+        protein_g: 180,
+        carbs_g: 200,
+        fat_g: 70,
+      },
+      nutrition_today: {
+        calories_logged: 412,
+        protein_g_logged: 44,
+        carbs_g_logged: 0,
+        fat_g_logged: 26,
+        calories_remaining: 1788,
+        protein_g_remaining: 136,
+        carbs_g_remaining: 200,
+        fat_g_remaining: 44,
+      },
+    },
+  })
+
+  const fatReply = buildDeterministicNutritionStatusReply({
+    message: "am i over my fat target",
+    coachContext: {
+      today: "2026-05-17",
+      profile: {
+        daily_calories: 2200,
+        protein_g: 180,
+        carbs_g: 200,
+        fat_g: 70,
+      },
+      nutrition_today: {
+        calories_logged: 412,
+        protein_g_logged: 44,
+        carbs_g_logged: 0,
+        fat_g_logged: 26,
+        calories_remaining: 1788,
+        protein_g_remaining: 136,
+        carbs_g_remaining: 200,
+        fat_g_remaining: 44,
+      },
+    },
+  })
+
+  assert.match(caloriesReply, /412 kcal/i)
+  assert.match(caloriesReply, /1788 kcal/i)
+  assert.doesNotMatch(caloriesReply, /\blogged\b/i)
+  assert.match(fatReply, /26g fat/i)
+  assert.match(fatReply, /44g fat/i)
+  assert.doesNotMatch(fatReply, /\b(saved|logged|tracked)\b/i)
 })
 
 test("coach logging rules can repeat a recent meal deterministically", () => {

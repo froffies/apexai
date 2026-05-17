@@ -296,6 +296,125 @@ export function inferMealTypeFromPrompt(prompt) {
   return "snack"
 }
 
+const NUTRITION_STATUS_QUESTION_PATTERN = /^(?:what(?:'s|s| is)?|how(?:'s|s| is| much| many)?|am i|do i|have i)\b/i
+
+function optionalNumber(value) {
+  return value === undefined || value === null || value === ""
+    ? null
+    : safeNumber(value)
+}
+
+function sumRecentMealTotals(recentMeals = [], today = "") {
+  const normalizedToday = String(today || "").trim()
+  return safeArray(recentMeals, 24)
+    .filter((meal) => {
+      if (!normalizedToday) return true
+      return String(meal?.date || "").slice(0, 10) === normalizedToday
+    })
+    .reduce((totals, meal) => ({
+      calories: totals.calories + (safeNumber(meal?.calories) || 0),
+      protein_g: roundMacro(totals.protein_g + (safeNumber(meal?.protein_g) || 0)),
+      carbs_g: roundMacro(totals.carbs_g + (safeNumber(meal?.carbs_g) || 0)),
+      fat_g: roundMacro(totals.fat_g + (safeNumber(meal?.fat_g) || 0)),
+    }), {
+      calories: 0,
+      protein_g: 0,
+      carbs_g: 0,
+      fat_g: 0,
+    })
+}
+
+function resolveNutritionStatusSnapshot({ coachContext = {}, profile = {}, recentMeals = [] } = {}) {
+  const contextProfile = coachContext?.profile && typeof coachContext.profile === "object"
+    ? coachContext.profile
+    : {}
+  const nutritionToday = coachContext?.nutrition_today && typeof coachContext.nutrition_today === "object"
+    ? coachContext.nutrition_today
+    : {}
+  const today = String(coachContext?.today || "").trim()
+  const fallbackTotals = sumRecentMealTotals(recentMeals, today)
+  const mergedProfile = {
+    daily_calories: optionalNumber(profile?.daily_calories) ?? optionalNumber(contextProfile?.daily_calories),
+    protein_g: optionalNumber(profile?.protein_g) ?? optionalNumber(contextProfile?.protein_g),
+    carbs_g: optionalNumber(profile?.carbs_g) ?? optionalNumber(contextProfile?.carbs_g),
+    fat_g: optionalNumber(profile?.fat_g) ?? optionalNumber(contextProfile?.fat_g),
+  }
+  const totals = {
+    calories: optionalNumber(nutritionToday?.calories_logged) ?? fallbackTotals.calories,
+    protein_g: optionalNumber(nutritionToday?.protein_g_logged) ?? fallbackTotals.protein_g,
+    carbs_g: optionalNumber(nutritionToday?.carbs_g_logged) ?? fallbackTotals.carbs_g,
+    fat_g: optionalNumber(nutritionToday?.fat_g_logged) ?? fallbackTotals.fat_g,
+  }
+  const remaining = {
+    calories: optionalNumber(nutritionToday?.calories_remaining),
+    protein_g: optionalNumber(nutritionToday?.protein_g_remaining),
+    carbs_g: optionalNumber(nutritionToday?.carbs_g_remaining),
+    fat_g: optionalNumber(nutritionToday?.fat_g_remaining),
+  }
+
+  for (const [key, target] of Object.entries(mergedProfile)) {
+    if (remaining[key] === null && target !== null) {
+      remaining[key] = Math.round((target - (totals[key] || 0)) * 10) / 10
+    }
+  }
+
+  return { totals, remaining, profile: mergedProfile }
+}
+
+function extractNutritionStatusMetric(message) {
+  const text = String(message || "").toLowerCase()
+  if (!NUTRITION_STATUS_QUESTION_PATTERN.test(text)) return null
+  if (/\bcalories?\b/.test(text)) return { key: "calories", label: "kcal", targetKey: "daily_calories", noun: "calories" }
+  if (/\bprotein\b/.test(text)) return { key: "protein_g", label: "g", targetKey: "protein_g", noun: "protein" }
+  if (/\bcarbs?\b|\bcarbohydrates?\b/.test(text)) return { key: "carbs_g", label: "g", targetKey: "carbs_g", noun: "carbs" }
+  if (/\bfat\b|\bfats\b/.test(text)) return { key: "fat_g", label: "g", targetKey: "fat_g", noun: "fat" }
+  return null
+}
+
+function formatNutritionStatusAmount(metric, value) {
+  if (metric.key === "calories") return `${Math.round(value || 0)} ${metric.label}`
+  return `${roundMacro(value || 0)}${metric.label} ${metric.noun}`.trim()
+}
+
+export function buildDeterministicNutritionStatusReply(args = {}) {
+  const metric = extractNutritionStatusMetric(args.message)
+  if (!metric) return ""
+
+  const text = String(args.message || "").toLowerCase()
+  const asksDailyStatus = /\b(?:total|so far|today|left|remaining|target|over|under)\b/.test(text)
+  if (!asksDailyStatus) return ""
+
+  const snapshot = resolveNutritionStatusSnapshot(args)
+  const current = snapshot.totals[metric.key]
+  if (current === null) return ""
+
+  const target = snapshot.profile[metric.targetKey]
+  const remaining = snapshot.remaining[metric.key]
+  const asksOverTarget = /\bover\b.*\btarget\b|\bunder\b.*\btarget\b|\btarget\b/.test(text)
+  const asksRemaining = /\b(?:left|remaining)\b/.test(text)
+
+  if (asksOverTarget && target !== null) {
+    const delta = roundMacro(current - target)
+    if (delta > 0) {
+      return `You're over your ${metric.noun} target by about ${formatNutritionStatusAmount(metric, delta)}. You're at ${formatNutritionStatusAmount(metric, current)} against a ${formatNutritionStatusAmount(metric, target)} target today.`
+    }
+    const left = Math.max(0, roundMacro(target - current))
+    return `You're at about ${formatNutritionStatusAmount(metric, current)} so far today, with ${formatNutritionStatusAmount(metric, left)} left against your ${formatNutritionStatusAmount(metric, target)} target.`
+  }
+
+  if (asksRemaining && remaining !== null && target !== null) {
+    const left = Math.max(0, roundMacro(remaining))
+    return `You've got about ${formatNutritionStatusAmount(metric, left)} left today. You're currently at ${formatNutritionStatusAmount(metric, current)} against your ${formatNutritionStatusAmount(metric, target)} target.`
+  }
+
+  if (target !== null && remaining !== null) {
+    const left = Math.max(0, roundMacro(remaining))
+    return `You're at about ${formatNutritionStatusAmount(metric, current)} so far today, with ${formatNutritionStatusAmount(metric, left)} left against your ${formatNutritionStatusAmount(metric, target)} target.`
+  }
+
+  return `You're at about ${formatNutritionStatusAmount(metric, current)} so far today.`
+}
+
 function normalizeMealType(value) {
   const text = String(value || "").trim().toLowerCase()
   return ["breakfast", "lunch", "dinner", "snack"].includes(text) ? text : ""

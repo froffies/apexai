@@ -17,6 +17,7 @@ import {
   summarizeCoachAuditRecords,
 } from "./coachAudit.mjs"
 import {
+  buildDeterministicNutritionStatusReply,
   buildDeterministicMealDeletionAction,
   buildDeterministicMealActions,
   buildDeterministicWorkoutAction,
@@ -1180,6 +1181,23 @@ async function handleCoach(request, response) {
       sendCoachPayload({
         reply: workoutClarifyAction.message,
         actions: [workoutClarifyAction],
+        warnings: [],
+        meal_session: mealContext,
+        workout_session: workoutContext,
+      }, "deterministic")
+      return
+    }
+
+    const nutritionStatusReply = buildDeterministicNutritionStatusReply({
+      message: body.message,
+      coachContext: body.coachContext || {},
+      profile: body.profile || {},
+      recentMeals: safeArray(body.meals, 24),
+    })
+    if (nutritionStatusReply) {
+      sendCoachPayload({
+        reply: nutritionStatusReply,
+        actions: [],
         warnings: [],
         meal_session: mealContext,
         workout_session: workoutContext,
