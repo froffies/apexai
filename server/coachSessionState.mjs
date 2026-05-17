@@ -10,10 +10,12 @@ const SUPPRESS_SESSION_PATTERN = /\b(?:don't|dont|do not|stop|no)\s+(?:log|save|
 const REPEAT_RECENT_MEAL_PATTERN = /\b(?:same as yesterday|same as last time|same as before|repeat that(?: meal)?|same thing as yesterday)\b/i
 const MEAL_LOG_QUERY_PATTERN = /^(?:what(?:'s|s| is)?|show|list|see|view|display)\b.*\b(?:today'?s?|todays?|my)\b.*\b(?:nutrition|food|meal|meals|log)\b/i
 const NUTRITION_QUESTION_PATTERN = /^(?:is|are|does|do|can|should|will|would|what(?:'s|s| is)?|how(?:'s|s| is| much| many)?|which|why)\b.{0,80}?\b(?:better|best|worse|good|bad|healthy|unhealthy|high|low|more|less|enough|too much|work|help|cause|prevent|affect)\b/i
+const WORKOUT_QUESTION_PATTERN = /^(?:is|are|does|do|can|should|will|would|what(?:'s|s| is)?|how(?:'s|s| is| much| many)?|which|why)\b.{0,120}?\b(?:workout[s]?|exercises?|training|run(?:ning)?|ran|cardio|gym|lift(?:ing)?|muscle[s]?|fitness|calories?|burn(?:ing)?|strength|endurance|recover(?:y)?|rest)\b/i
 const VAGUE_TIME_REF_PATTERN = /\b(?:yesterday|last night|last week|earlier today|before|already|just ate|just had)\b/i
 const VAGUE_REFERENCE_PATTERN = /^(?:(?:i\s+)?(?:had|ate|drank|eaten))\s+(?:that|the same|same thing|it|the usual|the same as|lunch already|dinner already|breakfast already|that already)\b/i
+const FRUSTRATION_PATTERN = /\b(?:why did you|why cant you|you suck|what the|thats not what|thats wrong|youre wrong|you got it wrong|why would you|stop doing|you keep|you always|i cant believe|this is wrong|you messed up)\b/i
 const WORKOUT_REROUTE_PATTERN = /^(?:log|save|add|track|put)\s+(?:it|that|this)\s+(?:in|as|to|under)\s+(?:a\s+|my\s+)?(?:workout|workouts|training|exercise|gym|weights)/i
-const WORKOUT_START_PATTERN = /\b(?:workout|train(?:ed|ing)?|lift(?:ed|ing)?|exercise|exercises|session|cardio|bench|squat|deadlift|row|rows|press|curls?|pulldown|pull ups?|push ups?|pullups?|pushups?|situps?|sit ups?|burpees?|dips?|lunge|lunges|treadmill|bike|run|running|walk|walking|rower|elliptical|stairmaster|km|min|minutes|sets?|reps?|kg)\b/i
+const WORKOUT_START_PATTERN = /(?:\b(?:workout|train(?:ed|ing)?|lift(?:ed|ing)?|exercise|exercises|session|cardio|bench|squats?|deadlift|row|rows|press|curls?|pulldown|pull\s*ups?|push\s*ups?|sit\s*ups?|burpees?|dips?|lunges?|treadmill|bike|biked|ran|run|running|swim|swam|walk(?:ed|ing)?|cycling|cycled|rower|elliptical|stairmaster|sets?|reps?)\b)|(?:\d+\s*(?:kg|km|mi|miles?|min(?:utes?)?|sec(?:onds?)?|hours?|cal(?:ories?)?))|(?:\d+\s*x\s*\d+)/i
 const WORKOUT_CORRECTION_PATTERN = /\b(?:actually|correction|change(?:\s+that)?|update(?:\s+that)?|make that|not\b|instead|sorry|i meant)\b/i
 const WORKOUT_DELETE_PATTERN = /\b(?:delete|remove|undo|erase)\b(?:\s+(?:it|that|this|workout|session|log))?/i
 const WORKOUT_FINALISE_PATTERN = /^(?:i just did|i already did|that'?s it|thats it|log it|save it|go ahead|yes|yeah|yep|okay|ok)$/i
@@ -447,6 +449,10 @@ function buildMealSessionState(recentMessages = [], currentMessage = "", existin
   if (!prior.active && !prior.persisted && NUTRITION_QUESTION_PATTERN.test(cleanText(currentMessage))) return null
   if (!prior.active && !prior.persisted && VAGUE_REFERENCE_PATTERN.test(cleanText(currentMessage))) return null
   if (!prior.active && !prior.persisted && VAGUE_TIME_REF_PATTERN.test(cleanText(currentMessage)) && !isExplicitMealStart(currentMessage)) return null
+  // Frustrated messages like "why did you save that" should route to general/correction
+  // handling when there is no active session. When a session IS persisted, let the
+  // delete/correction path handle it instead.
+  if (!prior.active && !prior.persisted && FRUSTRATION_PATTERN.test(cleanText(currentMessage))) return null
 
   if (prior.persisted && deleteRequested) {
     return {
@@ -609,12 +615,18 @@ function extractWorkoutThread(recentMessages = [], currentMessage = "", existing
       || currentParsedWorkout?.duration_seconds
       || currentParsedWorkout?.distance_km
     )
-  const shouldTrack = WORKOUT_START_PATTERN.test(normalizedCurrent)
+  // Question-shaped sentences about workouts ("whats a good pre workout meal",
+  // "is running good for fat loss") should not start a workout logging session.
+  const isWorkoutQuestion = !existingSession?.active && !existingSession?.persisted
+    && WORKOUT_QUESTION_PATTERN.test(normalizedCurrent)
+  const shouldTrack = !isWorkoutQuestion && (
+    WORKOUT_START_PATTERN.test(normalizedCurrent)
     || (workoutCorrectionRequested(currentMessage) && !currentLooksMealLike && (currentLooksWorkoutLike || existingSession?.active || existingSession?.persisted))
     || (suppressionRequested(currentMessage) && (existingSession?.active || existingSession?.persisted))
     || (WORKOUT_FINALISE_PATTERN.test(normalizedCurrent) && hasExistingWorkoutContext)
     || (existingSession?.active && (/\d/.test(normalizedCurrent) || workoutReferenceMessage(normalizedCurrent)))
     || (existingSession?.persisted && !isExplicitMealStart(normalizedCurrent) && (/\d/.test(normalizedCurrent) || workoutReferenceMessage(normalizedCurrent)))
+  )
 
   if (!shouldTrack) return []
 
