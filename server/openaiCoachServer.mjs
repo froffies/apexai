@@ -1078,7 +1078,18 @@ async function handleCoach(request, response) {
       return
     }
 
-    if (mealContext?.alreadyLogged) {
+    const mealHasPendingWork = Boolean(
+      mealContext
+      && !mealContext.alreadyLogged
+      && (mealContext.deleteRequested || mealContext.suppressed || mealContext.readyToLog || mealContext.clarifyQuestion || mealContext.correctionRequested)
+    )
+    const workoutHasPendingWork = Boolean(
+      workoutContext
+      && !workoutContext.alreadyLogged
+      && (workoutContext.deleteRequested || workoutContext.suppressed || workoutContext.readyToLog || workoutContext.clarifyQuestion || workoutContext.correctionRequested)
+    )
+
+    if (mealContext?.alreadyLogged && !workoutHasPendingWork) {
       sendCoachPayload({
         reply: deterministicAlreadyLoggedReply(mealContext, "meal"),
         actions: [],
@@ -1100,7 +1111,7 @@ async function handleCoach(request, response) {
       return
     }
 
-    if (workoutContext?.alreadyLogged) {
+    if (workoutContext?.alreadyLogged && !mealHasPendingWork) {
       sendCoachPayload({
         reply: deterministicAlreadyLoggedReply(workoutContext, "workout"),
         actions: [],

@@ -1426,6 +1426,88 @@ test("deterministic coach does not treat today's-log queries as meal updates and
   assert.equal(String(secondCoach.meal_session?.summary || ""), "")
 })
 
+test("deterministic coach lets a meal refinement outrank stale already-logged workout context", async (t) => {
+  const port = randomPort()
+  const serverProcess = spawn(process.execPath, [serverEntry], {
+    cwd,
+    env: {
+      ...process.env,
+      OPENAI_COACH_PORT: String(port),
+      OPENAI_COACH_REQUIRE_AUTH: "false",
+      OPENAI_COACH_CORS_ORIGIN: "http://127.0.0.1:5173",
+      OPENFOODFACTS_ENABLED: "false",
+      OPENAI_API_KEY: "",
+      NODE_ENV: "production",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  })
+
+  t.after(async () => {
+    serverProcess.kill()
+  })
+
+  await waitForHealth(port)
+
+  const coachResponse = await fetch(`http://127.0.0.1:${port}/api/coach`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Origin: "http://127.0.0.1:5173",
+    },
+    body: JSON.stringify({
+      message: "6 were fried, the rest were scrambled",
+      recentMessages: [
+        { role: "user", content: "i had eggs and did 4 pushups" },
+        { role: "assistant", content: "How many eggs did you have?" },
+        { role: "user", content: "18" },
+        { role: "assistant", content: "Saved to today's nutrition: 18 eggs. Saved to Workouts: Pushups." },
+      ],
+      mealSession: {
+        active: false,
+        mealConversation: true,
+        readyToLog: false,
+        persisted: true,
+        persistedMealId: "meal_1",
+        persistedSummary: "18 eggs",
+        summary: "18 eggs",
+        items: [
+          {
+            base_name: "egg",
+            label: "Eggs",
+            category: "food",
+            quantity: { amount: 18, unit: "egg", text: "18 eggs" },
+            preparation: [],
+            exclusions: [],
+            attached_to: null,
+            relation: null,
+          },
+        ],
+      },
+      workoutSession: {
+        active: false,
+        workoutConversation: true,
+        readyToLog: false,
+        persisted: true,
+        persistedWorkoutId: "workout_1",
+        persistedSummary: "Pushups for 1 set of 4",
+        summary: "Pushups for 1 set of 4",
+        exercise_name: "Pushups",
+        workout_type: "Pushups",
+        muscle_group: "full_body",
+        sets: 1,
+        reps: 4,
+        weight_kg: 0,
+      },
+    }),
+  })
+  const coach = await coachResponse.json()
+  assert.equal(coachResponse.status, 200)
+  assert.equal(coach.actions?.[0]?.type, "clarify")
+  assert.match(coach.reply, /what were the fried eggs cooked in/i)
+  assert.equal(Boolean(coach.meal_session?.correctionRequested), true)
+  assert.doesNotMatch(coach.reply, /already saved .*pushups/i)
+})
+
 test("deterministic coach keeps recent clarification context for complaint turns when a meal session is already active", async (t) => {
   const port = randomPort()
   const serverProcess = spawn(process.execPath, [serverEntry], {
