@@ -52,6 +52,8 @@ const WORKOUT_EXERCISES = [
   "rdl",
   "back squat",
   "front squat",
+  "squat",
+  "squats",
   "leg press",
   "walking lunge",
   "preacher curl",
@@ -78,6 +80,9 @@ const CORRECTION_LEAD_PATTERNS = [
 
 const GENERIC_MEAL_DELETE_PATTERN = /^(?:actually\s+)?(?:delete|remove|undo|erase)(?:\s+(?:it|that|this|meal|log))?$/i
 const REJECTION_DELETE_PATTERN = /^(?:no|nah)\s+(?:that'?s wrong|thats wrong|wrong meal|logged wrong)\s+(?:delete|remove|undo|erase)(?:\s+(?:it|that|this|meal|log))?$/i
+const INLINE_MEAL_CORRECTION_PATTERN = /^(?<lead>(?:please\s+)?(?:(?:i\s+)?(?:had|ate|drank)|log|track|save|add|include)\s+)(?<first>.+?)\s+(?:no\s+wait|actually|sorry|i\s+meant?|make\s+that|change\s+that(?:\s+to)?|it\s+was)\s+(?<second>.+)$/i
+const TRAILING_MEAL_QUANTITY_PATTERN = /^(?<lead>(?:(?:actually|also|and then|then)\s+)*(?:(?:i\s+)?(?:had|ate|drank)|log|track|save|add|include)\s+)?(?<food>[a-z][a-z\s'/-]+?)\s+(?<amount>\d+(?:\.\d+)?|half)\s*(?:(?<article>a)\s+)?(?<unit>kg|g|lb|lbs|pound|pounds|ml|l|litre|litres|liter|liters|cup|cups|tbsp|tablespoon|tablespoons|tsp|teaspoon|teaspoons|slice|slices|serve|serves|serving|servings|bowl|bowls|plate|plates|mug|mugs)\b$/i
+const BARE_MEAL_MEASURE_NAMES = new Set(["g", "kg", "lb", "ml", "l", "cup", "tbsp", "tsp", "slice", "tin", "can", "block", "bunch", "serve", "bowl", "plate", "mug"])
 
 function cleanText(value) {
   return String(value || "")
@@ -253,6 +258,56 @@ function isExplicitMealStart(message) {
   return MEAL_EXPLICIT_START_PATTERN.test(String(message || "").trim())
 }
 
+function normalizeInlineMealCorrectionMessage(message = "") {
+  const raw = String(message || "").trim()
+  if (!raw) return raw
+  const match = raw.match(INLINE_MEAL_CORRECTION_PATTERN)
+  if (!match?.groups) return raw
+
+  const lead = String(match.groups.lead || "").trim()
+  const first = String(match.groups.first || "").trim()
+  const secondRaw = String(match.groups.second || "").trim()
+  if (!lead || !first || !secondRaw) return raw
+
+  const second = secondRaw
+    .replace(/^(?:like|about|around)\s+/i, "")
+    .trim()
+  if (!second) return raw
+
+  const standalonePreview = buildLegacyMealContext([], second, emptyLegacyMealSession())
+  const standaloneBaseName = cleanText(
+    standalonePreview?.items?.find((item) => !item?.attached_to)?.base_name
+    || standalonePreview?.items?.find((item) => !item?.attached_to)?.label
+    || ""
+  )
+  if (standaloneBaseName && !BARE_MEAL_MEASURE_NAMES.has(standaloneBaseName)) {
+    return `${lead} ${second}`.replace(/\s+/g, " ").trim()
+  }
+
+  const firstPreview = buildLegacyMealContext([], `${lead} ${first}`.replace(/\s+/g, " ").trim(), emptyLegacyMealSession())
+  const baseName = String(
+    firstPreview?.items?.find((item) => !item?.attached_to)?.base_name
+    || firstPreview?.items?.find((item) => !item?.attached_to)?.label
+    || ""
+  ).trim()
+  if (!baseName) return raw
+
+  return `${lead} ${second} ${baseName}`.replace(/\s+/g, " ").trim()
+}
+
+function normalizeTrailingMealQuantityMessage(message = "") {
+  const raw = String(message || "").trim()
+  if (!raw) return raw
+  const match = raw.match(TRAILING_MEAL_QUANTITY_PATTERN)
+  if (!match?.groups?.food || !match?.groups?.amount || !match?.groups?.unit) return raw
+  const lead = String(match.groups.lead || "")
+  const food = String(match.groups.food || "").trim()
+  const amount = String(match.groups.amount || "").trim()
+  const article = String(match.groups.article || "").trim()
+  const unit = String(match.groups.unit || "").trim()
+  return `${lead}${amount}${article ? ` ${article}` : ""} ${unit} ${food}`.replace(/\s+/g, " ").trim()
+}
+
 function looksLikeWorkoutOnlyTurn(message) {
   const normalized = cleanText(message)
   if (!normalized) return false
@@ -425,6 +480,7 @@ function looksLikeFullMealCorrectionRestatement(message) {
 function buildMealSessionState(recentMessages = [], currentMessage = "", existingSession = null, recentMeals = []) {
   const prior = normalizeMealSession(existingSession)
   const normalizedCurrent = cleanText(currentMessage)
+  const normalizedMealMessage = normalizeTrailingMealQuantityMessage(normalizeInlineMealCorrectionMessage(currentMessage))
   const deleteRequested = Boolean(prior.persistedMealId && genericMealDeleteRequested(currentMessage))
   const rejectionRequested = Boolean(prior.persistedMealId && mealRejectionRequested(currentMessage))
   const correctionRequested = Boolean(prior.persistedMealId && mealCorrectionRequested(currentMessage))
@@ -453,6 +509,15 @@ function buildMealSessionState(recentMessages = [], currentMessage = "", existin
   // handling when there is no active session. When a session IS persisted, let the
   // delete/correction path handle it instead.
   if (!prior.active && !prior.persisted && FRUSTRATION_PATTERN.test(cleanText(currentMessage))) return null
+  if (
+    prior.persisted
+    && !prior.active
+    && detectQuestionOnlyTurn(currentMessage)
+    && !mealLogQueryRequested(currentMessage)
+    && !mealDeleteRequested(currentMessage)
+    && !mealRejectionRequested(currentMessage)
+    && !mealCorrectionRequested(currentMessage)
+  ) return null
 
   if (prior.persisted && deleteRequested) {
     return {
@@ -474,7 +539,7 @@ function buildMealSessionState(recentMessages = [], currentMessage = "", existin
   const historyForNext = (fullCorrectionRestatement || startedNewMeal) ? [] : recentMessages
   const shouldSeedPersistedSession = !fullCorrectionRestatement && (prior.active || (prior.persisted && !startedNewMeal))
   const seededSession = shouldSeedPersistedSession ? seedLegacyMealSession(prior) : null
-  const next = buildLegacyMealContext(historyForNext, currentMessage, seededSession)
+  const next = buildLegacyMealContext(historyForNext, normalizedMealMessage, seededSession)
   if (!next) return null
 
   const impliedCorrectionRequested = Boolean(
@@ -580,7 +645,7 @@ function normalizeExerciseName(value) {
     .replace(/\b\d+\s*sets?\b/g, " ")
     .replace(/\b\d+\s*reps?\b/g, " ")
     .replace(/\b\d+(?:\.\d+)?\s*(?:min|mins|minutes)\b/g, " ")
-    .replace(/\b(?:i|did|done|completed|finished|just|log|logged|save|saved|track|tracked|for|of|sets?|reps?|kg|min|minutes)\b/g, " ")
+    .replace(/\b(?:i|did|done|completed|finished|just|log|logged|save|saved|track|tracked|for|of|sets?|reps?|kg|min|minutes|at|and|then|more|also|actually|oh|today)\b/g, " ")
     .replace(/\s+/g, " ")
     .trim()
   if (!text) return ""
@@ -624,8 +689,8 @@ function extractWorkoutThread(recentMessages = [], currentMessage = "", existing
     || (workoutCorrectionRequested(currentMessage) && !currentLooksMealLike && (currentLooksWorkoutLike || existingSession?.active || existingSession?.persisted))
     || (suppressionRequested(currentMessage) && (existingSession?.active || existingSession?.persisted))
     || (WORKOUT_FINALISE_PATTERN.test(normalizedCurrent) && hasExistingWorkoutContext)
-    || (existingSession?.active && (/\d/.test(normalizedCurrent) || workoutReferenceMessage(normalizedCurrent)))
-    || (existingSession?.persisted && !isExplicitMealStart(normalizedCurrent) && (/\d/.test(normalizedCurrent) || workoutReferenceMessage(normalizedCurrent)))
+    || (existingSession?.active && !currentLooksMealLike && (/\d/.test(normalizedCurrent) || workoutReferenceMessage(normalizedCurrent)))
+    || (existingSession?.persisted && !currentLooksMealLike && !isExplicitMealStart(normalizedCurrent) && (/\d/.test(normalizedCurrent) || workoutReferenceMessage(normalizedCurrent)))
   )
 
   if (!shouldTrack) return []
@@ -695,6 +760,10 @@ function mergeWorkoutMetrics(state, patch = {}) {
   }
   if (patch.workout_type) state.workout_type = patch.workout_type
   if (patch.muscle_group) state.muscle_group = patch.muscle_group
+  if (Number.isFinite(patch.sets_delta) && patch.sets_delta > 0) {
+    const baseSets = Number(state.sets || 0)
+    state.sets = (baseSets > 0 ? baseSets : 1) + patch.sets_delta
+  }
   if (Number.isFinite(patch.sets) && patch.sets > 0) state.sets = patch.sets
   if (Number.isFinite(patch.reps) && patch.reps > 0) state.reps = patch.reps
   if (Number.isFinite(patch.weight_kg) && patch.weight_kg > 0) state.weight_kg = patch.weight_kg
@@ -751,12 +820,58 @@ function parseWorkoutMessage(message) {
     }
   }
 
+  const embeddedExercise = WORKOUT_EXERCISES.find((exercise) => new RegExp(`\\b${exercise.replace(/\s+/g, "\\s+")}\\b`, "i").test(text))
+  const compactEmbeddedMetrics = text.match(/(?<weight>\d+(?:\.\d+)?)\s*kg?\s*(?<sets>\d+)\s*x\s*(?<reps>\d+)\b/)
+  if (embeddedExercise && compactEmbeddedMetrics?.groups) {
+    const exercise = normalizeExerciseName(embeddedExercise)
+    return {
+      exercise_name: exercise,
+      workout_type: exercise,
+      muscle_group: cardioAliases.has(cleanText(exercise)) ? "cardio" : "full_body",
+      sets: Number(compactEmbeddedMetrics.groups.sets || 0),
+      reps: Number(compactEmbeddedMetrics.groups.reps || 0),
+      weight_kg: Number(compactEmbeddedMetrics.groups.weight || 0),
+      duration_seconds: 0,
+      distance_km: 0,
+    }
+  }
+
+  const repsAtWeightPattern = text.match(/^(?:and\s+then\s+)?(?<reps>\d+(?:\.\d+)?)\s*reps?\s+at\s+(?<weight>\d+(?:\.\d+)?)\s*kg\b/)
+  if (repsAtWeightPattern?.groups) {
+    return {
+      exercise_name: "",
+      workout_type: "",
+      muscle_group: "full_body",
+      sets: 1,
+      reps: Number(repsAtWeightPattern.groups.reps || 0),
+      weight_kg: Number(repsAtWeightPattern.groups.weight || 0),
+      duration_seconds: 0,
+      distance_km: 0,
+    }
+  }
+
+  const moreSetsAtWeightPattern = text.match(/^(?:and\s+then\s+)?(?<sets>\d+)\s+more\s+sets?\s+at\s+(?<weight>\d+(?:\.\d+)?)\s*kg\b/)
+  if (moreSetsAtWeightPattern?.groups) {
+    return {
+      exercise_name: "",
+      workout_type: "",
+      muscle_group: "full_body",
+      sets: 0,
+      sets_delta: Number(moreSetsAtWeightPattern.groups.sets || 0),
+      reps: 0,
+      weight_kg: Number(moreSetsAtWeightPattern.groups.weight || 0),
+      duration_seconds: 0,
+      distance_km: 0,
+    }
+  }
+
   const xPattern = text.match(/(?<exercise>[a-z][a-z\s'/-]+?)\s+(?<weight>\d+(?:\.\d+)?)\s*kg?\s*x\s*(?<reps>\d+)\s*x\s*(?<sets>\d+)/)
   const setsPattern = text.match(/(?<exercise>[a-z][a-z\s'/-]+?)\s+(?<weight>\d+(?:\.\d+)?)\s*kg?\s*(?:for\s*)?(?<sets>\d+)\s*sets?\s*(?:of|x)?\s*(?<reps>\d+)/)
   const simplePattern = text.match(/(?<exercise>[a-z][a-z\s'/-]+?)\s+(?<weight>\d+(?:\.\d+)?)\s*kg?\s*(?:for|x)?\s*(?<reps>\d+)\s*reps?/)
+  const compactExercisePattern = text.match(/(?<exercise>[a-z][a-z\s'/-]+?)\s+(?<weight>\d+(?:\.\d+)?)\s*kg?\s*(?<sets>\d+)\s*x\s*(?<reps>\d+)\b/)
   const metricsOnlyPattern = text.match(/^(?<weight>\d+(?:\.\d+)?)\s*kg?\s*(?:for\s*)?(?<sets>\d+)\s*sets?\s*(?:of|x)?\s*(?<reps>\d+)\b/)
   const bodyweightPattern = text.match(/(?<exercise>[a-z][a-z\s'/-]+?)\s+(?<sets>\d+)\s*sets?\s*(?:of|x)?\s*(?<reps>\d+)/)
-  const match = xPattern || setsPattern || simplePattern || metricsOnlyPattern || bodyweightPattern
+  const match = xPattern || setsPattern || simplePattern || compactExercisePattern || metricsOnlyPattern || bodyweightPattern
   if (match?.groups) {
     const exercise = normalizeExerciseName(match.groups.exercise)
     return {

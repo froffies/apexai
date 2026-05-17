@@ -540,7 +540,7 @@ test("ready meal corrections outrank stray workout clarifications when OpenAI is
   assert.equal(coach.reply, "Updated today's nutrition entry for 18 fried eggs cooked in 100g salted butter, plus 250ml Earl Grey tea with no milk and no sugar.")
   assert.equal(coach.actions?.[0]?.type, "update_meal_log")
   assert.equal(coach.actions?.[0]?.meal_id, "meal_fix_live")
-  assert.equal(coach.workout_session?.clarifyQuestion, "What exercise or cardio did you do?")
+  assert.ok(!coach.workout_session || !coach.workout_session.clarifyQuestion)
 })
 
 test("additive meal follow-ups update the persisted meal instead of creating a duplicate", async (t) => {

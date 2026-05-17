@@ -380,6 +380,43 @@ test("pure nutrition questions do not open a meal logging clarification flow", (
   assert.equal(next.workoutSession, null)
 })
 
+test("post-save nutrition questions route away from a persisted meal session", () => {
+  const persistedMeal = makePersistedMealSession({
+    ...emptyMealSessionState(),
+    active: false,
+    mealConversation: true,
+    readyToLog: false,
+    summary: "200g salmon",
+    items: [
+      {
+        base_name: "salmon",
+        label: "Salmon",
+        category: "food",
+        quantity: { amount: 200, unit: "g", text: "200g" },
+        preparation: [],
+        exclusions: [],
+        attached_to: null,
+        relation: null,
+      },
+    ],
+  }, "meal_macro_saved")
+
+  const next = buildCoachSessionState({
+    recentMessages: [
+      user("i had salmon"),
+      assistant("How much salmon did you have?"),
+      user("200g"),
+      assistant("Saved to today's nutrition: 200g salmon."),
+    ],
+    currentMessage: "how much protein is in that",
+    mealSession: persistedMeal,
+    workoutSession: emptyWorkoutSessionState(),
+  })
+
+  assert.equal(next.mealSession, null)
+  assert.equal(next.workoutSession, null)
+})
+
 test("comparative food questions do not open a meal clarification flow", () => {
   const cases = [
     "is brown rice better than white?",
@@ -598,6 +635,128 @@ test("coach session state keeps persisted meal state isolated from a new fragmen
   assert.equal(secondWorkoutTurn.workoutSession.reps, 6)
 })
 
+test("coach session state parses compact workout pivots inside a meal thread", () => {
+  const persistedMeal = makePersistedMealSession({
+    ...emptyMealSessionState(),
+    active: false,
+    mealConversation: true,
+    readyToLog: false,
+    summary: "250g pasta",
+    items: [
+      {
+        base_name: "pasta",
+        label: "Pasta",
+        category: "food",
+        quantity: { amount: 250, unit: "g", text: "250g" },
+        preparation: [],
+        exclusions: [],
+        attached_to: null,
+        relation: null,
+      },
+    ],
+  }, "meal_pasta_saved")
+
+  const next = buildCoachSessionState({
+    recentMessages: [
+      user("i had pasta"),
+      assistant("How much pasta did you have?"),
+      user("250g"),
+      assistant("Saved to today's nutrition: 250g pasta."),
+    ],
+    currentMessage: "oh and i did legs today, squats 100kg 5x5",
+    mealSession: persistedMeal,
+    workoutSession: emptyWorkoutSessionState(),
+  })
+
+  assert.equal(next.mealSession, null)
+  assert.ok(next.workoutSession)
+  assert.match(next.workoutSession.exercise_name, /Squat/i)
+  assert.equal(next.workoutSession.weight_kg, 100)
+  assert.equal(next.workoutSession.sets, 5)
+  assert.equal(next.workoutSession.reps, 5)
+  assert.equal(next.workoutSession.readyToLog, true)
+})
+
+test("coach session state keeps meal pivots out of an active workout thread", () => {
+  const priorWorkout = {
+    ...emptyWorkoutSessionState(),
+    active: true,
+    workoutConversation: true,
+    exercise_name: "Bench Press",
+    workout_type: "Bench Press",
+    sets: 0,
+    reps: 0,
+    weight_kg: 0,
+    summary: "Bench Press",
+    readyToLog: false,
+  }
+
+  const next = buildCoachSessionState({
+    recentMessages: [
+      user("bench press"),
+      assistant("How many reps did you do for Bench Press?"),
+    ],
+    currentMessage: "actually also had a protein shake 300ml",
+    mealSession: emptyMealSessionState(),
+    workoutSession: priorWorkout,
+  })
+
+  assert.ok(next.mealSession)
+  assert.match(next.mealSession.summary.toLowerCase(), /protein shake/)
+  assert.match(next.mealSession.summary.toLowerCase(), /300ml/)
+  assert.equal(next.workoutSession, null)
+})
+
+test("coach session state keeps metric-only workout replies attached to the existing exercise", () => {
+  const priorWorkout = {
+    ...emptyWorkoutSessionState(),
+    active: true,
+    workoutConversation: true,
+    exercise_name: "Bench Press",
+    workout_type: "Bench Press",
+    sets: 0,
+    reps: 0,
+    weight_kg: 0,
+    summary: "Bench Press",
+    readyToLog: false,
+  }
+
+  const repsTurn = buildCoachSessionState({
+    recentMessages: [
+      user("bench press"),
+      assistant("How many reps did you do for Bench Press?"),
+    ],
+    currentMessage: "5 reps at 60kg",
+    mealSession: emptyMealSessionState(),
+    workoutSession: priorWorkout,
+  })
+
+  assert.ok(repsTurn.workoutSession)
+  assert.equal(repsTurn.workoutSession.exercise_name, "Bench Press")
+  assert.equal(repsTurn.workoutSession.weight_kg, 60)
+  assert.equal(repsTurn.workoutSession.reps, 5)
+  assert.equal(repsTurn.workoutSession.readyToLog, true)
+
+  const moreSetsTurn = buildCoachSessionState({
+    recentMessages: [
+      user("bench press"),
+      assistant("How many reps did you do for Bench Press?"),
+      user("5 reps at 60kg"),
+      assistant("Saved to Workouts: Bench Press 60kg for 1 set of 5."),
+    ],
+    currentMessage: "and then 2 more sets at 60kg",
+    mealSession: emptyMealSessionState(),
+    workoutSession: makePersistedWorkoutSession(repsTurn.workoutSession, "workout_bench_saved"),
+  })
+
+  assert.ok(moreSetsTurn.workoutSession)
+  assert.equal(moreSetsTurn.workoutSession.exercise_name, "Bench Press")
+  assert.equal(moreSetsTurn.workoutSession.weight_kg, 60)
+  assert.equal(moreSetsTurn.workoutSession.reps, 5)
+  assert.equal(moreSetsTurn.workoutSession.sets, 3)
+  assert.equal(moreSetsTurn.workoutSession.correctionRequested, true)
+})
+
 test("coach session state keeps a new explicit meal isolated from the previously saved meal", () => {
   const initial = replayCoachConversation([
     user("i had egg"),
@@ -801,6 +960,22 @@ test("coach session state keeps nutrition questions answer-only instead of reope
   assert.equal(mealSession.clarifyQuestion, "")
   assert.match(mealSession.summary, /3 fried eggs/i)
   assert.match(mealSession.summary, /250ml Earl Grey tea with no milk and no sugar/i)
+})
+
+test("coach session state normalizes inline meal quantity corrections before logging", () => {
+  const next = buildCoachSessionState({
+    recentMessages: [],
+    currentMessage: "i had 200g chicken no wait like half a pound",
+    mealSession: emptyMealSessionState(),
+    workoutSession: emptyWorkoutSessionState(),
+  })
+
+  assert.ok(next.mealSession)
+  assert.equal(next.workoutSession, null)
+  assert.match(next.mealSession.summary.toLowerCase(), /chicken/)
+  assert.doesNotMatch(next.mealSession.summary.toLowerCase(), /no wait/)
+  assert.doesNotMatch(next.mealSession.summary.toLowerCase(), /like half a pound/)
+  assert.match(next.mealSession.summary.toLowerCase(), /(0\.5|half).*(lb|pound).*chicken/)
 })
 
 test("coach session state suppresses active meal logging when the user says not to save it", () => {

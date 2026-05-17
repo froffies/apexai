@@ -1,6 +1,7 @@
 const QUANTITY_WORDS = new Map([
   ["a", 1],
   ["an", 1],
+  ["half", 0.5],
   ["one", 1],
   ["two", 2],
   ["three", 3],
@@ -133,6 +134,10 @@ const FOOD_HINT_WORDS = ["egg", "eggs", "chicken", "rice", "beef", "pork", "lamb
 const QUANTITY_UNITS = [
   "kg",
   "g",
+  "lb",
+  "lbs",
+  "pound",
+  "pounds",
   "gram",
   "grams",
   "ml",
@@ -177,6 +182,7 @@ const QUANTITY_UNITS = [
 const GENERIC_PORTION_UNITS = new Set([
   "g",
   "kg",
+  "lb",
   "ml",
   "l",
   "cup",
@@ -236,7 +242,7 @@ const PREPARATION_PATTERNS = [
 ]
 
 const QUANTITY_PATTERN = new RegExp(
-  `(?<amount>\\d+(?:\\.\\d+)?|${[...QUANTITY_WORDS.keys()].join("|")})\\s*(?:(?<intensity>whole|entire)\\s+)?(?<unit>${QUANTITY_UNITS.join("|")})\\b(?:\\s+of)?\\s*(?<food>.*)$`,
+  `(?<amount>\\d+(?:\\.\\d+)?|${[...QUANTITY_WORDS.keys()].join("|")})\\s*(?:(?<intensity>whole|entire|a)\\s+)?(?<unit>${QUANTITY_UNITS.join("|")})\\b(?:\\s+of)?\\s*(?<food>.*)$`,
   "i"
 )
 const TOTAL_ONLY_PATTERN = new RegExp(
@@ -307,6 +313,7 @@ function toAmount(raw) {
 function normalizeUnit(unit) {
   const text = cleanText(unit)
   if (!text) return ""
+  if (text === "pound" || text === "pounds" || text === "lb" || text === "lbs") return "lb"
   if (text === "gram" || text === "grams") return "g"
   if (text === "litre" || text === "litres" || text === "liter" || text === "liters") return "l"
   if (text === "tablespoon" || text === "tablespoons") return "tbsp"
@@ -328,7 +335,7 @@ function normalizeUnit(unit) {
 function pluralizeCountUnit(unit, amount) {
   const normalized = normalizeUnit(unit)
   if (!normalized || Number(amount) === 1) return normalized
-  if (["g", "kg", "ml", "l", "tbsp", "tsp"].includes(normalized)) return normalized
+  if (["g", "kg", "lb", "ml", "l", "tbsp", "tsp"].includes(normalized)) return normalized
   if (normalized.endsWith("ch") || normalized.endsWith("sh") || normalized.endsWith("x") || normalized.endsWith("z")) {
     return `${normalized}es`
   }
@@ -358,6 +365,7 @@ function uniqueNormalizedValues(values = []) {
 
 function normalizeLabel(label) {
   return cleanText(label)
+    .replace(/^(?:(?:actually|also|and then|then)\s+)*(?:i\s+)?(?:had|ate|drank)\s+/, "")
     .replace(/^(?:but|and)\s+(?:i\s+)?(?:had|ate|drank)\s+/, "")
     .replace(/^(?:i had|had|i ate|ate|i drank|drank|log|track|save|add|include)\s+/, "")
     .replace(/\b(?:please|thanks|thank you)\b/g, "")
@@ -368,8 +376,9 @@ function normalizeLabel(label) {
 
 const CORRECTION_LEAD_PATTERNS = [
   /^(?:actually|sorry|correction)\s+/i,
+  /^(?:no\s+wait|wait)\s+/i,
   /^(?:no|nah),?\s+i meant\s+/i,
-  /^(?:i meant|it was|it is)\s+/i,
+  /^(?:i meant|i mean|it was|it is)\s+/i,
   /^(?:make that|change that(?: to)?|update that(?: to)?|instead)\s+/i,
 ]
 
