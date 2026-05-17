@@ -11,6 +11,7 @@ const REPEAT_RECENT_MEAL_PATTERN = /\b(?:same as yesterday|same as last time|sam
 const MEAL_LOG_QUERY_PATTERN = /^(?:what(?:'s|s| is)?|show|list|see|view|display)\b.*\b(?:today'?s?|todays?|my)\b.*\b(?:nutrition|food|meal|meals|log)\b/i
 const NUTRITION_QUESTION_PATTERN = /^(?:is|are|does|do|can|should|will|would|what(?:'s|s| is)?|how(?:'s|s| is| much| many)?|which|why)\b.{0,80}?\b(?:better|best|worse|good|bad|healthy|unhealthy|high|low|more|less|enough|too much|work|help|cause|prevent|affect)\b/i
 const WORKOUT_QUESTION_PATTERN = /^(?:is|are|does|do|can|should|will|would|what(?:'s|s| is)?|how(?:'s|s| is| much| many)?|which|why)\b.{0,120}?\b(?:workout[s]?|exercises?|training|run(?:ning)?|ran|cardio|gym|lift(?:ing)?|muscle[s]?|fitness|calories?|burn(?:ing)?|strength|endurance|recover(?:y)?|rest)\b/i
+const POST_SAVE_NUTRITION_QUERY_PATTERN = /^(?:how\s+(?:much|many)|am\s+i\s+(?:over|under|hitting|at)|what(?:'s|s|\s+is)?\s+(?:my|are\s+my)|what(?:'s|s|\s+is)\s+(?:my\s+)?(?:total|remaining)|did\s+i\s+(?:hit|reach|exceed)|how\s+(?:close|far))\b.{0,80}?\b(?:protein|fat|carbs?|calories?|kcal|macros?|target|goal|limit|intake)\b/i
 const VAGUE_TIME_REF_PATTERN = /\b(?:yesterday|last night|last week|earlier today|before|already|just ate|just had)\b/i
 const VAGUE_REFERENCE_PATTERN = /^(?:(?:i\s+)?(?:had|ate|drank|eaten))\s+(?:that|the same|same thing|it|the usual|the same as|lunch already|dinner already|breakfast already|that already)\b/i
 const FRUSTRATION_PATTERN = /\b(?:why did you|why cant you|you suck|what the|thats not what|thats wrong|youre wrong|you got it wrong|why would you|stop doing|you keep|you always|i cant believe|this is wrong|you messed up)\b/i
@@ -582,6 +583,30 @@ function buildMealSessionState(recentMessages = [], currentMessage = "", existin
   // handling when there is no active session. When a session IS persisted, let the
   // delete/correction path handle it instead.
   if (!prior.active && !prior.persisted && FRUSTRATION_PATTERN.test(cleanText(currentMessage))) return null
+  // After a meal is saved, macro/nutrition questions like "how much protein is in that" or
+  // "am i over my fat target" should be answered in the context of the recently saved meal,
+  // not routed to GENERAL with no context. Return an answerOnly session so the AI uses the
+  // meal system prompt with "answer without saving" instruction.
+  if (
+    prior.persisted
+    && !prior.active
+    && !mealDeleteRequested(currentMessage)
+    && !mealRejectionRequested(currentMessage)
+    && !mealCorrectionRequested(currentMessage)
+    && POST_SAVE_NUTRITION_QUERY_PATTERN.test(cleanText(currentMessage))
+  ) {
+    return {
+      ...emptyMealSessionState(),
+      persisted: true,
+      persistedMealId: String(prior.persistedMealId || ""),
+      persistedSummary: String(prior.persistedSummary || prior.summary || ""),
+      persistedAt: String(prior.persistedAt || ""),
+      summary: String(prior.persistedSummary || prior.summary || ""),
+      answerOnly: true,
+      readyToLog: false,
+      thread_messages: buildThreadMessages(recentMessages, currentMessage),
+    }
+  }
   if (
     prior.persisted
     && !prior.active

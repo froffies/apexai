@@ -413,7 +413,10 @@ test("post-save nutrition questions route away from a persisted meal session", (
     workoutSession: emptyWorkoutSessionState(),
   })
 
-  assert.equal(next.mealSession, null)
+  assert.ok(next.mealSession, "should return an answerOnly session, not null, so the AI has saved meal context")
+  assert.equal(next.mealSession.answerOnly, true)
+  assert.equal(next.mealSession.readyToLog, false)
+  assert.equal(next.mealSession.persisted, true)
   assert.equal(next.workoutSession, null)
 })
 
