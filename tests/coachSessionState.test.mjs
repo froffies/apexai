@@ -417,6 +417,25 @@ test("post-save nutrition questions route away from a persisted meal session", (
   assert.equal(next.workoutSession, null)
 })
 
+test("apostrophe-free nutrition questions and target checks do not open meal sessions", () => {
+  const cases = [
+    "whats my total calories so far today",
+    "am i over my fat target",
+  ]
+
+  for (const currentMessage of cases) {
+    const next = buildCoachSessionState({
+      recentMessages: [],
+      currentMessage,
+      mealSession: emptyMealSessionState(),
+      workoutSession: emptyWorkoutSessionState(),
+    })
+
+    assert.equal(next.mealSession, null, currentMessage)
+    assert.equal(next.workoutSession, null, currentMessage)
+  }
+})
+
 test("comparative food questions do not open a meal clarification flow", () => {
   const cases = [
     "is brown rice better than white?",

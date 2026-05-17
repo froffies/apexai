@@ -301,7 +301,7 @@ function normalizeTrailingMealQuantityMessage(message = "") {
   const match = raw.match(TRAILING_MEAL_QUANTITY_PATTERN)
   if (!match?.groups?.food || !match?.groups?.amount || !match?.groups?.unit) return raw
   const lead = String(match.groups.lead || "")
-  const food = String(match.groups.food || "").trim()
+  const food = String(match.groups.food || "").trim().replace(/^(?:a|an)\s+/i, "")
   const amount = String(match.groups.amount || "").trim()
   const article = String(match.groups.article || "").trim()
   const unit = String(match.groups.unit || "").trim()
