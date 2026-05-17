@@ -887,6 +887,78 @@ test("deterministic coach nutrition answers still work when OpenAI is unavailabl
   assert.match(coach.reply, /if you want it saved, tell me to log it/i)
 })
 
+test("deterministic coach can combine a clarified meal and a remembered workout from the same mixed thread", async (t) => {
+  const port = randomPort()
+  const serverProcess = spawn(process.execPath, [serverEntry], {
+    cwd,
+    env: {
+      ...process.env,
+      OPENAI_COACH_PORT: String(port),
+      OPENAI_COACH_REQUIRE_AUTH: "false",
+      OPENAI_COACH_CORS_ORIGIN: "http://127.0.0.1:5173",
+      OPENFOODFACTS_ENABLED: "false",
+      OPENAI_API_KEY: "",
+      NODE_ENV: "production",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  })
+
+  t.after(async () => {
+    serverProcess.kill()
+  })
+
+  await waitForHealth(port)
+
+  const firstResponse = await fetch(`http://127.0.0.1:${port}/api/coach`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Origin: "http://127.0.0.1:5173",
+    },
+    body: JSON.stringify({
+      message: "i had eggs and did 4 pushups",
+      mealSession: {},
+      workoutSession: {},
+    }),
+  })
+  const firstCoach = await firstResponse.json()
+  assert.equal(firstResponse.status, 200)
+  assert.equal(firstCoach.actions?.[0]?.type, "clarify")
+  assert.match(firstCoach.reply, /how many eggs/i)
+  assert.ok(firstCoach.workout_session)
+  assert.equal(firstCoach.workout_session.readyToLog, true)
+  assert.equal(firstCoach.workout_session.exercise_name, "Pushups")
+  assert.equal(firstCoach.workout_session.reps, 4)
+
+  const secondResponse = await fetch(`http://127.0.0.1:${port}/api/coach`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Origin: "http://127.0.0.1:5173",
+    },
+    body: JSON.stringify({
+      message: "18",
+      recentMessages: [
+        { role: "user", content: "i had eggs and did 4 pushups" },
+        { role: "assistant", content: "How many eggs did you have?" },
+      ],
+      mealSession: firstCoach.meal_session,
+      workoutSession: firstCoach.workout_session,
+    }),
+  })
+  const secondCoach = await secondResponse.json()
+  assert.equal(secondResponse.status, 200)
+  assert.equal(Array.isArray(secondCoach.actions), true)
+  assert.equal(secondCoach.actions.length, 2)
+  assert.equal(secondCoach.actions[0]?.type, "log_meal")
+  assert.equal(secondCoach.actions[0]?.food_name, "18 eggs")
+  assert.equal(secondCoach.actions[1]?.type, "log_workout")
+  assert.equal(secondCoach.actions[1]?.exercise_name, "Pushups")
+  assert.equal(secondCoach.actions[1]?.reps, 4)
+  assert.match(secondCoach.reply, /saved to today'?s nutrition/i)
+  assert.match(secondCoach.reply, /saved to workouts/i)
+})
+
 test("deterministic coach repeat-meal logging works when OpenAI is unavailable", async (t) => {
   const port = randomPort()
   const serverProcess = spawn(process.execPath, [serverEntry], {

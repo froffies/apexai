@@ -417,6 +417,41 @@ test("post-save nutrition questions route away from a persisted meal session", (
   assert.equal(next.workoutSession, null)
 })
 
+test("coach session state splits same-turn meal and workout fragments so the workout does not become food", () => {
+  const firstTurn = buildCoachSessionState({
+    recentMessages: [],
+    currentMessage: "i had eggs and did 4 pushups",
+    mealSession: emptyMealSessionState(),
+    workoutSession: emptyWorkoutSessionState(),
+  })
+
+  assert.ok(firstTurn.mealSession)
+  assert.ok(firstTurn.workoutSession)
+  assert.match(firstTurn.mealSession.clarifyQuestion, /how many eggs/i)
+  assert.equal(firstTurn.mealSession.summary, "eggs")
+  assert.equal(firstTurn.workoutSession.readyToLog, true)
+  assert.equal(firstTurn.workoutSession.exercise_name, "Pushups")
+  assert.equal(firstTurn.workoutSession.reps, 4)
+
+  const secondTurn = buildCoachSessionState({
+    recentMessages: [
+      user("i had eggs and did 4 pushups"),
+      assistant("How many eggs did you have?"),
+    ],
+    currentMessage: "18",
+    mealSession: firstTurn.mealSession,
+    workoutSession: firstTurn.workoutSession,
+  })
+
+  assert.ok(secondTurn.mealSession)
+  assert.ok(secondTurn.workoutSession)
+  assert.equal(secondTurn.mealSession.readyToLog, true)
+  assert.equal(secondTurn.mealSession.summary, "18 eggs")
+  assert.equal(secondTurn.workoutSession.readyToLog, true)
+  assert.equal(secondTurn.workoutSession.exercise_name, "Pushups")
+  assert.equal(secondTurn.workoutSession.reps, 4)
+})
+
 test("apostrophe-free nutrition questions and target checks do not open meal sessions", () => {
   const cases = [
     "whats my total calories so far today",

@@ -1575,6 +1575,8 @@ export default function Coach() {
       replyText = "I have the meal details, but I couldn't save it just now."
     } else if (requestedWorkoutPersistence && !workoutSaveSucceeded) {
       replyText = "I have the details, but I couldn't save it just now."
+    } else if (mealSaveSucceeded && workoutSaveSucceeded) {
+      replyText = coachResponse.reply || replyText
     } else if (loggedMeals.length > 1 && !updatedMeals.length) {
       replyText = formatCoachMealBatchConfirmation("Saved to today's nutrition", loggedMeals)
     } else if (updatedMeals.length > 1 && !loggedMeals.length) {

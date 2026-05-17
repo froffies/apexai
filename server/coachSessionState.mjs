@@ -83,6 +83,9 @@ const REJECTION_DELETE_PATTERN = /^(?:no|nah)\s+(?:that'?s wrong|thats wrong|wro
 const INLINE_MEAL_CORRECTION_PATTERN = /^(?<lead>(?:please\s+)?(?:(?:i\s+)?(?:had|ate|drank)|log|track|save|add|include)\s+)(?<first>.+?)\s+(?:no\s+wait|actually|sorry|i\s+meant?|make\s+that|change\s+that(?:\s+to)?|it\s+was)\s+(?<second>.+)$/i
 const TRAILING_MEAL_QUANTITY_PATTERN = /^(?<lead>(?:(?:actually|also|and then|then)\s+)*(?:(?:i\s+)?(?:had|ate|drank)|log|track|save|add|include)\s+)?(?<food>[a-z][a-z\s'/-]+?)\s+(?<amount>\d+(?:\.\d+)?|half)\s*(?:(?<article>a)\s+)?(?<unit>kg|g|lb|lbs|pound|pounds|ml|l|litre|litres|liter|liters|cup|cups|tbsp|tablespoon|tablespoons|tsp|teaspoon|teaspoons|slice|slices|serve|serves|serving|servings|bowl|bowls|plate|plates|mug|mugs)\b$/i
 const BARE_MEAL_MEASURE_NAMES = new Set(["g", "kg", "lb", "ml", "l", "cup", "tbsp", "tsp", "slice", "tin", "can", "block", "bunch", "serve", "bowl", "plate", "mug"])
+const MIXED_TURN_SPLIT_PATTERN = /\b(?:oh\s+and|and then|and|also|then|plus)\b|[,;]+/gi
+const WORKOUT_PIVOT_PATTERN = /^(?:(?:i\s+)?(?:did|trained?|lifted|worked\s+out|ran|run|running|walked|walk|cycled|cycle|biked|bike|swam|swim)\b|(?:bench(?:\s+press)?|incline\s+bench\s+press|overhead\s+press|shoulder\s+press|dumbbell\s+shoulder\s+press|seated\s+row|barbell\s+row|bent\s+over\s+row|lat\s+pulldown|back\s+squat|front\s+squat|squats?|deadlift|romanian\s+deadlift|rdl|leg\s+press|walking\s+lunge|preacher\s+curls?|bicep\s+curl|tricep\s+pushdown|plank|treadmill|rower|elliptical|stairmaster|push\s*ups?|pushups?|pull\s*ups?|pullups?|sit\s*ups?|situps?|burpees?|dips?|lunges?)\b|\d+(?:\.\d+)?\s*(?:push\s*ups?|pushups?|pull\s*ups?|pullups?|sit\s*ups?|situps?|burpees?|dips?|lunges?|squats?)\b)/i
+const MEAL_PIVOT_PATTERN = /^(?:actually\s+)?(?:also\s+)?(?:(?:i\s+)?(?:had|ate|drank))\b/i
 
 function cleanText(value) {
   return String(value || "")
@@ -306,6 +309,76 @@ function normalizeTrailingMealQuantityMessage(message = "") {
   const article = String(match.groups.article || "").trim()
   const unit = String(match.groups.unit || "").trim()
   return `${lead}${amount}${article ? ` ${article}` : ""} ${unit} ${food}`.replace(/\s+/g, " ").trim()
+}
+
+function normalizeWorkoutFragment(message = "") {
+  const raw = String(message || "").trim()
+  if (!raw) return raw
+  if (/^did\b/i.test(raw)) return `i ${raw}`
+  return raw
+}
+
+function stripMixedTurnLead(message = "") {
+  return String(message || "")
+    .trim()
+    .replace(/^(?:oh\s+and|and then|and|also|then|plus)\s+/i, "")
+    .trim()
+}
+
+function looksLikeWorkoutPivotFragment(message = "") {
+  const stripped = stripMixedTurnLead(message)
+  if (!stripped) return false
+  return WORKOUT_PIVOT_PATTERN.test(cleanText(stripped))
+}
+
+function looksLikeMealPivotFragment(message = "") {
+  const stripped = stripMixedTurnLead(message)
+  if (!stripped) return false
+  return MEAL_PIVOT_PATTERN.test(cleanText(stripped))
+}
+
+function splitMixedCoachTurn(message = "") {
+  const raw = String(message || "").trim()
+  if (!raw) return {
+    mealMessage: raw,
+    workoutMessage: raw,
+  }
+
+  const explicitMeal = isExplicitMealStart(raw)
+  const workoutLike = looksLikeWorkoutOnlyTurn(raw)
+  if (!explicitMeal && !workoutLike) {
+    return {
+      mealMessage: raw,
+      workoutMessage: raw,
+    }
+  }
+
+  for (const match of raw.matchAll(MIXED_TURN_SPLIT_PATTERN)) {
+    const splitIndex = match.index ?? -1
+    if (splitIndex < 0) continue
+    const prefix = raw.slice(0, splitIndex).trim().replace(/[,\s]+$/g, "")
+    const suffix = raw.slice(splitIndex + match[0].length).trim().replace(/^[,\s]+/g, "")
+    if (!prefix || !suffix) continue
+
+    if (explicitMeal && looksLikeWorkoutPivotFragment(suffix)) {
+      return {
+        mealMessage: prefix,
+        workoutMessage: normalizeWorkoutFragment(stripMixedTurnLead(suffix)),
+      }
+    }
+
+    if (workoutLike && looksLikeMealPivotFragment(suffix)) {
+      return {
+        mealMessage: stripMixedTurnLead(suffix),
+        workoutMessage: prefix,
+      }
+    }
+  }
+
+  return {
+    mealMessage: raw,
+    workoutMessage: raw,
+  }
 }
 
 function looksLikeWorkoutOnlyTurn(message) {
@@ -1220,8 +1293,9 @@ export function buildCoachSessionState({
   workoutSession = null,
   recentMeals = [],
 } = {}) {
-  let nextMealSession = buildMealSessionState(recentMessages, currentMessage, mealSession, recentMeals)
-  const nextWorkoutSession = buildWorkoutSessionState(recentMessages, currentMessage, workoutSession)
+  const splitTurn = splitMixedCoachTurn(currentMessage)
+  let nextMealSession = buildMealSessionState(recentMessages, splitTurn.mealMessage, mealSession, recentMeals)
+  const nextWorkoutSession = buildWorkoutSessionState(recentMessages, splitTurn.workoutMessage, workoutSession)
 
   if (
     !nextMealSession

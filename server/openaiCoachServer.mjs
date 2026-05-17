@@ -1122,15 +1122,20 @@ async function handleCoach(request, response) {
       return
     }
 
+    const mealActions = mealContext?.readyToLog
+      ? buildDeterministicMealActions({
+          mealSession: mealContext,
+          explicitActions: [],
+          prompt: body.message,
+          candidateFoodMatches,
+          allowAnswerOnly: mealContext?.answerOnly,
+        })
+      : []
+    const workoutAction = workoutContext?.readyToLog
+      ? buildDeterministicWorkoutAction({ workoutSession: workoutContext, explicitActions: [] })
+      : null
     if (mealContext?.readyToLog) {
-      const mealActions = buildDeterministicMealActions({
-        mealSession: mealContext,
-        explicitActions: [],
-        prompt: body.message,
-        candidateFoodMatches,
-        allowAnswerOnly: mealContext?.answerOnly,
-      })
-      if (mealContext?.answerOnly && mealActions[0]) {
+      if (mealContext?.answerOnly && mealActions[0] && !workoutAction) {
         sendCoachPayload({
           reply: formatDeterministicMealAnswer(mealActions[0]),
           actions: [],
@@ -1140,10 +1145,20 @@ async function handleCoach(request, response) {
         }, "deterministic")
         return
       }
-      if (mealActions.length) {
+    }
+
+    const mealClarifyAction = deterministicClarifyActionFromSession(mealContext)
+    const workoutClarifyAction = deterministicClarifyActionFromSession(workoutContext)
+
+    if (!mealClarifyAction && !workoutClarifyAction) {
+      const combinedDeterministicActions = [
+        ...mealActions,
+        ...(workoutAction ? [workoutAction] : []),
+      ]
+      if (combinedDeterministicActions.length) {
         sendCoachPayload({
-          reply: summarizeCoachActions(mealActions) || summarizeCoachAction(mealActions[0]),
-          actions: mealActions,
+          reply: combinedDeterministicActions.map((action) => summarizeCoachAction(action)).filter(Boolean).join(" "),
+          actions: combinedDeterministicActions,
           warnings: [],
           meal_session: mealContext,
           workout_session: workoutContext,
@@ -1152,19 +1167,6 @@ async function handleCoach(request, response) {
       }
     }
 
-    if (!mealContext && workoutContext?.readyToLog) {
-      const workoutAction = buildDeterministicWorkoutAction({ workoutSession: workoutContext, explicitActions: [] })
-      sendCoachPayload({
-        reply: summarizeCoachAction(workoutAction),
-        actions: workoutAction ? [workoutAction] : [],
-        warnings: [],
-        meal_session: mealContext,
-        workout_session: workoutContext,
-      }, "deterministic")
-      return
-    }
-
-    const mealClarifyAction = deterministicClarifyActionFromSession(mealContext)
     if (mealClarifyAction) {
       sendCoachPayload({
         reply: mealClarifyAction.message || "I need a bit more detail before I can log that meal.",
@@ -1176,7 +1178,6 @@ async function handleCoach(request, response) {
       return
     }
 
-    const workoutClarifyAction = deterministicClarifyActionFromSession(workoutContext)
     if (workoutClarifyAction) {
       sendCoachPayload({
         reply: workoutClarifyAction.message,
