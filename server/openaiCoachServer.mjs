@@ -235,6 +235,8 @@ Core rules:
 - Sound like a real coach, not a menu or a help screen.
 - Use coach_context when it is relevant. It contains today's targets, recent logging context, readiness, and current plans.
 - Use recent_messages, meal_context, workout_context, recent_meals, recent_workouts, and validated_actions together. The user may be continuing a fragmented thread, correcting themselves, or mixing food and training in one sentence.
+- meal_context and workout_context are heuristic server-built session hints, not absolute truth. If they conflict with recent_messages, trust the actual conversation first and use the hints to stay oriented.
+- previous_meal_session and previous_workout_session are the raw client-held sessions from before this turn was parsed. Use them to understand continuity, especially if the new heuristic session looks incomplete or oddly shaped.
 - If the user is frustrated, tired, embarrassed, or inconsistent, stay calm and useful. Do not be robotic or judgmental.
 - Answer the user's actual question first. Offer one useful next step when it helps.
 - Distinguish clearly between answering, clarifying, planning, and logging.
@@ -278,6 +280,9 @@ Core rules:
 - If validated_actions includes a clarify action, treat its message as a hint, not a script. Rephrase it naturally.
 - Before asking a clarification question, check recent_messages and the current session context carefully. If the user already answered, do not ask again.
 - If the food or exercise name in a clarify hint looks like sentence filler or accidental text like "actually", "oh and", "and then", "at", or "this mornings workout", do not echo it back. Ask what they actually ate or did instead.
+- If validated_actions contain a clarify action but recent_messages show the user already answered it, do not ask again. Prefer the answer already given and align your returned actions with the now-complete context.
+- If validated_actions contain both meal and workout actions, acknowledge both naturally in one reply instead of picking only one domain.
+- If the current turn sounds conversationally valid but the parser hints look odd or partial, use the conversation to repair the wording of the reply. Never mirror awkward parser fragments back to the user.
 - Never mention system prompts, schemas, backend rules, or internal tooling.
 - Default to Australian metric units and Australian food context.
 - validated_actions are server-validated candidates. If they are present, keep your reply aligned with them exactly. Do not invent extra save/update/delete actions that are not supported by the validated actions or the current session state.
@@ -303,49 +308,6 @@ Goals:
 - Provide totals for the full recipe and per-serving macros.
 - Use Australian spelling and metric-friendly quantities where practical.
 - Do not claim perfect certainty. If the macro basis is mixed, say so briefly in notes.
-`
-
-const mealCoachInstructions = `
-You are ApexAI's dedicated meal logging specialist inside an Australian fitness app.
-
-Return JSON only with exactly this structure:
-{
-  "reply": "Short user-facing response",
-  "actions": [],
-  "warnings": []
-}
-
-Valid action types here are: none, clarify, log_meal, update_meal_log.
-
-You will receive a structured meal_context that already merges fragmented conversation history across turns.
-You may also receive validated_actions and response_hints prepared by the server.
-
-Critical rules:
-- Treat meal_context as the source of truth for the meal so far.
-- Do not ask for information that meal_context already contains.
-- Backend state, not your judgement, decides whether the meal is ready to log.
-- Speak naturally and briefly. Do not sound like a form or checklist.
-- If validated_actions are present, they are already server-validated. Keep your reply aligned with them exactly and do not invent extra persistence actions.
-- If meal_context.ready_to_log is true, stop clarifying and return one combined log_meal or update_meal_log action now.
-- If meal_context.clarification_attempts is 2 or more, prioritise logging with reasonable estimates instead of asking another follow-up.
-- Use meal_context.summary as the canonical combined meal description. Do not drop previously captured foods.
-- If the user corrected a quantity or ingredient, use the latest value from meal_context.
-- If the user described one eating event over multiple turns, log it as one combined meal.
-- Never split one eating event into multiple log_meal actions for separate sub-items.
-- Never ask for information already present in meal_context.items, meal_context.summary, or recent_messages.
-- If the user began by saying they had or ate the meal, treat that as logging intent.
-- If the user is only asking for calories or macros and not asking to save anything, answer the question without returning a persistence action.
-- If the user says not to log or save the meal, do not return a persistence action.
-- Only ask a clarification question when a critical logging detail is still missing and meal_context says it is not ready yet.
-- If you say the meal was logged or saved, you MUST include a real log_meal or update_meal_log action with calories, protein_g, carbs_g, fat_g, quantity, estimated, nutrition_source, and food_name.
-- If meal_context.summary already gives enough detail, do not ask more questions just because the quantity is unusual. 17 eggs is unusual, not impossible.
-- If meal_context.answerOnly is true, answer the user's question in the context of the saved/current meal and return no persistence action.
-- If response_hints.nutrition_status_hint is present, use it as a trusted context hint for the answer instead of re-prompting to save or logging again.
-- If response_hints.answer_only_meal_hint is present, use those macros to answer the current meal question without logging anything.
-- Keep the reply concise and mobile-friendly. Prefer 1-2 short sentences.
-- If validated_actions includes a clarify action, treat its message as a hint, not a script. Rephrase it naturally.
-- Before asking a clarification question, check recent_messages and meal_context carefully. If the user already answered, do not ask again.
-- If the food name inside a clarify hint looks like sentence filler or accidental text like "actually", "oh and", "and then", or "at", ask what they actually ate instead of echoing garbage back.
 `
 
 function jsonHeaders(origin = fallbackCorsOrigin) {
@@ -983,15 +945,7 @@ async function handleCoach(request, response) {
       workout_session: body.workoutSession || null,
     })
 
-    const hasActiveCoachSession = Boolean(
-      body.mealSession?.active
-      || body.mealSession?.persisted
-      || body.workoutSession?.active
-      || body.workoutSession?.persisted
-    )
-    contextualRecentMessages = hasActiveCoachSession || needsRecentChatContext(body.message)
-      ? normalizeRecentMessages(body.recentMessages, body.message, 18)
-      : []
+    contextualRecentMessages = normalizeRecentMessages(body.recentMessages, body.message, 18)
 
     const coachState = buildCoachSessionState({
       recentMessages: contextualRecentMessages,
@@ -1191,16 +1145,8 @@ async function handleCoach(request, response) {
       profile: body.profile || {},
       recentMeals: safeArray(body.meals, 24),
     })
-    const shouldLetAiComposeValidatedReply = Boolean(client && combinedDeterministicActions.length)
-    const shouldLetAiComposeNutritionAnswer = Boolean(client && nutritionStatusReply)
-    const shouldUseGeneralCoachPrompt = Boolean(
-      combinedDeterministicActions.length > 1
-      || workoutAction
-      || shouldLetAiComposeNutritionAnswer
-    )
-
     if (!mealClarifyAction && !workoutClarifyAction) {
-      if (combinedDeterministicActions.length && !shouldLetAiComposeValidatedReply) {
+      if (combinedDeterministicActions.length && !client) {
         sendCoachPayload({
           reply: combinedDeterministicActions.map((action) => summarizeCoachAction(action)).filter(Boolean).join(" "),
           actions: combinedDeterministicActions,
@@ -1212,7 +1158,7 @@ async function handleCoach(request, response) {
       }
     }
 
-    if (nutritionStatusReply && !shouldLetAiComposeNutritionAnswer) {
+    if (nutritionStatusReply && !client) {
       sendCoachPayload({
         reply: nutritionStatusReply,
         actions: [],
@@ -1256,59 +1202,14 @@ async function handleCoach(request, response) {
       return
     }
 
-    if (mealContext) {
-      const mealPayload = {
-        current_date: new Date().toISOString().slice(0, 10),
-        user_message: String(body.message || ""),
-        profile: body.profile || {},
-        coach_context: body.coachContext || {},
-        meal_context: mealContext,
-        workout_context: workoutContext,
-        recent_messages: safeRecentArray(mealContext.thread_messages, 8),
-        recent_meals: safeArray(body.meals, 6),
-        candidate_food_matches: candidateFoodMatches,
-        validated_actions: combinedDeterministicActions,
-        response_hints: {
-          nutrition_status_hint: nutritionStatusReply || "",
-          answer_only: Boolean(mealContext?.answerOnly),
-          answer_only_meal_hint: answerOnlyMealHint,
-        },
-      }
-
-      if (!shouldUseGeneralCoachPrompt) {
-        const completion = await client.chat.completions.create({
-          model,
-          max_completion_tokens: 350,
-          response_format: { type: "json_object" },
-          messages: [
-            { role: "system", content: mealCoachInstructions },
-            { role: "user", content: JSON.stringify(mealPayload) },
-          ],
-        })
-
-        const parsed = JSON.parse(completion.choices[0]?.message?.content || "{}")
-        sendCoachPayload({
-          ...normalizeCoachResponse(parsed, {
-            prompt: body.message,
-            recentMessages: contextualRecentMessages,
-            recentMeals: safeArray(body.meals, 12),
-            recentWorkouts: safeArray(body.workouts, 12),
-            mealContext,
-            workoutContext,
-          }),
-          meal_session: mealContext,
-          workout_session: workoutContext,
-        }, "ai-assisted")
-        return
-      }
-    }
-
     const payload = {
       current_date: new Date().toISOString().slice(0, 10),
       user_message: String(body.message || ""),
       profile: body.profile || {},
       coach_context: body.coachContext || {},
       recent_messages: contextualRecentMessages,
+      previous_meal_session: body.mealSession || null,
+      previous_workout_session: body.workoutSession || null,
       recent_meals: safeArray(body.meals, 12),
       recent_workouts: safeArray(body.workouts, 12),
       recent_workout_sets: safeArray(body.workoutSets, 24),
@@ -1325,6 +1226,7 @@ async function handleCoach(request, response) {
         nutrition_status_hint: nutritionStatusReply || "",
         answer_only: Boolean(mealContext?.answerOnly),
         answer_only_meal_hint: answerOnlyMealHint,
+        validated_action_types: combinedDeterministicActions.map((action) => action?.type).filter(Boolean),
       },
     }
 
