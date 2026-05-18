@@ -213,6 +213,7 @@ const QUESTION_PREFIX_PATTERN = /^(?:how many|how much|what(?:'s|s| is)?|how(?:'
 const WORKOUT_ONLY_PATTERN = /\b(bench press|incline bench|overhead press|shoulder press|preacher curl|bicep curl|tricep pushdown|lat pulldown|pull ups?|push ups?|pullups?|pushups?|situps?|sit ups?|burpees?|dips?|squat|squats|deadlift|rdl|lunge|lunges|leg press|seated row|barbell row|row|rows|treadmill|bike|rower|elliptical|stairmaster|sets?|reps?)\b/i
 const WORKOUT_X_PATTERN = /\b\d+(?:\.\d+)?\s*kg\b\s*x\s*\d+\s*x\s*\d+\b/i
 const WORKOUT_CARDIO_PATTERN = /\b\d+\s*(?:min|mins|minutes)\s*(?:incline treadmill|treadmill|bike|rower|elliptical|stairmaster|run|walk)\b/i
+const WORKOUT_DISTANCE_PATTERN = /\b(?:ran|run|running|walked|walk|cycled|cycle|biked|bike|swam|swim)\s+\d+(?:\.\d+)?\s*(?:km|mi|miles?)\b|\b\d+(?:\.\d+)?\s*(?:km|mi|miles?)\s+(?:run|running|walk|walking|bike|cycling|cycle|swim|swimming)\b/i
 const MEAL_LOG_QUERY_PATTERN = /^(?:what(?:'s|s| is)?|show|list|see|view|display)\b.*\b(?:today'?s?|todays?|my)\b.*\b(?:nutrition|food|meal|meals|log)\b/i
 const REMOVAL_PATTERN = /^(?:actually\s+)?(?:remove|without|skip|delete|drop)\s+(?<item>.+)$|^(?:actually\s+)?no\s+(?<item2>.+)$/i
 const TARGETED_REPLACEMENT_PATTERN = /^(?:actually\s+)?(?:update|change|make)\s+(?:the\s+)?(?<target>.+?)\s+to\s+(?<replacement>.+)$/i
@@ -259,6 +260,10 @@ const INHERITED_GROUP_PATTERN = new RegExp(
 )
 const VARIANT_FRAGMENT_PATTERN = new RegExp(
   `^(?:(?:the\\s+)?rest(?:\\s+of\\s+(?:it|them))?|(?:\\d+(?:\\.\\d+)?|${[...QUANTITY_WORDS.keys()].join("|")})\\s*(?:${QUANTITY_UNITS.join("|")})?)\\s+[a-z]`,
+  "i"
+)
+const EACH_QUANTITY_PATTERN = new RegExp(
+  `^(?:about|around|roughly|approx(?:imately)?|bout)?\\s*(?<amount>\\d+(?:\\.\\d+)?|${[...QUANTITY_WORDS.keys()].join("|")})\\s*(?:(?<intensity>whole|entire)\\s+)?(?<unit>${QUANTITY_UNITS.join("|")})\\s+each$`,
   "i"
 )
 
@@ -541,7 +546,7 @@ function looksFoodishPhrase(text) {
 function looksLikeWorkoutOnly(text) {
   const normalized = cleanText(text)
   if (!normalized || looksFoodishPhrase(normalized) || MEAL_VERBS.test(normalized)) return false
-  if (WORKOUT_X_PATTERN.test(normalized) || WORKOUT_CARDIO_PATTERN.test(normalized)) return true
+  if (WORKOUT_X_PATTERN.test(normalized) || WORKOUT_CARDIO_PATTERN.test(normalized) || WORKOUT_DISTANCE_PATTERN.test(normalized)) return true
   return WORKOUT_ONLY_PATTERN.test(normalized)
 }
 
@@ -1053,6 +1058,13 @@ function parseQuantityOnly(text) {
   const match = normalized.match(new RegExp(`^(?<amount>\\d+(?:\\.\\d+)?|${[...QUANTITY_WORDS.keys()].join("|")})\\s*(?:(?<intensity>whole|entire)\\s+)?(?<unit>${QUANTITY_UNITS.join("|")})$`, "i"))
   if (!match?.groups) return null
   if (normalizeUnit(match.groups.unit) === "egg") return null
+  return buildQuantity(match.groups.amount, match.groups.unit, match.groups.intensity)
+}
+
+function parseEachQuantity(text) {
+  const normalized = cleanText(stripCorrectionLead(text))
+  const match = normalized.match(EACH_QUANTITY_PATTERN)
+  if (!match?.groups?.amount || !match?.groups?.unit) return null
   return buildQuantity(match.groups.amount, match.groups.unit, match.groups.intensity)
 }
 
@@ -1955,6 +1967,17 @@ function applyPendingQuantity(state, item) {
   }
 }
 
+function applySharedQuantityToUnquantifiedItems(state, quantity) {
+  if (!quantity) return false
+  const targets = state.items.filter((item) => !item.attachedTo && item.category !== "ingredient" && !item.quantity)
+  if (targets.length < 2) return false
+  let changed = false
+  for (const target of targets) {
+    changed = upsertItem(state, { ...target, quantity: { ...quantity } }, { preferLast: true }) || changed
+  }
+  return changed
+}
+
 function findPendingClarificationItem(state, pending) {
   const normalized = normalizePendingClarification(pending)
   if (!normalized) return null
@@ -2240,6 +2263,10 @@ function mergeClauseIntoState(state, clause) {
 
   let changed = false
 
+  if (looksLikeWorkoutOnly(normalizedWithoutAlso)) {
+    return false
+  }
+
   if (looksLikeMetaConversationTurn(clauseText)) {
     return false
   }
@@ -2319,6 +2346,9 @@ function mergeClauseIntoState(state, clause) {
     }
     return recordDeclaredTotal(state, declaredTotal)
   }
+
+  const eachQuantity = parseEachQuantity(clauseText)
+  if (eachQuantity && applySharedQuantityToUnquantifiedItems(state, eachQuantity)) return true
 
   const explicitCookingAttachment = parseCookingAttachmentClause(state, clauseText)
   if (explicitCookingAttachment) {
@@ -2807,6 +2837,9 @@ function buildClarifyQuestion(state) {
   const firstMissing = pickClarificationTarget(state, missing)
   const baseName = cleanText(firstMissing.item.baseName || firstMissing.item.label)
   const displayName = titleCase(defaultDisplayLabel(baseName, firstMissing.item.label || firstMissing.item.baseName))
+  if (looksComplaintDerivedBaseName(baseName)) {
+    return "What food are you trying to log?"
+  }
   if (pending?.invalidReply && pending.type === "quantity") {
     if (baseName === "egg") return "I'm asking how many eggs you had."
     return `I'm asking how much ${displayName.toLowerCase()} you had.`

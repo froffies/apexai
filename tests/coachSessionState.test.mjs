@@ -1031,6 +1031,62 @@ test("frustrated log reversal threads do not turn complaint text into meal or wo
   assert.equal(Boolean(workoutSession?.readyToLog), false)
 })
 
+test("persisted meal delete requests outrank frustration text and do not reopen meal parsing", () => {
+  const initial = replayCoachConversation([
+    user("i had burrito"),
+    assistant("How much burrito did you have?"),
+    user("300g"),
+  ])
+  const persistedMeal = makePersistedMealSession(initial.mealSession)
+  const next = buildCoachSessionState({
+    recentMessages: [
+      ...initial.history,
+      assistant("Saved to today's nutrition: 300g burrito."),
+    ],
+    currentMessage: "no thats wrong, why did you save that, delete it",
+    mealSession: persistedMeal,
+    workoutSession: emptyWorkoutSessionState(),
+  })
+
+  assert.ok(next.mealSession)
+  assert.equal(next.mealSession.deleteRequested, true)
+  assert.equal(next.mealSession.alreadyLogged, false)
+  assert.equal(Boolean(next.mealSession.clarifyQuestion), false)
+  assert.doesNotMatch(String(next.mealSession.summary || "").toLowerCase(), /why did you|delete it/)
+})
+
+test("vague workout references ask for the exercise instead of inventing a workout label", () => {
+  const next = buildCoachSessionState({
+    recentMessages: [],
+    currentMessage: "this mornings workout",
+    mealSession: emptyMealSessionState(),
+    workoutSession: emptyWorkoutSessionState(),
+  })
+
+  assert.equal(next.mealSession, null)
+  assert.ok(next.workoutSession)
+  assert.equal(next.workoutSession.exercise_name, "")
+  assert.equal(next.workoutSession.clarifyQuestion, "What exercise or cardio did you do?")
+})
+
+test("fragmented shared quantities apply to all unresolved foods instead of creating an 'each' item", () => {
+  const { mealSession } = replayCoachConversation([
+    user("i had"),
+    assistant("What did you have for your meal?"),
+    user("chicken"),
+    assistant("How much chicken did you have?"),
+    user("and rice"),
+    assistant("How much rice did you have?"),
+    user("about 200g each"),
+  ])
+
+  assert.ok(mealSession)
+  assert.equal(mealSession.readyToLog, true)
+  assert.match(String(mealSession.summary || "").toLowerCase(), /200g chicken/)
+  assert.match(String(mealSession.summary || "").toLowerCase(), /200g rice/)
+  assert.doesNotMatch(String(mealSession.summary || "").toLowerCase(), /\beach\b/)
+})
+
 test("coach session state keeps nutrition questions answer-only instead of reopening a fresh log", () => {
   const { mealSession } = replayCoachConversation([
     user("i had egg and tea"),

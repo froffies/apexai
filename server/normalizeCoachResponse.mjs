@@ -79,6 +79,11 @@ export function normalizeCoachResponse(value, context = {}) {
     return true
   })
 
+  const deterministicClarifyActions = [
+    ...(mealClarifyAction ? [mealClarifyAction] : []),
+    ...(workoutClarifyAction ? [workoutClarifyAction] : []),
+  ]
+
   let actions = []
   let forcedReply = ""
 
@@ -92,16 +97,11 @@ export function normalizeCoachResponse(value, context = {}) {
   } else if (deterministicWorkoutDeleteAction) {
     actions = [deterministicWorkoutDeleteAction]
     forcedReply = summarizeCoachAction(deterministicWorkoutDeleteAction)
-  } else if (mealClarifyAction) {
-    actions = [mealClarifyAction]
-    forcedReply = mealClarifyAction.message
-  } else if (workoutClarifyAction) {
-    actions = [workoutClarifyAction]
-    forcedReply = workoutClarifyAction.message
   } else {
     actions = [
       ...deterministicMealActions,
       ...(deterministicWorkoutAction ? [deterministicWorkoutAction] : []),
+      ...deterministicClarifyActions,
       ...filteredExplicitActions,
     ]
       .map(normalizeMealAction)

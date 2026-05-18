@@ -107,9 +107,9 @@ test("normalizeCoachResponse returns already-logged replies instead of reopening
   assert.match(mealPayload.reply, /already saved Greek yoghurt bowl/i)
 })
 
-test("normalizeCoachResponse prefers deterministic clarification from session state", () => {
+test("normalizeCoachResponse keeps deterministic clarify actions without overriding the AI reply", () => {
   const payload = normalizeCoachResponse({
-    reply: "I've logged that meal for you.",
+    reply: "What did you actually have?",
     actions: [{ type: "log_meal", calories: 100, protein_g: 10, carbs_g: 10, fat_g: 2 }],
     warnings: [],
   }, {
@@ -122,7 +122,39 @@ test("normalizeCoachResponse prefers deterministic clarification from session st
 
   assert.equal(payload.actions.length, 1)
   assert.equal(payload.actions[0].type, "clarify")
-  assert.equal(payload.reply, "How many eggs did you have?")
+  assert.equal(payload.reply, "What did you actually have?")
+})
+
+test("normalizeCoachResponse preserves deterministic workout logs alongside meal clarification actions", () => {
+  const payload = normalizeCoachResponse({
+    reply: "How many eggs did you have? I've also logged your squats.",
+    actions: [],
+    warnings: [],
+  }, {
+    mealContext: {
+      clarifyQuestion: "How many eggs did you have?",
+      readyToLog: false,
+      alreadyLogged: false,
+    },
+    workoutContext: {
+      readyToLog: true,
+      alreadyLogged: false,
+      persistedWorkoutId: "",
+      correctionRequested: false,
+      exercise_name: "Squat",
+      workout_type: "Squat",
+      muscle_group: "full_body",
+      sets: 5,
+      reps: 5,
+      weight_kg: 100,
+      duration_seconds: 0,
+      distance_km: 0,
+    },
+  })
+
+  assert.equal(payload.actions.some((action) => action.type === "clarify"), true)
+  assert.equal(payload.actions.some((action) => action.type === "log_workout"), true)
+  assert.match(payload.reply, /how many eggs/i)
 })
 
 test("normalizeCoachResponse blocks fake persistence wording when no real save action exists", () => {

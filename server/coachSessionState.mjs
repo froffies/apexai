@@ -15,6 +15,7 @@ const POST_SAVE_NUTRITION_QUERY_PATTERN = /^(?:how\s+(?:much|many)|am\s+i\s+(?:o
 const VAGUE_TIME_REF_PATTERN = /\b(?:yesterday|last night|last week|earlier today|before|already|just ate|just had)\b/i
 const VAGUE_REFERENCE_PATTERN = /^(?:(?:i\s+)?(?:had|ate|drank|eaten))\s+(?:that|the same|same thing|it|the usual|the same as|lunch already|dinner already|breakfast already|that already)\b/i
 const FRUSTRATION_PATTERN = /\b(?:why did you|why cant you|you suck|what the|thats not what|thats wrong|youre wrong|you got it wrong|why would you|stop doing|you keep|you always|i cant believe|this is wrong|you messed up)\b/i
+const VAGUE_WORKOUT_REFERENCE_PATTERN = /^(?:this\s+mornings\s+workout|this\s+morning'?s\s+workout|today'?s\s+workout|my\s+workout|the\s+workout|this\s+workout|that\s+workout|workout\s+this\s+morning|training\s+this\s+morning|this\s+mornings\s+training|this\s+morning'?s\s+training)\b/i
 const WORKOUT_REROUTE_PATTERN = /^(?:log|save|add|track|put)\s+(?:it|that|this)\s+(?:in|as|to|under)\s+(?:a\s+|my\s+)?(?:workout|workouts|training|exercise|gym|weights)/i
 const WORKOUT_START_PATTERN = /(?:\b(?:workout|train(?:ed|ing)?|lift(?:ed|ing)?|exercise|exercises|session|cardio|bench|squats?|deadlift|row|rows|press|curls?|pulldown|pull\s*ups?|push\s*ups?|sit\s*ups?|burpees?|dips?|lunges?|treadmill|bike|biked|ran|run|running|swim|swam|walk(?:ed|ing)?|cycling|cycled|rower|elliptical|stairmaster|sets?|reps?)\b)|(?:\d+\s*(?:kg|km|mi|miles?|min(?:utes?)?|sec(?:onds?)?|hours?|cal(?:ories?)?))|(?:\d+\s*x\s*\d+)/i
 const WORKOUT_CORRECTION_PATTERN = /\b(?:actually|correction|change(?:\s+that)?|update(?:\s+that)?|make that|not\b|instead|sorry|i meant)\b/i
@@ -221,6 +222,19 @@ function mealDeleteRequested(message) {
 function genericMealDeleteRequested(message) {
   const normalized = cleanText(message)
   return GENERIC_MEAL_DELETE_PATTERN.test(normalized) || REJECTION_DELETE_PATTERN.test(normalized)
+}
+
+function explicitWholeMealDeleteRequested(message) {
+  const normalized = cleanText(message)
+  if (!normalized) return false
+  if (genericMealDeleteRequested(message)) return true
+  if (/\b(?:delete|undo|erase)\b/.test(normalized)) return true
+  if (/\bremove\b/.test(normalized)) {
+    return /\bremove\s+(?:it|that|this|meal|log|all)\b/.test(normalized)
+      || FRUSTRATION_PATTERN.test(normalized)
+      || mealRejectionRequested(message)
+  }
+  return false
 }
 
 function mealRejectionRequested(message) {
@@ -555,7 +569,7 @@ function buildMealSessionState(recentMessages = [], currentMessage = "", existin
   const prior = normalizeMealSession(existingSession)
   const normalizedCurrent = cleanText(currentMessage)
   const normalizedMealMessage = normalizeTrailingMealQuantityMessage(normalizeInlineMealCorrectionMessage(currentMessage))
-  const deleteRequested = Boolean(prior.persistedMealId && genericMealDeleteRequested(currentMessage))
+  const deleteRequested = Boolean(prior.persistedMealId && explicitWholeMealDeleteRequested(currentMessage))
   const rejectionRequested = Boolean(prior.persistedMealId && mealRejectionRequested(currentMessage))
   const correctionRequested = Boolean(prior.persistedMealId && mealCorrectionRequested(currentMessage))
   const fullCorrectionRestatement = Boolean(
@@ -872,6 +886,7 @@ function mergeWorkoutMetrics(state, patch = {}) {
 function parseWorkoutMessage(message) {
   const text = cleanText(message)
   if (!text) return null
+  if (VAGUE_WORKOUT_REFERENCE_PATTERN.test(text)) return null
 
   const cardioMatch = text.match(/(?:(?<minutes>\d+(?:\.\d+)?)\s*(?:min|mins|minutes)\s*(?<exercise>incline treadmill|treadmill|bike|rower|run|running|walk|walking|elliptical|stairmaster))|(?<exercise2>incline treadmill|treadmill|bike|rower|run|running|walk|walking|elliptical|stairmaster)\s*(?:for)?\s*(?<minutes2>\d+(?:\.\d+)?)\s*(?:min|mins|minutes)/)
   if (cardioMatch?.groups) {
@@ -886,6 +901,28 @@ function parseWorkoutMessage(message) {
       weight_kg: 0,
       duration_seconds: minutes > 0 ? minutes * 60 : 0,
       distance_km: 0,
+    }
+  }
+
+  const distanceOnly = text.match(/(?:(?<exercise>ran|run|running|walked|walk|cycled|cycle|biked|bike|swam|swim)\s+(?<distance>\d+(?:\.\d+)?)\s*(?<unit>km|mi|miles?)\b)|(?:(?<distance2>\d+(?:\.\d+)?)\s*(?<unit2>km|mi|miles?)\s+(?<exercise2>run|running|walk|walking|bike|cycling|cycle|swim|swimming))\b/)
+  if (distanceOnly?.groups) {
+    const rawExercise = distanceOnly.groups.exercise || distanceOnly.groups.exercise2 || ""
+    const rawUnit = cleanText(distanceOnly.groups.unit || distanceOnly.groups.unit2 || "km")
+    const rawDistance = Number(distanceOnly.groups.distance || distanceOnly.groups.distance2 || 0)
+    const distanceKm = rawUnit === "mi" || rawUnit === "miles" ? rawDistance * 1.60934 : rawDistance
+    const exercise = rawExercise.startsWith("walk") ? "Walk"
+      : rawExercise.startsWith("bike") || rawExercise.startsWith("cycl") ? "Bike"
+      : rawExercise.startsWith("sw") ? "Swim"
+      : "Run"
+    return {
+      exercise_name: exercise,
+      workout_type: exercise,
+      muscle_group: "cardio",
+      sets: 1,
+      reps: 0,
+      weight_kg: 0,
+      duration_seconds: 0,
+      distance_km: distanceKm > 0 ? Number(distanceKm.toFixed(2)) : 0,
     }
   }
 
