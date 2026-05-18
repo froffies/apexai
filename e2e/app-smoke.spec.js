@@ -1416,7 +1416,7 @@ test("coach additive follow-ups update a saved meal instead of creating a duplic
 
   await composer.fill("with gravy")
   await page.getByRole("button", { name: /^Send$/i }).click()
-  await expect(page.getByText(/updated today's nutrition: 1 bowl chips with gravy\./i)).toBeVisible()
+  await expect(page.getByText(/updated today's nutrition: 1 bowl chips with gravy/i)).toBeVisible()
 
   await page.goto("/Nutrition")
   const todayMealsSection = page.locator("section").filter({ has: page.getByRole("heading", { name: /today's meals/i }) })

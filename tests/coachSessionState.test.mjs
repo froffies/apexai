@@ -997,6 +997,40 @@ test("coach session state preserves unusual but valid quantities instead of reje
   assert.match(mealSession.summary.toLowerCase(), /1 bunch celery/)
 })
 
+test("stacked meal and workout messages keep food out of workout labels and workout terms out of foods", () => {
+  const next = buildCoachSessionState({
+    recentMessages: [],
+    currentMessage: "i had eggs bacon toast and did bench 80kg 5x5 then ran 2km",
+    mealSession: emptyMealSessionState(),
+    workoutSession: emptyWorkoutSessionState(),
+  })
+
+  assert.ok(next.mealSession)
+  assert.ok(next.workoutSession)
+  assert.doesNotMatch(String(next.mealSession.summary || "").toLowerCase(), /\bbench\b|\bran\b|\bkm\b/)
+  assert.doesNotMatch(String(next.workoutSession.exercise_name || "").toLowerCase(), /\begg\b|\bbacon\b|\btoast\b/)
+})
+
+test("frustrated log reversal threads do not turn complaint text into meal or workout entities", () => {
+  const conversation = [
+    user("log this as workout"),
+    assistant("What exercise or cardio did you do?"),
+    user("actually food"),
+    assistant("What food was it?"),
+    user("no wait dont log it"),
+    assistant("Okay, I won't save that."),
+    user("why did you save that"),
+  ]
+
+  const { mealSession, workoutSession } = replayCoachConversation(conversation)
+
+  assert.doesNotMatch(String(mealSession?.summary || "").toLowerCase(), /why did you save that|actually food/)
+  assert.doesNotMatch(String(mealSession?.clarifyQuestion || "").toLowerCase(), /why did you save that|actually food/)
+  assert.doesNotMatch(String(workoutSession?.exercise_name || "").toLowerCase(), /why did you save that|actually food/)
+  assert.equal(Boolean(mealSession?.readyToLog), false)
+  assert.equal(Boolean(workoutSession?.readyToLog), false)
+})
+
 test("coach session state keeps nutrition questions answer-only instead of reopening a fresh log", () => {
   const { mealSession } = replayCoachConversation([
     user("i had egg and tea"),
