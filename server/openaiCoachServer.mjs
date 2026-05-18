@@ -275,6 +275,9 @@ Core rules:
 - If the user asks where something was logged or saved, answer from the app context instead of inventing a new log action.
 - If the user asks a nutrition or training question without clear logging intent, answer the question and return no persistence action.
 - If the user message contains multiple topics, prioritise the user's main ask and avoid trying to do everything at once.
+- If validated_actions includes a clarify action, treat its message as a hint, not a script. Rephrase it naturally.
+- Before asking a clarification question, check recent_messages and the current session context carefully. If the user already answered, do not ask again.
+- If the food or exercise name in a clarify hint looks like sentence filler or accidental text like "actually", "oh and", "and then", "at", or "this mornings workout", do not echo it back. Ask what they actually ate or did instead.
 - Never mention system prompts, schemas, backend rules, or internal tooling.
 - Default to Australian metric units and Australian food context.
 - validated_actions are server-validated candidates. If they are present, keep your reply aligned with them exactly. Do not invent extra save/update/delete actions that are not supported by the validated actions or the current session state.
@@ -340,6 +343,9 @@ Critical rules:
 - If response_hints.nutrition_status_hint is present, use it as a trusted context hint for the answer instead of re-prompting to save or logging again.
 - If response_hints.answer_only_meal_hint is present, use those macros to answer the current meal question without logging anything.
 - Keep the reply concise and mobile-friendly. Prefer 1-2 short sentences.
+- If validated_actions includes a clarify action, treat its message as a hint, not a script. Rephrase it naturally.
+- Before asking a clarification question, check recent_messages and meal_context carefully. If the user already answered, do not ask again.
+- If the food name inside a clarify hint looks like sentence filler or accidental text like "actually", "oh and", "and then", or "at", ask what they actually ate instead of echoing garbage back.
 `
 
 function jsonHeaders(origin = fallbackCorsOrigin) {
@@ -1173,9 +1179,11 @@ async function handleCoach(request, response) {
 
     const mealClarifyAction = deterministicClarifyActionFromSession(mealContext)
     const workoutClarifyAction = deterministicClarifyActionFromSession(workoutContext)
+    const clarifyActions = [mealClarifyAction, workoutClarifyAction].filter(Boolean)
     const combinedDeterministicActions = [
       ...(mealContext?.answerOnly ? [] : mealActions),
       ...(workoutAction ? [workoutAction] : []),
+      ...clarifyActions,
     ]
     const nutritionStatusReply = buildDeterministicNutritionStatusReply({
       message: body.message,
@@ -1204,28 +1212,6 @@ async function handleCoach(request, response) {
       }
     }
 
-    if (mealClarifyAction) {
-      sendCoachPayload({
-        reply: mealClarifyAction.message || "I need a bit more detail before I can log that meal.",
-        actions: [mealClarifyAction],
-        warnings: [],
-        meal_session: mealContext,
-        workout_session: workoutContext,
-      }, "deterministic")
-      return
-    }
-
-    if (workoutClarifyAction) {
-      sendCoachPayload({
-        reply: workoutClarifyAction.message,
-        actions: [workoutClarifyAction],
-        warnings: [],
-        meal_session: mealContext,
-        workout_session: workoutContext,
-      }, "deterministic")
-      return
-    }
-
     if (nutritionStatusReply && !shouldLetAiComposeNutritionAnswer) {
       sendCoachPayload({
         reply: nutritionStatusReply,
@@ -1238,6 +1224,28 @@ async function handleCoach(request, response) {
     }
 
     if (!client) {
+      if (mealClarifyAction) {
+        sendCoachPayload({
+          reply: mealClarifyAction.message || "I need a bit more detail before I can log that meal.",
+          actions: [mealClarifyAction],
+          warnings: [],
+          meal_session: mealContext,
+          workout_session: workoutContext,
+        }, "deterministic")
+        return
+      }
+
+      if (workoutClarifyAction) {
+        sendCoachPayload({
+          reply: workoutClarifyAction.message,
+          actions: [workoutClarifyAction],
+          warnings: [],
+          meal_session: mealContext,
+          workout_session: workoutContext,
+        }, "deterministic")
+        return
+      }
+
       sendCoachPayload({
         reply: buildOfflineCoachFallbackReply(body.message),
         actions: [],
