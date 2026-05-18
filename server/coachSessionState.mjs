@@ -904,28 +904,6 @@ function parseWorkoutMessage(message) {
     }
   }
 
-  const distanceOnly = text.match(/(?:(?<exercise>ran|run|running|walked|walk|cycled|cycle|biked|bike|swam|swim)\s+(?<distance>\d+(?:\.\d+)?)\s*(?<unit>km|mi|miles?)\b)|(?:(?<distance2>\d+(?:\.\d+)?)\s*(?<unit2>km|mi|miles?)\s+(?<exercise2>run|running|walk|walking|bike|cycling|cycle|swim|swimming))\b/)
-  if (distanceOnly?.groups) {
-    const rawExercise = distanceOnly.groups.exercise || distanceOnly.groups.exercise2 || ""
-    const rawUnit = cleanText(distanceOnly.groups.unit || distanceOnly.groups.unit2 || "km")
-    const rawDistance = Number(distanceOnly.groups.distance || distanceOnly.groups.distance2 || 0)
-    const distanceKm = rawUnit === "mi" || rawUnit === "miles" ? rawDistance * 1.60934 : rawDistance
-    const exercise = rawExercise.startsWith("walk") ? "Walk"
-      : rawExercise.startsWith("bike") || rawExercise.startsWith("cycl") ? "Bike"
-      : rawExercise.startsWith("sw") ? "Swim"
-      : "Run"
-    return {
-      exercise_name: exercise,
-      workout_type: exercise,
-      muscle_group: "cardio",
-      sets: 1,
-      reps: 0,
-      weight_kg: 0,
-      duration_seconds: 0,
-      distance_km: distanceKm > 0 ? Number(distanceKm.toFixed(2)) : 0,
-    }
-  }
-
   const durationOnly = text.match(/(?<minutes>\d+(?:\.\d+)?)\s*(?:min|mins|minutes)\b/)
   if (durationOnly?.groups?.minutes) {
     return {
@@ -1018,6 +996,28 @@ function parseWorkoutMessage(message) {
       weight_kg: Number(match.groups.weight || 0),
       duration_seconds: 0,
       distance_km: 0,
+    }
+  }
+
+  const distanceOnly = text.match(/(?:(?<exercise>ran|run|running|walked|walk|cycled|cycle|biked|bike|swam|swim)\s+(?<distance>\d+(?:\.\d+)?)\s*(?<unit>km|mi|miles?)\b)|(?:(?<distance2>\d+(?:\.\d+)?)\s*(?<unit2>km|mi|miles?)\s+(?<exercise2>run|running|walk|walking|bike|cycling|cycle|swim|swimming))\b/)
+  if (distanceOnly?.groups) {
+    const rawExercise = distanceOnly.groups.exercise || distanceOnly.groups.exercise2 || ""
+    const rawUnit = cleanText(distanceOnly.groups.unit || distanceOnly.groups.unit2 || "km")
+    const rawDistance = Number(distanceOnly.groups.distance || distanceOnly.groups.distance2 || 0)
+    const distanceKm = rawUnit === "mi" || rawUnit === "miles" ? rawDistance * 1.60934 : rawDistance
+    const exercise = rawExercise.startsWith("walk") ? "Walk"
+      : rawExercise.startsWith("bike") || rawExercise.startsWith("cycl") ? "Bike"
+      : rawExercise.startsWith("sw") ? "Swim"
+      : "Run"
+    return {
+      exercise_name: exercise,
+      workout_type: exercise,
+      muscle_group: "cardio",
+      sets: 1,
+      reps: 0,
+      weight_kg: 0,
+      duration_seconds: 0,
+      distance_km: distanceKm > 0 ? Number(distanceKm.toFixed(2)) : 0,
     }
   }
 

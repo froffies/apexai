@@ -1009,6 +1009,7 @@ test("stacked meal and workout messages keep food out of workout labels and work
   assert.ok(next.workoutSession)
   assert.doesNotMatch(String(next.mealSession.summary || "").toLowerCase(), /\bbench\b|\bran\b|\bkm\b/)
   assert.doesNotMatch(String(next.workoutSession.exercise_name || "").toLowerCase(), /\begg\b|\bbacon\b|\btoast\b/)
+  assert.match(String(next.workoutSession.exercise_name || ""), /bench/i)
 })
 
 test("frustrated log reversal threads do not turn complaint text into meal or workout entities", () => {

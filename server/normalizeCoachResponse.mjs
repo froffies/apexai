@@ -109,6 +109,18 @@ export function normalizeCoachResponse(value, context = {}) {
       .slice(0, 8)
   }
 
+  const seenClarifyMessages = new Set()
+  actions = actions.filter((action) => {
+    if (action?.type !== "clarify") return true
+    const message = String(action?.message || "").trim().toLowerCase()
+    if (!message) {
+      return !actions.some((candidate) => candidate?.type === "clarify" && String(candidate?.message || "").trim())
+    }
+    if (seenClarifyMessages.has(message)) return false
+    seenClarifyMessages.add(message)
+    return true
+  })
+
   const originalReply =
     typeof value.reply === "string" && value.reply.trim() ? value.reply.trim() : ""
   const hasPersistenceAction = actions.some(isPersistenceAction)

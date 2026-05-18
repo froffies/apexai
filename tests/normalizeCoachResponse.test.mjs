@@ -157,6 +157,24 @@ test("normalizeCoachResponse preserves deterministic workout logs alongside meal
   assert.match(payload.reply, /how many eggs/i)
 })
 
+test("normalizeCoachResponse deduplicates clarify actions and drops blank clarify duplicates", () => {
+  const payload = normalizeCoachResponse({
+    reply: "What exercise did you do this morning?",
+    actions: [{ type: "clarify", message: "" }],
+    warnings: [],
+  }, {
+    workoutContext: {
+      clarifyQuestion: "What exercise did you do this morning?",
+      readyToLog: false,
+      alreadyLogged: false,
+    },
+  })
+
+  const clarifyActions = payload.actions.filter((action) => action.type === "clarify")
+  assert.equal(clarifyActions.length, 1)
+  assert.equal(clarifyActions[0].message, "What exercise did you do this morning?")
+})
+
 test("normalizeCoachResponse blocks fake persistence wording when no real save action exists", () => {
   const payload = normalizeCoachResponse({
     reply: "I've logged that meal for you.",
