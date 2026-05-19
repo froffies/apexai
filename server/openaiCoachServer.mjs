@@ -235,6 +235,7 @@ Core rules:
 - Sound like a real coach, not a menu or a help screen.
 - Use coach_context when it is relevant. It contains today's targets, recent logging context, readiness, and current plans.
 - Use recent_messages, meal_context, workout_context, recent_meals, recent_workouts, and validated_actions together. The user may be continuing a fragmented thread, correcting themselves, or mixing food and training in one sentence.
+- candidate_fragments contains the server's clause-level mixed-turn decomposition. Use it as a context hint for how the turn may split across meal and workout domains, not as absolute truth.
 - meal_context and workout_context are heuristic server-built session hints, not absolute truth. If they conflict with recent_messages, trust the actual conversation first and use the hints to stay oriented.
 - previous_meal_session and previous_workout_session are the raw client-held sessions from before this turn was parsed. Use them to understand continuity, especially if the new heuristic session looks incomplete or oddly shaped.
 - If the user is frustrated, tired, embarrassed, or inconsistent, stay calm and useful. Do not be robotic or judgmental.
@@ -283,6 +284,7 @@ Core rules:
 - If the food or exercise name in a clarify hint looks like sentence filler or accidental text like "actually", "oh and", "and then", "at", or "this mornings workout", do not echo it back. Ask what they actually ate or did instead.
 - If validated_actions contain a clarify action but recent_messages show the user already answered it, do not ask again. Prefer the answer already given and align your returned actions with the now-complete context.
 - If validated_actions contain both meal and workout actions, acknowledge both naturally in one reply instead of picking only one domain.
+- If candidate_fragments.has_mixed_domains is true, the user sent a message containing both food and exercise. Handle both in your reply. If validated_actions already includes both a meal and workout action, confirm both. If only one side has a validated action, confirm that one and estimate or ask about the other - do not silently drop either side.
 - If the current turn sounds conversationally valid but the parser hints look odd or partial, use the conversation to repair the wording of the reply. Never mirror awkward parser fragments back to the user.
 - Clarify hints are not mandatory. If the user already gave enough detail to estimate and log safely, you may return a valid log or update action instead of a clarify action.
 - If the user asks to "log all that" and the message contains both food and training, do your best to handle both in one turn. If one part is still vague, you may still log the other part and ask one targeted follow-up for the missing piece.
@@ -1128,8 +1130,13 @@ async function handleCoach(request, response) {
       ? buildDeterministicWorkoutAction({ workoutSession: workoutContext, explicitActions: [] })
       : null
     const explicitMixedLogRequest = /\b(?:log|save|track|add)\s+all\s+that\b/i.test(String(body.message || ""))
+    const impliedMixedLogRequest = Boolean(
+      mealContext?.intentGraph?.hasMixedDomains
+      && workoutAction
+      && (mealContext?.intentGraph?.loggingIntent || explicitMixedLogRequest)
+    )
     const mixedMealEstimateActions = (
-      explicitMixedLogRequest
+      (explicitMixedLogRequest || impliedMixedLogRequest)
       && mealContext
       && !mealContext.readyToLog
       && !mealContext.answerOnly
@@ -1250,6 +1257,13 @@ async function handleCoach(request, response) {
       meal_context: mealContext,
       workout_context: workoutContext,
       validated_actions: combinedDeterministicActions,
+      candidate_fragments: {
+        meal: mealContext?.candidateFragments?.meal || [],
+        workout: mealContext?.candidateFragments?.workout || workoutContext?.candidateFragments?.workout || [],
+        has_mixed_domains: Boolean(
+          (mealContext?.intentGraph || workoutContext?.intentGraph)?.hasMixedDomains
+        ),
+      },
       response_hints: {
         nutrition_status_hint: nutritionStatusReply || "",
         answer_only: Boolean(mealContext?.answerOnly),
