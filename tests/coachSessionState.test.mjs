@@ -222,6 +222,31 @@ test("coach session state turns post-save delete intent into a deterministic mea
   assert.equal(next.mealSession.persistedMealId, "meal_delete_live")
 })
 
+test("coach session state treats post-save do-not-log reversals as deterministic meal deletions", () => {
+  const persistedMeal = makePersistedMealSession({
+    ...emptyMealSessionState(),
+    active: false,
+    mealConversation: true,
+    readyToLog: false,
+    summary: "1 burger",
+  }, "meal_suppress_delete")
+
+  const next = buildCoachSessionState({
+    recentMessages: [
+      user("i had a burger"),
+      assistant("Saved to today's nutrition: 1 burger."),
+    ],
+    currentMessage: "actually dont log that",
+    mealSession: persistedMeal,
+    workoutSession: emptyWorkoutSessionState(),
+  })
+
+  assert.ok(next.mealSession)
+  assert.equal(next.mealSession.deleteRequested, true)
+  assert.equal(next.mealSession.persistedMealId, "meal_suppress_delete")
+  assert.equal(next.mealSession.alreadyLogged, false)
+})
+
 test("coach session state turns post-save workout delete intent into a deterministic workout deletion request", () => {
   const initial = replayCoachConversation([
     user("bench press"),
@@ -248,6 +273,34 @@ test("coach session state turns post-save workout delete intent into a determini
   assert.equal(next.workoutSession.deleteRequested, true)
   assert.equal(next.workoutSession.alreadyLogged, false)
   assert.equal(next.workoutSession.persistedWorkoutId, "workout_delete_live")
+})
+
+test("coach session state treats post-save do-not-save reversals as deterministic workout deletions", () => {
+  const persistedWorkout = makePersistedWorkoutSession({
+    ...emptyWorkoutSessionState(),
+    active: false,
+    workoutConversation: true,
+    exercise_name: "Pushups",
+    workout_type: "Pushups",
+    reps: 14,
+    summary: "Pushups:14",
+    readyToLog: false,
+  }, "workout_suppress_delete")
+
+  const next = buildCoachSessionState({
+    recentMessages: [
+      user("i did 14 pushups"),
+      assistant("Saved to Workouts: Pushups."),
+    ],
+    currentMessage: "dont save that",
+    mealSession: emptyMealSessionState(),
+    workoutSession: persistedWorkout,
+  })
+
+  assert.ok(next.workoutSession)
+  assert.equal(next.workoutSession.deleteRequested, true)
+  assert.equal(next.workoutSession.persistedWorkoutId, "workout_suppress_delete")
+  assert.equal(next.workoutSession.alreadyLogged, false)
 })
 
 test("coach session state treats an identical persisted workout message as already logged instead of duplicating it", () => {

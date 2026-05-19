@@ -79,9 +79,11 @@ export function normalizeCoachResponse(value, context = {}) {
     return true
   })
 
+  const explicitMealPersistenceAction = filteredExplicitActions.find(isMealPersistenceAction)
+  const explicitWorkoutPersistenceAction = filteredExplicitActions.find(isWorkoutPersistenceAction)
   const deterministicClarifyActions = [
-    ...(mealClarifyAction ? [mealClarifyAction] : []),
-    ...(workoutClarifyAction ? [workoutClarifyAction] : []),
+    ...(!deterministicMealActions.length && !explicitMealPersistenceAction && mealClarifyAction ? [mealClarifyAction] : []),
+    ...(!deterministicWorkoutAction && !explicitWorkoutPersistenceAction && workoutClarifyAction ? [workoutClarifyAction] : []),
   ]
 
   let actions = []
@@ -135,7 +137,7 @@ export function normalizeCoachResponse(value, context = {}) {
     "Tell me what happened or what you want to change, and I'll help you sort the next move."
 
   if (replyClaimsPersistence(reply) && !hasPersistenceAction && !alreadyLoggedReply) {
-    reply = "I have the details, but I couldn't save it just now."
+    reply = context.nutritionStatusReply || "I have the details, but I couldn't save it just now."
   }
 
   if (context.persistenceAttempted && context.persistenceSucceeded === false) {

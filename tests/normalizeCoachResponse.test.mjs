@@ -110,7 +110,7 @@ test("normalizeCoachResponse returns already-logged replies instead of reopening
 test("normalizeCoachResponse keeps deterministic clarify actions without overriding the AI reply", () => {
   const payload = normalizeCoachResponse({
     reply: "What did you actually have?",
-    actions: [{ type: "log_meal", calories: 100, protein_g: 10, carbs_g: 10, fat_g: 2 }],
+    actions: [],
     warnings: [],
   }, {
     mealContext: {
@@ -157,6 +157,30 @@ test("normalizeCoachResponse preserves deterministic workout logs alongside meal
   assert.match(payload.reply, /how many eggs/i)
 })
 
+test("normalizeCoachResponse drops deterministic meal clarification when the AI already returned a meal persistence action", () => {
+  const payload = normalizeCoachResponse({
+    reply: "I logged 200g chicken and 200g rice for you.",
+    actions: [{
+      type: "log_meal",
+      food_name: "200g chicken, plus 200g rice",
+      calories: 410,
+      protein_g: 38,
+      carbs_g: 36,
+      fat_g: 6,
+    }],
+    warnings: [],
+  }, {
+    mealContext: {
+      clarifyQuestion: "How much chicken did you have?",
+      readyToLog: false,
+      alreadyLogged: false,
+    },
+  })
+
+  assert.equal(payload.actions.filter((action) => action.type === "clarify").length, 0)
+  assert.equal(payload.actions.filter((action) => action.type === "log_meal").length, 1)
+})
+
 test("normalizeCoachResponse deduplicates clarify actions and drops blank clarify duplicates", () => {
   const payload = normalizeCoachResponse({
     reply: "What exercise did you do this morning?",
@@ -190,6 +214,23 @@ test("normalizeCoachResponse blocks fake persistence wording when no real save a
 
   assert.equal(payload.actions.length, 0)
   assert.equal(payload.reply, "I have the details, but I couldn't save it just now.")
+})
+
+test("normalizeCoachResponse falls back to nutrition status wording instead of generic fake-save wording when available", () => {
+  const payload = normalizeCoachResponse({
+    reply: "I've logged that meal for you.",
+    actions: [],
+    warnings: [],
+  }, {
+    mealContext: {
+      readyToLog: false,
+      alreadyLogged: false,
+    },
+    nutritionStatusReply: "You're at about 560 kcal so far today, with 1640 kcal left against your 2200 kcal target.",
+  })
+
+  assert.equal(payload.actions.length, 0)
+  assert.equal(payload.reply, "You're at about 560 kcal so far today, with 1640 kcal left against your 2200 kcal target.")
 })
 
 test("normalizeCoachResponse blocks save wording after a failed persistence attempt", () => {

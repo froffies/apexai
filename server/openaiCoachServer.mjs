@@ -283,6 +283,9 @@ Core rules:
 - If validated_actions contain a clarify action but recent_messages show the user already answered it, do not ask again. Prefer the answer already given and align your returned actions with the now-complete context.
 - If validated_actions contain both meal and workout actions, acknowledge both naturally in one reply instead of picking only one domain.
 - If the current turn sounds conversationally valid but the parser hints look odd or partial, use the conversation to repair the wording of the reply. Never mirror awkward parser fragments back to the user.
+- Clarify hints are not mandatory. If the user already gave enough detail to estimate and log safely, you may return a valid log or update action instead of a clarify action.
+- If the user asks to "log all that" and the message contains both food and training, do your best to handle both in one turn. If one part is still vague, you may still log the other part and ask one targeted follow-up for the missing piece.
+- If the user says "don't log that" or clearly reverses a just-saved item, prefer helping them undo or remove the saved entry rather than treating it like a fresh suppression-only turn.
 - Never mention system prompts, schemas, backend rules, or internal tooling.
 - Default to Australian metric units and Australian food context.
 - validated_actions are server-validated candidates. If they are present, keep your reply aligned with them exactly. Do not invent extra save/update/delete actions that are not supported by the validated actions or the current session state.
@@ -1249,6 +1252,7 @@ async function handleCoach(request, response) {
         recentWorkouts: safeArray(body.workouts, 12),
         mealContext,
         workoutContext,
+        nutritionStatusReply,
       }),
       meal_session: mealContext,
       workout_session: workoutContext,

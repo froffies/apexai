@@ -569,7 +569,10 @@ function buildMealSessionState(recentMessages = [], currentMessage = "", existin
   const prior = normalizeMealSession(existingSession)
   const normalizedCurrent = cleanText(currentMessage)
   const normalizedMealMessage = normalizeTrailingMealQuantityMessage(normalizeInlineMealCorrectionMessage(currentMessage))
-  const deleteRequested = Boolean(prior.persistedMealId && explicitWholeMealDeleteRequested(currentMessage))
+  const deleteRequested = Boolean(
+    prior.persistedMealId
+    && (explicitWholeMealDeleteRequested(currentMessage) || suppressionRequested(currentMessage))
+  )
   const rejectionRequested = Boolean(prior.persistedMealId && mealRejectionRequested(currentMessage))
   const correctionRequested = Boolean(prior.persistedMealId && mealCorrectionRequested(currentMessage))
   const fullCorrectionRestatement = Boolean(
@@ -1185,7 +1188,10 @@ function buildWorkoutSessionState(recentMessages = [], currentMessage = "", exis
   const prior = normalizeWorkoutSession(existingSession)
   const normalizedCurrent = cleanText(currentMessage)
   const correctionRequested = Boolean(prior.persistedWorkoutId && workoutCorrectionRequested(currentMessage))
-  const deleteRequested = Boolean(prior.persistedWorkoutId && workoutDeleteRequested(currentMessage))
+  const deleteRequested = Boolean(
+    prior.persistedWorkoutId
+    && (workoutDeleteRequested(currentMessage) || suppressionRequested(currentMessage))
+  )
   const suppressed = suppressionRequested(currentMessage)
 
   if (prior.persisted && deleteRequested) {
