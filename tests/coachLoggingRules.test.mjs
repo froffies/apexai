@@ -92,6 +92,44 @@ test("coach logging rules can estimate a deterministic meal action from session 
   assert.ok(action.fat_g > 150)
 })
 
+test("coach logging rules can build a loose estimated meal action for mixed log-all-that turns", () => {
+  const action = buildDeterministicMealAction({
+    mealSession: {
+      readyToLog: false,
+      alreadyLogged: false,
+      wantsLogging: true,
+      summary: "bacon eggs, plus toast",
+      items: [
+        {
+          baseName: "egg",
+          label: "Eggs",
+          category: "food",
+          quantity: null,
+          modifiers: ["Bacon"],
+          exclusions: [],
+        },
+        {
+          baseName: "toast",
+          label: "Toast",
+          category: "food",
+          quantity: null,
+          exclusions: [],
+        },
+      ],
+    },
+    explicitActions: [],
+    allowLooseEstimate: true,
+    prompt: "i had eggs bacon and toast for breakfast also did 20 min run and drank a litre of water can you log all that",
+  })
+
+  assert.ok(action)
+  assert.equal(action.type, "log_meal")
+  assert.match(action.food_name.toLowerCase(), /egg/)
+  assert.match(action.food_name.toLowerCase(), /toast/)
+  assert.equal(action.estimated, true)
+  assert.ok(action.calories > 0)
+})
+
 test("coach logging rules preserve grouped same-food preparations and all related macros", () => {
   const action = buildDeterministicMealAction({
     mealSession: {

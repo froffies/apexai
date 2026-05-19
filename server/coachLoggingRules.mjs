@@ -595,10 +595,22 @@ function buildSingleDeterministicMealAction({
   candidateFoodMatches = {},
   allowAnswerOnly = false,
   mealTypeOverride = "",
+  allowLooseEstimate = false,
 }) {
-  if (!mealSession?.readyToLog || mealSession?.alreadyLogged || mealSession?.suppressed || (mealSession?.answerOnly && !allowAnswerOnly)) return null
+  const looseEstimateAllowed = (
+    allowLooseEstimate
+    && !mealSession?.readyToLog
+    && !mealSession?.alreadyLogged
+    && !mealSession?.suppressed
+    && !mealSession?.persistedMealId
+    && !mealSession?.correctionRequested
+    && String(mealSession?.summary || "").trim()
+    && safeArray(mealSession?.items, 24).length > 0
+  )
+  if ((!mealSession?.readyToLog && !looseEstimateAllowed) || mealSession?.alreadyLogged || mealSession?.suppressed || (mealSession?.answerOnly && !allowAnswerOnly)) return null
   const shouldPersist =
-    mealSession?.wantsLogging !== false
+    looseEstimateAllowed
+    || mealSession?.wantsLogging !== false
     || mealSession?.correctionRequested
     || mealSession?.referenceMeal
     || (allowAnswerOnly && mealSession?.answerOnly)
@@ -646,7 +658,17 @@ function buildSingleDeterministicMealAction({
 
 export function buildDeterministicMealActions(args = {}) {
   const { mealSession } = args
-  if (!mealSession?.readyToLog || mealSession?.alreadyLogged || mealSession?.suppressed || (mealSession?.answerOnly && !args.allowAnswerOnly)) return []
+  const looseEstimateAllowed = (
+    args.allowLooseEstimate
+    && !mealSession?.readyToLog
+    && !mealSession?.alreadyLogged
+    && !mealSession?.suppressed
+    && !mealSession?.persistedMealId
+    && !mealSession?.correctionRequested
+    && String(mealSession?.summary || "").trim()
+    && safeArray(mealSession?.items, 24).length > 0
+  )
+  if ((!mealSession?.readyToLog && !looseEstimateAllowed) || mealSession?.alreadyLogged || mealSession?.suppressed || (mealSession?.answerOnly && !args.allowAnswerOnly)) return []
 
   const groups = safeArray(mealSession?.meal_groups, 8).filter((group) => (
     normalizeMealType(group?.meal_type || "")
