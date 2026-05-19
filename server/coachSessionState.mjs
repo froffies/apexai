@@ -88,6 +88,10 @@ const BARE_MEAL_MEASURE_NAMES = new Set(["g", "kg", "lb", "ml", "l", "cup", "tbs
 const MIXED_TURN_SPLIT_PATTERN = /\b(?:oh\s+and|and then|and|also|then|plus)\b|[,;]+/gi
 const WORKOUT_PIVOT_PATTERN = /^(?:(?:i\s+)?(?:did|trained?|lifted|worked\s+out|ran|run|running|walked|walk|cycled|cycle|biked|bike|swam|swim)\b|(?:bench(?:\s+press)?|incline\s+bench\s+press|overhead\s+press|shoulder\s+press|dumbbell\s+shoulder\s+press|seated\s+row|barbell\s+row|bent\s+over\s+row|lat\s+pulldown|back\s+squat|front\s+squat|squats?|deadlift|romanian\s+deadlift|rdl|leg\s+press|walking\s+lunge|preacher\s+curls?|bicep\s+curl|tricep\s+pushdown|plank|treadmill|rower|elliptical|stairmaster|push\s*ups?|pushups?|pull\s*ups?|pullups?|sit\s*ups?|situps?|burpees?|dips?|lunges?)\b|\d+(?:\.\d+)?\s*(?:push\s*ups?|pushups?|pull\s*ups?|pullups?|sit\s*ups?|situps?|burpees?|dips?|lunges?|squats?)\b)/i
 const MEAL_PIVOT_PATTERN = /^(?:actually\s+)?(?:also\s+)?(?:(?:i\s+)?(?:had|ate|drank))\b/i
+const TURN_DIRECTIVE_ONLY_PATTERN = /^(?:can\s+you|could\s+you|please|just)\s+(?:log|save|track|add)\b/i
+const MEAL_CONTINUATION_PATTERN = /^(?:and\s+)?(?:about|around|bout|roughly|approx(?:imately)?|with|without|no\b|the\b|rest\b|more\b|another\b|half\b|a\s+couple\b|a\s+few\b|a\s+small\b|a\s+big\b|heaps?\b|cooked\s+in\b|fried\b|scrambled\b|boiled\b|grilled\b|poached\b|baked\b|\d+(?:\.\d+)?\s*(?:g|kg|lb|lbs|pound|pounds|ml|l|litre|litres|liter|liters|cup|cups|tbsp|tablespoon|tablespoons|tsp|teaspoon|teaspoons|slice|slices|serve|serves|serving|servings|bowl|bowls|plate|plates|mug|mugs)\b)/i
+const WORKOUT_CONTINUATION_PATTERN = /^(?:and\s+then\s+)?(?:\d+(?:\.\d+)?\s*(?:kg|reps?|sets?|x|min|mins|minutes|km|mi|miles?)\b|at\s+\d+(?:\.\d+)?\s*kg\b|for\s+\d+(?:\.\d+)?\s*(?:min|mins|minutes|km|mi|miles?)\b|\d+\s*more\s+sets?\b|same\s+(?:weight|exercise|thing)\b)/i
+const DIRECT_LOG_ALL_PATTERN = /\b(?:log|save|track|add)\s+(?:all\s+that|that|it)\b/i
 
 function cleanText(value) {
   return String(value || "")
@@ -393,6 +397,322 @@ function splitMixedCoachTurn(message = "") {
   return {
     mealMessage: raw,
     workoutMessage: raw,
+  }
+}
+
+function splitTurnIntoClauses(message = "") {
+  const raw = String(message || "").trim()
+  if (!raw) return []
+
+  const parts = raw.split(MIXED_TURN_SPLIT_PATTERN)
+    .map((part) => String(part || "").trim().replace(/^[,;\s]+|[,;\s]+$/g, ""))
+    .filter(Boolean)
+
+  if (!parts.length) return [{ id: "clause_0", text: raw, normalized: cleanText(raw), index: 0 }]
+
+  return parts.map((text, index) => ({
+    id: `clause_${index}`,
+    text,
+    normalized: cleanText(text),
+    index,
+  }))
+}
+
+function buildMealPreview(message = "") {
+  const normalizedMessage = normalizeTrailingMealQuantityMessage(normalizeInlineMealCorrectionMessage(message))
+  const preview = buildLegacyMealContext([], normalizedMessage, emptyLegacyMealSession())
+  const itemCount = Array.isArray(preview?.items) ? preview.items.length : 0
+  return {
+    normalizedMessage,
+    preview,
+    itemCount,
+    hasItems: itemCount > 0,
+    hasSummary: Boolean(cleanText(preview?.summary || "")),
+    pendingClarification: Boolean(preview?.pendingClarification || (Array.isArray(preview?.pendingQuantities) && preview.pendingQuantities.length)),
+  }
+}
+
+function hasMealClarificationContext(session = null) {
+  return Boolean(session?.active && (session?.pendingClarification || session?.clarifyQuestion || (Array.isArray(session?.pendingQuantities) && session.pendingQuantities.length)))
+}
+
+function hasWorkoutClarificationContext(session = null) {
+  return Boolean(session?.active && session?.clarifyQuestion)
+}
+
+function isNumericLikeFragment(text = "") {
+  return /^(?:about|around|bout|roughly)?\s*\d+(?:\.\d+)?(?:\s*(?:g|kg|lb|lbs|pound|pounds|ml|l|litre|litres|liter|liters|cup|cups|tbsp|tablespoon|tablespoons|tsp|teaspoon|teaspoons|min|mins|minutes|km|mi|miles?|sets?|reps?))?(?:\s+each)?$/i.test(String(text || "").trim())
+}
+
+function looksLikeDirectiveOnlyClause(text = "") {
+  const normalized = cleanText(text)
+  if (!normalized) return false
+  if (!TURN_DIRECTIVE_ONLY_PATTERN.test(normalized) && !DIRECT_LOG_ALL_PATTERN.test(normalized)) return false
+  return !looksLikeStandaloneMealMessage(text) && !parseWorkoutMessage(text)
+}
+
+function hasStrongWorkoutSignal(text = "", parsedWorkout = null) {
+  const normalized = cleanText(text)
+  const knownExercise = WORKOUT_EXERCISES.some((exercise) => {
+    const exercisePattern = new RegExp(`\\b${exercise.replace(/\s+/g, "\\s+")}\\b`, "i")
+    return exercisePattern.test(normalized)
+  })
+  return Boolean(
+    WORKOUT_REROUTE_PATTERN.test(normalized)
+    || WORKOUT_START_PATTERN.test(normalized)
+    || workoutReferenceMessage(normalized)
+    || hasWorkoutMetricDetail(parsedWorkout)
+    || /\d+\s*x\s*\d+/i.test(normalized)
+    || /\d+(?:\.\d+)?\s*(?:kg|km|mi|miles?|min|mins|minutes|sets?|reps?)\b/i.test(normalized)
+    || knownExercise
+  )
+}
+
+function classifyCoachClauseDomain({
+  clause,
+  mealSession,
+  workoutSession,
+  previousDomain = "",
+}) {
+  const raw = String(clause?.text || "").trim()
+  const normalized = cleanText(raw)
+  const mealPreview = buildMealPreview(raw)
+  const parsedWorkout = parseWorkoutMessage(raw)
+  const mealSessionActive = Boolean(mealSession?.active || mealSession?.persisted)
+  const workoutSessionActive = Boolean(workoutSession?.active || workoutSession?.persisted)
+  const strongWorkoutSignal = hasStrongWorkoutSignal(raw, parsedWorkout)
+  const workoutLike = Boolean(
+    strongWorkoutSignal
+    || parsedWorkout?.duration_seconds
+    || parsedWorkout?.distance_km
+  )
+  const mealLike = Boolean(
+    isExplicitMealStart(raw)
+    || mealPreview.hasItems
+    || mealPreview.hasSummary
+    || mealPreview.pendingClarification
+    || MEAL_REFERENCE_PATTERN.test(normalized)
+    || (mealSessionActive && MEAL_CONTINUATION_PATTERN.test(normalized))
+  )
+  const directiveOnly = looksLikeDirectiveOnlyClause(raw)
+  const nutritionQuestion = NUTRITION_QUESTION_PATTERN.test(normalized)
+    || (mealSessionActive && POST_SAVE_NUTRITION_QUERY_PATTERN.test(normalized))
+  const workoutQuestion = WORKOUT_QUESTION_PATTERN.test(normalized)
+  const deleteOrSuppress = suppressionRequested(raw) || mealDeleteRequested(raw) || workoutDeleteRequested(raw)
+  const correction = mealCorrectionRequested(raw) || workoutCorrectionRequested(raw) || mealRejectionRequested(raw)
+
+  if (hasMealClarificationContext(mealSession) && !hasWorkoutClarificationContext(workoutSession) && (isNumericLikeFragment(raw) || MEAL_CONTINUATION_PATTERN.test(normalized) || MEAL_REFERENCE_PATTERN.test(normalized))) {
+    return { domain: "meal", mealPreview, parsedWorkout, mealLike, workoutLike, directiveOnly, nutritionQuestion, workoutQuestion, deleteOrSuppress, correction }
+  }
+  if (hasWorkoutClarificationContext(workoutSession) && !hasMealClarificationContext(mealSession) && (isNumericLikeFragment(raw) || WORKOUT_CONTINUATION_PATTERN.test(normalized) || workoutReferenceMessage(normalized))) {
+    return { domain: "workout", mealPreview, parsedWorkout, mealLike, workoutLike, directiveOnly, nutritionQuestion, workoutQuestion, deleteOrSuppress, correction }
+  }
+  if (directiveOnly) {
+    return { domain: "general", mealPreview, parsedWorkout, mealLike, workoutLike, directiveOnly, nutritionQuestion, workoutQuestion, deleteOrSuppress, correction }
+  }
+  if (!mealSessionActive && !workoutSessionActive && (nutritionQuestion || workoutQuestion || VAGUE_REFERENCE_PATTERN.test(normalized))) {
+    return { domain: "general", mealPreview, parsedWorkout, mealLike, workoutLike, directiveOnly, nutritionQuestion, workoutQuestion, deleteOrSuppress, correction }
+  }
+  if (!mealSessionActive && !workoutSessionActive && FRUSTRATION_PATTERN.test(normalized) && !deleteOrSuppress) {
+    return { domain: "general", mealPreview, parsedWorkout, mealLike, workoutLike, directiveOnly, nutritionQuestion, workoutQuestion, deleteOrSuppress, correction }
+  }
+  if (mealSessionActive && (POST_SAVE_NUTRITION_QUERY_PATTERN.test(normalized) || detectQuestionOnlyTurn(raw) || MEAL_REFERENCE_PATTERN.test(normalized))) {
+    return { domain: "meal", mealPreview, parsedWorkout, mealLike, workoutLike, directiveOnly, nutritionQuestion, workoutQuestion, deleteOrSuppress, correction }
+  }
+  if (workoutSessionActive && (workoutReferenceMessage(normalized) || (detectQuestionOnlyTurn(raw) && !mealLike))) {
+    return { domain: "workout", mealPreview, parsedWorkout, mealLike, workoutLike, directiveOnly, nutritionQuestion, workoutQuestion, deleteOrSuppress, correction }
+  }
+  if (WORKOUT_REROUTE_PATTERN.test(normalized) || looksLikeWorkoutPivotFragment(raw)) {
+    return { domain: "workout", mealPreview, parsedWorkout, mealLike, workoutLike, directiveOnly, nutritionQuestion, workoutQuestion, deleteOrSuppress, correction }
+  }
+  if (looksLikeMealPivotFragment(raw)) {
+    return { domain: "meal", mealPreview, parsedWorkout, mealLike, workoutLike, directiveOnly, nutritionQuestion, workoutQuestion, deleteOrSuppress, correction }
+  }
+  if (WORKOUT_CONTINUATION_PATTERN.test(normalized) && previousDomain === "workout") {
+    return { domain: "workout", mealPreview, parsedWorkout, mealLike, workoutLike, directiveOnly, nutritionQuestion, workoutQuestion, deleteOrSuppress, correction }
+  }
+  if (MEAL_CONTINUATION_PATTERN.test(normalized) && previousDomain === "meal") {
+    return { domain: "meal", mealPreview, parsedWorkout, mealLike, workoutLike, directiveOnly, nutritionQuestion, workoutQuestion, deleteOrSuppress, correction }
+  }
+  if (workoutLike && !mealLike) {
+    return { domain: "workout", mealPreview, parsedWorkout, mealLike, workoutLike, directiveOnly, nutritionQuestion, workoutQuestion, deleteOrSuppress, correction }
+  }
+  if (mealLike && !workoutLike) {
+    return { domain: "meal", mealPreview, parsedWorkout, mealLike, workoutLike, directiveOnly, nutritionQuestion, workoutQuestion, deleteOrSuppress, correction }
+  }
+  if (mealLike && workoutLike) {
+    const domain = previousDomain || (hasWorkoutMetricDetail(parsedWorkout) ? "workout" : "meal")
+    return { domain, mealPreview, parsedWorkout, mealLike, workoutLike, directiveOnly, nutritionQuestion, workoutQuestion, deleteOrSuppress, correction }
+  }
+  if (previousDomain === "meal" && /^(?:and|with|plus|then)\b/i.test(normalized)) {
+    return { domain: "meal", mealPreview, parsedWorkout, mealLike, workoutLike, directiveOnly, nutritionQuestion, workoutQuestion, deleteOrSuppress, correction }
+  }
+  if (previousDomain === "workout" && /^(?:and|then|also)\b/i.test(normalized)) {
+    return { domain: "workout", mealPreview, parsedWorkout, mealLike, workoutLike, directiveOnly, nutritionQuestion, workoutQuestion, deleteOrSuppress, correction }
+  }
+
+  return { domain: "general", mealPreview, parsedWorkout, mealLike, workoutLike, directiveOnly, nutritionQuestion, workoutQuestion, deleteOrSuppress, correction }
+}
+
+function buildTurnIntentGraph({
+  currentMessage = "",
+  mealSession = null,
+  workoutSession = null,
+} = {}) {
+  const raw = String(currentMessage || "").trim()
+  const clauses = splitTurnIntoClauses(raw)
+  const graph = {
+    raw,
+    clauses: [],
+    mealFragments: [],
+    workoutFragments: [],
+    generalFragments: [],
+    hasMixedDomains: false,
+    loggingIntent: DIRECT_LOG_ALL_PATTERN.test(cleanText(raw)) || TURN_DIRECTIVE_ONLY_PATTERN.test(cleanText(raw)),
+  }
+
+  let previousDomain = ""
+  const seenDomains = new Set()
+
+  for (const clause of clauses) {
+    const analysis = classifyCoachClauseDomain({
+      clause,
+      mealSession,
+      workoutSession,
+      previousDomain,
+    })
+    const entry = {
+      id: clause.id,
+      index: clause.index,
+      text: clause.text,
+      normalized: clause.normalized,
+      domain: analysis.domain,
+      mealLike: analysis.mealLike,
+      workoutLike: analysis.workoutLike,
+      directiveOnly: analysis.directiveOnly,
+      nutritionQuestion: analysis.nutritionQuestion,
+      workoutQuestion: analysis.workoutQuestion,
+      deleteOrSuppress: analysis.deleteOrSuppress,
+      correction: analysis.correction,
+      mealPreviewSummary: analysis.mealPreview?.preview?.summary || "",
+      workoutPreviewExercise: analysis.parsedWorkout?.exercise_name || "",
+    }
+    graph.clauses.push(entry)
+
+    if (analysis.domain === "meal") {
+      const fragmentText = analysis.mealPreview?.normalizedMessage || clause.text
+      graph.mealFragments.push({ id: clause.id, index: clause.index, text: fragmentText, rawText: clause.text })
+      seenDomains.add("meal")
+      previousDomain = "meal"
+      continue
+    }
+    if (analysis.domain === "workout") {
+      const fragmentText = normalizeWorkoutFragment(stripMixedTurnLead(clause.text))
+      graph.workoutFragments.push({
+        id: clause.id,
+        index: clause.index,
+        text: fragmentText,
+        rawText: clause.text,
+        parsedWorkout: analysis.parsedWorkout || null,
+      })
+      seenDomains.add("workout")
+      previousDomain = "workout"
+      continue
+    }
+
+    graph.generalFragments.push({ id: clause.id, index: clause.index, text: clause.text })
+  }
+
+  graph.hasMixedDomains = seenDomains.has("meal") && seenDomains.has("workout")
+  return graph
+}
+
+function attachIntentGraph(session, graph, recentMessages, currentMessage) {
+  if (!session) return session
+  return {
+    ...session,
+    thread_messages: buildThreadMessages(recentMessages, currentMessage),
+    intentGraph: graph,
+    candidateFragments: {
+      meal: graph?.mealFragments || [],
+      workout: graph?.workoutFragments || [],
+      general: graph?.generalFragments || [],
+    },
+  }
+}
+
+function reduceMealFragments(graph, recentMessages, existingSession, recentMeals) {
+  if (!Array.isArray(graph?.mealFragments) || !graph.mealFragments.length) return null
+  let session = existingSession
+  let nextSession = null
+
+  for (const fragment of graph.mealFragments) {
+    const built = buildMealSessionState(recentMessages, fragment.text, session, recentMeals)
+    if (built) {
+      nextSession = built
+      session = built
+    }
+  }
+
+  return nextSession
+}
+
+function reduceWorkoutFragments(graph, recentMessages, existingSession) {
+  if (!Array.isArray(graph?.workoutFragments) || !graph.workoutFragments.length) return null
+
+  const parsedFragments = graph.workoutFragments
+    .map((fragment) => ({ ...fragment, parsedWorkout: fragment.parsedWorkout || parseWorkoutMessage(fragment.text) }))
+    .filter((fragment) => fragment.parsedWorkout || WORKOUT_START_PATTERN.test(cleanText(fragment.text)) || workoutReferenceMessage(fragment.text))
+
+  if (!parsedFragments.length) return null
+
+  const primary = parsedFragments.find((fragment) => hasWorkoutMetricDetail(fragment.parsedWorkout))
+    || parsedFragments.find((fragment) => fragment.parsedWorkout?.exercise_name)
+    || parsedFragments[0]
+
+  const fallbackThread = parsedFragments.map((fragment) => ({ role: "user", content: fragment.text }))
+  let nextSession = buildWorkoutSessionState(recentMessages, primary.text, existingSession)
+  if (!nextSession) {
+    const parsed = primary.parsedWorkout || parseWorkoutMessage(primary.text)
+    if (!parsed) return null
+    const state = {
+      ...normalizeWorkoutSession(existingSession),
+      ...emptyWorkoutSessionState(),
+      active: true,
+      workoutConversation: true,
+      wantsLogging: true,
+      thread_messages: fallbackThread,
+    }
+    mergeWorkoutMetrics(state, parsed)
+    if (!state.sets && state.reps) state.sets = 1
+    state.summary = buildWorkoutSummary(state)
+    state.clarifyQuestion = buildWorkoutClarifyQuestion(state)
+    state.readyToLog = state.muscle_group === "cardio"
+      ? Boolean(state.exercise_name && (state.duration_seconds > 0 || state.distance_km > 0))
+      : Boolean(state.exercise_name && state.reps > 0)
+    nextSession = state
+  }
+
+  const secondaryActivities = parsedFragments
+    .filter((fragment) => fragment.id !== primary.id)
+    .map((fragment) => ({
+      text: fragment.text,
+      parsedWorkout: fragment.parsedWorkout,
+    }))
+    .filter((entry) => entry.parsedWorkout)
+
+  if (!secondaryActivities.length) return nextSession
+
+  return {
+    ...nextSession,
+    candidateActivities: [
+      {
+        text: primary.text,
+        parsedWorkout: primary.parsedWorkout || parseWorkoutMessage(primary.text),
+        primary: true,
+      },
+      ...secondaryActivities,
+    ],
   }
 }
 
@@ -1361,9 +1681,29 @@ export function buildCoachSessionState({
   workoutSession = null,
   recentMeals = [],
 } = {}) {
-  const splitTurn = splitMixedCoachTurn(currentMessage)
-  let nextMealSession = buildMealSessionState(recentMessages, splitTurn.mealMessage, mealSession, recentMeals)
-  const nextWorkoutSession = buildWorkoutSessionState(recentMessages, splitTurn.workoutMessage, workoutSession)
+  const intentGraph = buildTurnIntentGraph({
+    currentMessage,
+    mealSession,
+    workoutSession,
+  })
+  const shouldUseIntentGraph = Boolean(
+    intentGraph.workoutFragments.length > 1
+    || (intentGraph.mealFragments.length > 0 && intentGraph.workoutFragments.length > 0)
+  )
+
+  let nextMealSession = null
+  let nextWorkoutSession = null
+
+  if (shouldUseIntentGraph) {
+    nextMealSession = reduceMealFragments(intentGraph, recentMessages, mealSession, recentMeals)
+    nextWorkoutSession = reduceWorkoutFragments(intentGraph, recentMessages, workoutSession)
+  }
+
+  if (!nextMealSession && !nextWorkoutSession) {
+    const splitTurn = splitMixedCoachTurn(currentMessage)
+    nextMealSession = buildMealSessionState(recentMessages, splitTurn.mealMessage, mealSession, recentMeals)
+    nextWorkoutSession = buildWorkoutSessionState(recentMessages, splitTurn.workoutMessage, workoutSession)
+  }
 
   if (
     !nextMealSession
@@ -1378,7 +1718,7 @@ export function buildCoachSessionState({
   }
 
   return {
-    mealSession: nextMealSession,
-    workoutSession: nextWorkoutSession,
+    mealSession: attachIntentGraph(nextMealSession, intentGraph, recentMessages, currentMessage),
+    workoutSession: attachIntentGraph(nextWorkoutSession, intentGraph, recentMessages, currentMessage),
   }
 }

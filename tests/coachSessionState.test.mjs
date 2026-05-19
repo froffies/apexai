@@ -1065,6 +1065,24 @@ test("stacked meal and workout messages keep food out of workout labels and work
   assert.match(String(next.workoutSession.exercise_name || ""), /bench/i)
 })
 
+test("intent graph keeps stacked mixed turns as separate meal and workout candidate fragments", () => {
+  const next = buildCoachSessionState({
+    recentMessages: [],
+    currentMessage: "i had eggs bacon toast and did bench 80kg 5x5 then ran 2km",
+    mealSession: emptyMealSessionState(),
+    workoutSession: emptyWorkoutSessionState(),
+  })
+
+  assert.ok(next.mealSession?.intentGraph)
+  assert.equal(next.mealSession.intentGraph.hasMixedDomains, true)
+  assert.equal(next.mealSession.candidateFragments.meal.length, 1)
+  assert.equal(next.mealSession.candidateFragments.workout.length, 2)
+  assert.ok(Array.isArray(next.workoutSession?.candidateActivities))
+  assert.equal(next.workoutSession.candidateActivities.length, 2)
+  assert.match(String(next.workoutSession.candidateActivities[0]?.parsedWorkout?.exercise_name || ""), /bench/i)
+  assert.match(String(next.workoutSession.candidateActivities[1]?.parsedWorkout?.exercise_name || ""), /run/i)
+})
+
 test("frustrated log reversal threads do not turn complaint text into meal or workout entities", () => {
   const conversation = [
     user("log this as workout"),
