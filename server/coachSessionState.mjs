@@ -568,7 +568,9 @@ function buildTurnIntentGraph({
     workoutFragments: [],
     generalFragments: [],
     hasMixedDomains: false,
-    loggingIntent: DIRECT_LOG_ALL_PATTERN.test(cleanText(raw)) || TURN_DIRECTIVE_ONLY_PATTERN.test(cleanText(raw)),
+    loggingIntent: DIRECT_LOG_ALL_PATTERN.test(cleanText(raw))
+      || TURN_DIRECTIVE_ONLY_PATTERN.test(cleanText(raw))
+      || (isExplicitMealStart(raw) && WORKOUT_START_PATTERN.test(cleanText(raw))),
   }
 
   let previousDomain = ""
