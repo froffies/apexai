@@ -887,6 +887,46 @@ test("coach session state keeps metric-only workout replies attached to the exis
   assert.equal(moreSetsTurn.workoutSession.correctionRequested, true)
 })
 
+test("coach session state keeps a persisted workout idle when a numeric reply is clearly answering an active meal clarification", () => {
+  const initial = buildCoachSessionState({
+    recentMessages: [],
+    currentMessage: "i had eggs and did 4 pushups",
+    mealSession: emptyMealSessionState(),
+    workoutSession: emptyWorkoutSessionState(),
+  })
+
+  const persistedWorkout = {
+    ...initial.workoutSession,
+    persisted: true,
+    persistedWorkoutId: "workout_pushups",
+    persistedSummary: "Pushups",
+    persistedAt: "2026-05-05T00:00:00.000Z",
+    summary: "Pushups",
+    active: false,
+    readyToLog: false,
+    clarifyQuestion: "",
+    alreadyLogged: false,
+  }
+
+  const next = buildCoachSessionState({
+    recentMessages: [
+      user("i had eggs and did 4 pushups"),
+      assistant("Great job on the pushups! Would you like me to log that meal?"),
+    ],
+    currentMessage: "18",
+    mealSession: initial.mealSession,
+    workoutSession: persistedWorkout,
+  })
+
+  assert.ok(next.mealSession)
+  assert.equal(next.mealSession.summary, "18 eggs")
+  assert.equal(next.mealSession.readyToLog, true)
+  assert.ok(next.workoutSession)
+  assert.equal(next.workoutSession.alreadyLogged, true)
+  assert.equal(next.workoutSession.readyToLog, false)
+  assert.equal(next.workoutSession.clarifyQuestion, "")
+})
+
 test("coach session state keeps a new explicit meal isolated from the previously saved meal", () => {
   const initial = replayCoachConversation([
     user("i had egg"),

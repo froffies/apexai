@@ -1484,6 +1484,29 @@ function buildGenericSuppressedMealSession(recentMessages = [], currentMessage =
   }
 }
 
+function looksWorkoutSpecificMessage(message = "") {
+  const normalized = cleanText(message)
+  if (!normalized) return false
+  const parsed = parseWorkoutMessage(message)
+  return Boolean(
+    WORKOUT_REROUTE_PATTERN.test(normalized)
+    || WORKOUT_START_PATTERN.test(normalized)
+    || workoutReferenceMessage(normalized)
+    || hasWorkoutMetricDetail(parsed)
+    || Number(parsed?.duration_seconds || 0) > 0
+    || Number(parsed?.distance_km || 0) > 0
+  )
+}
+
+function shouldKeepPersistedWorkoutIdleDuringMealFollowUp(currentMessage = "", previousMealSession = null, previousWorkoutSession = null, nextMealSession = null, nextWorkoutSession = null) {
+  if (!previousMealSession?.active || !hasMealClarificationContext(previousMealSession)) return false
+  if (!previousWorkoutSession?.persisted) return false
+  if (!nextMealSession || !(nextMealSession.readyToLog || nextMealSession.clarifyQuestion || nextMealSession.correctionRequested)) return false
+  if (!nextWorkoutSession?.persistedWorkoutId || nextWorkoutSession.correctionRequested || nextWorkoutSession.deleteRequested) return false
+  if (!nextWorkoutSession.readyToLog) return false
+  return !looksWorkoutSpecificMessage(currentMessage)
+}
+
 function shouldDiscardInvalidMealSessionForWorkoutFollowUp(currentMessage = "", mealSession = null, workoutSession = null, priorWorkoutSession = null) {
   if (!mealSession || !workoutSession) return false
   if (!mealSession.invalidStructure) return false
@@ -1718,6 +1741,18 @@ export function buildCoachSessionState({
 
   if (shouldDiscardInvalidMealSessionForWorkoutFollowUp(currentMessage, nextMealSession, nextWorkoutSession, workoutSession)) {
     nextMealSession = null
+  }
+
+  if (shouldKeepPersistedWorkoutIdleDuringMealFollowUp(currentMessage, mealSession, workoutSession, nextMealSession, nextWorkoutSession)) {
+    nextWorkoutSession = {
+      ...nextWorkoutSession,
+      active: false,
+      readyToLog: false,
+      clarifyQuestion: "",
+      alreadyLogged: true,
+      correctionRequested: false,
+      deleteRequested: false,
+    }
   }
 
   return {
