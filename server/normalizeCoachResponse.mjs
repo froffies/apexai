@@ -140,6 +140,15 @@ export function normalizeCoachResponse(value, context = {}) {
       && !context.mealContext?.answerOnly
     ) return false
     if (
+      isMealPersistenceAction(action)
+      && !hasValidatedMealPersistence
+      && context.mealContext?.persistedMealId
+      && context.mealContext?.pendingClarification
+      && context.workoutContext?.readyToLog
+      && !context.mealContext?.correctionRequested
+      && !context.mealContext?.deleteRequested
+    ) return false
+    if (
       isWorkoutPersistenceAction(action)
       && !hasValidatedWorkoutPersistence
       && context.workoutContext?.persistedWorkoutId

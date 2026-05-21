@@ -234,6 +234,50 @@ test("normalizeCoachResponse blocks AI workout persistence when a persisted work
   assert.equal(payload.actions.some((action) => action.type === "log_workout"), false)
 })
 
+test("normalizeCoachResponse blocks AI meal persistence when a persisted meal still needs quantity clarification and the turn is completing a workout", () => {
+  const payload = normalizeCoachResponse({
+    reply: "I'll log your meal of steak and your workout: bench press at 80kg for 1 set of 5 reps, plus your 2km run.",
+    actions: [
+      { type: "log_workout", exercise_name: "Bench", workout_type: "Bench", reps: 5, sets: 1, weight_kg: 80 },
+      { type: "log_meal", food_name: "steak", quantity: "1 meal", calories: 180, protein_g: 12, carbs_g: 0, fat_g: 11 },
+    ],
+    warnings: [],
+  }, {
+    prompt: "5 reps",
+    mealContext: {
+      readyToLog: false,
+      alreadyLogged: false,
+      persistedMealId: "meal_1",
+      persistedSummary: "steak",
+      pendingClarification: {
+        type: "quantity",
+        targetReference: "steak",
+      },
+      correctionRequested: false,
+      deleteRequested: false,
+    },
+    workoutContext: {
+      readyToLog: true,
+      alreadyLogged: false,
+      persistedWorkoutId: "workout_run",
+      persistedSummary: "Run",
+      correctionRequested: false,
+      deleteRequested: false,
+      exercise_name: "Bench",
+      workout_type: "Bench",
+      sets: 1,
+      reps: 5,
+      weight_kg: 80,
+    },
+    validatedActions: [
+      { type: "log_workout", exercise_name: "Bench", workout_type: "Bench", reps: 5, sets: 1, weight_kg: 80 },
+    ],
+  })
+
+  assert.equal(payload.actions.some((action) => action.type === "log_workout"), true)
+  assert.equal(payload.actions.some((action) => action.type === "log_meal"), false)
+})
+
 test("normalizeCoachResponse keeps validated mixed actions when the AI reply falls back generically", () => {
   const payload = normalizeCoachResponse({
     reply: "I have the details, but I couldn't save it just now.",
