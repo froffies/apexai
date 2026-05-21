@@ -1507,6 +1507,14 @@ function shouldKeepPersistedWorkoutIdleDuringMealFollowUp(currentMessage = "", p
   return !looksWorkoutSpecificMessage(currentMessage)
 }
 
+function shouldPreserveMealClarificationAcrossWorkoutFollowUp(currentMessage = "", previousMealSession = null, previousWorkoutSession = null, nextMealSession = null, nextWorkoutSession = null) {
+  if (nextMealSession) return false
+  if (!previousMealSession?.active || !hasMealClarificationContext(previousMealSession)) return false
+  if (!previousWorkoutSession?.active || !hasWorkoutClarificationContext(previousWorkoutSession)) return false
+  if (!nextWorkoutSession || !(nextWorkoutSession.readyToLog || nextWorkoutSession.clarifyQuestion || nextWorkoutSession.correctionRequested)) return false
+  return looksWorkoutSpecificMessage(currentMessage)
+}
+
 function shouldDiscardInvalidMealSessionForWorkoutFollowUp(currentMessage = "", mealSession = null, workoutSession = null, priorWorkoutSession = null) {
   if (!mealSession || !workoutSession) return false
   if (!mealSession.invalidStructure) return false
@@ -1741,6 +1749,17 @@ export function buildCoachSessionState({
 
   if (shouldDiscardInvalidMealSessionForWorkoutFollowUp(currentMessage, nextMealSession, nextWorkoutSession, workoutSession)) {
     nextMealSession = null
+  }
+
+  if (shouldPreserveMealClarificationAcrossWorkoutFollowUp(currentMessage, mealSession, workoutSession, nextMealSession, nextWorkoutSession)) {
+    nextMealSession = {
+      ...mealSession,
+      active: true,
+      alreadyLogged: false,
+      suppressed: false,
+      suppressionReply: "",
+      thread_messages: buildThreadMessages(recentMessages, currentMessage),
+    }
   }
 
   if (shouldKeepPersistedWorkoutIdleDuringMealFollowUp(currentMessage, mealSession, workoutSession, nextMealSession, nextWorkoutSession)) {

@@ -1219,6 +1219,30 @@ test("fragmented shared quantities apply to all unresolved foods instead of crea
   assert.doesNotMatch(String(mealSession.summary || "").toLowerCase(), /\beach\b/)
 })
 
+test("coach session state preserves pending meal clarification while a mixed-thread workout clarification is resolved", () => {
+  const firstTurn = buildCoachSessionState({
+    recentMessages: [],
+    currentMessage: "had steak and squatted 100kg",
+    mealSession: emptyMealSessionState(),
+    workoutSession: emptyWorkoutSessionState(),
+  })
+
+  const next = buildCoachSessionState({
+    recentMessages: [
+      user("had steak and squatted 100kg"),
+      assistant("How many reps did you do for Squat?"),
+    ],
+    currentMessage: "5 reps",
+    mealSession: firstTurn.mealSession,
+    workoutSession: firstTurn.workoutSession,
+  })
+
+  assert.ok(next.mealSession)
+  assert.match(String(next.mealSession.clarifyQuestion || ""), /how much steak/i)
+  assert.equal(next.workoutSession?.readyToLog, true)
+  assert.match(String(next.workoutSession?.exercise_name || ""), /squat/i)
+})
+
 test("coach session state keeps nutrition questions answer-only instead of reopening a fresh log", () => {
   const { mealSession } = replayCoachConversation([
     user("i had egg and tea"),

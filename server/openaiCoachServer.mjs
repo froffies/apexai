@@ -20,7 +20,7 @@ import {
   buildDeterministicNutritionStatusReply,
   buildDeterministicMealDeletionAction,
   buildDeterministicMealActions,
-  buildDeterministicWorkoutAction,
+  buildDeterministicWorkoutActions,
   buildDeterministicWorkoutDeletionAction,
   deterministicAlreadyLoggedReply,
   deterministicClarifyActionFromSession,
@@ -1126,15 +1126,14 @@ async function handleCoach(request, response) {
         })
       : []
     const answerOnlyMealHint = mealContext?.answerOnly ? mealActions[0] || null : null
-    const workoutAction = workoutContext?.readyToLog
-      ? buildDeterministicWorkoutAction({ workoutSession: workoutContext, explicitActions: [] })
-      : null
+    const workoutActions = buildDeterministicWorkoutActions({ workoutSession: workoutContext, explicitActions: [] })
+    const workoutAction = workoutActions[0] || null
     const mealClarifyAction = deterministicClarifyActionFromSession(mealContext)
     const workoutClarifyAction = deterministicClarifyActionFromSession(workoutContext)
     const explicitMixedLogRequest = /\b(?:log|save|track|add)\s+all\s+that\b/i.test(String(body.message || ""))
     const impliedMixedLogRequest = Boolean(
       mealContext?.intentGraph?.hasMixedDomains
-      && (workoutAction || workoutClarifyAction)
+      && (workoutActions.length || workoutClarifyAction)
       && (mealContext?.intentGraph?.loggingIntent || explicitMixedLogRequest)
     )
     const mixedMealEstimateActions = (
@@ -1143,7 +1142,7 @@ async function handleCoach(request, response) {
       && !mealContext.readyToLog
       && !mealContext.answerOnly
       && !mealContext.persistedMealId
-      && (workoutAction || workoutClarifyAction)
+      && (workoutActions.length || workoutClarifyAction)
     )
       ? buildDeterministicMealActions({
           mealSession: mealContext,
@@ -1153,7 +1152,7 @@ async function handleCoach(request, response) {
           allowLooseEstimate: true,
         })
       : []
-    if (!client && mealContext?.readyToLog && mealContext?.answerOnly && mealActions[0] && !workoutAction) {
+    if (!client && mealContext?.readyToLog && mealContext?.answerOnly && mealActions[0] && !workoutActions.length) {
       sendCoachPayload({
         reply: formatDeterministicMealAnswer(mealActions[0]),
         actions: [],
@@ -1170,7 +1169,7 @@ async function handleCoach(request, response) {
     const combinedDeterministicActions = [
       ...(mealContext?.answerOnly ? [] : mealActions),
       ...mixedMealEstimateActions,
-      ...(workoutAction ? [workoutAction] : []),
+      ...workoutActions,
       ...clarifyActions,
     ]
     const nutritionStatusReply = buildDeterministicNutritionStatusReply({

@@ -728,25 +728,106 @@ export function buildDeterministicMealAction(args = {}) {
   return buildDeterministicMealActions(args)[0] || null
 }
 
-export function buildDeterministicWorkoutAction({ workoutSession, explicitActions = [] }) {
-  if (!workoutSession?.readyToLog || workoutSession?.alreadyLogged || workoutSession?.suppressed) return null
+function normalizeWorkoutCandidate(parsed = {}, fallback = {}) {
+  const exerciseName = String(parsed?.exercise_name || parsed?.workout_type || fallback?.exercise_name || fallback?.workout_type || "").trim()
+  if (!exerciseName) return null
+  const muscleGroup = String(parsed?.muscle_group || fallback?.muscle_group || "full_body").trim() || "full_body"
+  const reps = Number(parsed?.reps || fallback?.reps || 0)
+  const sets = Number(parsed?.sets || fallback?.sets || (reps > 0 ? 1 : 0))
+  const weightKg = Number(parsed?.weight_kg || fallback?.weight_kg || 0)
+  const durationSeconds = Number(parsed?.duration_seconds || fallback?.duration_seconds || 0)
+  const distanceKm = Number(parsed?.distance_km || fallback?.distance_km || 0)
+  return {
+    exercise_name: exerciseName,
+    workout_type: String(parsed?.workout_type || fallback?.workout_type || exerciseName).trim() || exerciseName,
+    muscle_group: muscleGroup,
+    sets,
+    reps,
+    weight_kg: weightKg,
+    duration_seconds: durationSeconds,
+    distance_km: distanceKm,
+  }
+}
+
+function workoutCandidateReady(candidate = null) {
+  if (!candidate?.exercise_name) return false
+  const isCardio = String(candidate.muscle_group || "").trim().toLowerCase() === "cardio"
+  return isCardio
+    ? Boolean(candidate.duration_seconds > 0 || candidate.distance_km > 0)
+    : Boolean(candidate.reps > 0)
+}
+
+function buildWorkoutActionFromCandidate(candidate = null, existingSession = null) {
+  if (!candidate || !workoutCandidateReady(candidate)) return null
+  return {
+    type: existingSession?.persistedWorkoutId && existingSession?.correctionRequested ? "update_workout_log" : "log_workout",
+    ...(existingSession?.persistedWorkoutId && existingSession?.correctionRequested
+      ? { workout_id: existingSession.persistedWorkoutId }
+      : {}),
+    exercise_name: candidate.exercise_name,
+    workout_type: candidate.workout_type,
+    muscle_group: candidate.muscle_group || "full_body",
+    sets: Number(candidate.sets || 1),
+    reps: Number(candidate.reps || 0),
+    weight_kg: Number(candidate.weight_kg || 0),
+    duration_seconds: Number(candidate.duration_seconds || 0),
+    distance_km: Number(candidate.distance_km || 0),
+  }
+}
+
+function workoutActionKey(action = {}) {
+  return [
+    action?.type || "",
+    action?.workout_id || "",
+    String(action?.exercise_name || action?.workout_type || "").trim().toLowerCase(),
+    Number(action?.sets || 0),
+    Number(action?.reps || 0),
+    Number(action?.weight_kg || 0),
+    Number(action?.duration_seconds || 0),
+    Number(action?.distance_km || 0),
+  ].join(":")
+}
+
+export function buildDeterministicWorkoutActions({ workoutSession, explicitActions = [] }) {
+  if (workoutSession?.alreadyLogged || workoutSession?.suppressed) return []
 
   const explicit = firstWorkoutAction(explicitActions)
-  const exerciseName = String(workoutSession.exercise_name || explicit?.exercise_name || explicit?.workout_type || "").trim()
-  if (!exerciseName) return null
+  const primaryCandidate = normalizeWorkoutCandidate({
+    exercise_name: workoutSession?.exercise_name,
+    workout_type: workoutSession?.workout_type,
+    muscle_group: workoutSession?.muscle_group,
+    sets: workoutSession?.sets,
+    reps: workoutSession?.reps,
+    weight_kg: workoutSession?.weight_kg,
+    duration_seconds: workoutSession?.duration_seconds,
+    distance_km: workoutSession?.distance_km,
+  }, explicit || {})
 
-  return {
-    type: workoutSession.persistedWorkoutId && workoutSession.correctionRequested ? "update_workout_log" : "log_workout",
-    ...(workoutSession.persistedWorkoutId && workoutSession.correctionRequested ? { workout_id: workoutSession.persistedWorkoutId } : {}),
-    exercise_name: exerciseName,
-    workout_type: String(workoutSession.workout_type || explicit?.workout_type || exerciseName).trim(),
-    muscle_group: workoutSession.muscle_group || explicit?.muscle_group || "full_body",
-    sets: Number(workoutSession.sets || explicit?.sets || 1),
-    reps: Number(workoutSession.reps || explicit?.reps || 0),
-    weight_kg: Number(workoutSession.weight_kg || explicit?.weight_kg || 0),
-    duration_seconds: Number(workoutSession.duration_seconds || explicit?.duration_seconds || 0),
-    distance_km: Number(workoutSession.distance_km || explicit?.distance_km || 0),
+  const actions = []
+  const seen = new Set()
+  const primaryAction = buildWorkoutActionFromCandidate(primaryCandidate, workoutSession)
+  if (primaryAction && (workoutSession?.readyToLog || workoutSession?.correctionRequested)) {
+    actions.push(primaryAction)
+    seen.add(workoutActionKey(primaryAction))
   }
+
+  if (!workoutSession?.persistedWorkoutId && !workoutSession?.correctionRequested) {
+    for (const activity of safeArray(workoutSession?.candidateActivities, 8)) {
+      const candidate = normalizeWorkoutCandidate(activity?.parsedWorkout, {})
+      const action = buildWorkoutActionFromCandidate(candidate)
+      if (!action) continue
+      const key = workoutActionKey(action)
+      if (seen.has(key)) continue
+      actions.push(action)
+      seen.add(key)
+    }
+  }
+
+  return actions
+}
+
+export function buildDeterministicWorkoutAction(args = {}) {
+  return buildDeterministicWorkoutActions(args)[0] || null
 }
 
 export function buildDeterministicWorkoutDeletionAction(workoutSession) {

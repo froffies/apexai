@@ -5,6 +5,7 @@ import {
   buildDeterministicMealAction,
   buildDeterministicMealActions,
   buildDeterministicWorkoutAction,
+  buildDeterministicWorkoutActions,
   buildDeterministicWorkoutDeletionAction,
   deterministicAlreadyLoggedReply,
   deterministicClarifyActionFromSession,
@@ -564,6 +565,59 @@ test("coach logging rules emit update_workout_log for persisted workout correcti
   assert.ok(action)
   assert.equal(action.type, "update_workout_log")
   assert.equal(action.workout_id, "workout_fix")
+})
+
+test("coach logging rules can emit multiple deterministic workout actions from candidate activities", () => {
+  const actions = buildDeterministicWorkoutActions({
+    workoutSession: {
+      readyToLog: true,
+      alreadyLogged: false,
+      persistedWorkoutId: "",
+      correctionRequested: false,
+      exercise_name: "Bench",
+      workout_type: "Bench",
+      muscle_group: "full_body",
+      sets: 5,
+      reps: 5,
+      weight_kg: 80,
+      duration_seconds: 0,
+      distance_km: 0,
+      candidateActivities: [
+        {
+          parsedWorkout: {
+            exercise_name: "Bench",
+            workout_type: "Bench",
+            muscle_group: "full_body",
+            sets: 5,
+            reps: 5,
+            weight_kg: 80,
+            duration_seconds: 0,
+            distance_km: 0,
+          },
+        },
+        {
+          parsedWorkout: {
+            exercise_name: "Run",
+            workout_type: "Run",
+            muscle_group: "cardio",
+            sets: 1,
+            reps: 0,
+            weight_kg: 0,
+            duration_seconds: 0,
+            distance_km: 2,
+          },
+        },
+      ],
+    },
+    explicitActions: [],
+  })
+
+  assert.equal(actions.length, 2)
+  assert.equal(actions[0].type, "log_workout")
+  assert.match(actions[0].exercise_name, /bench/i)
+  assert.equal(actions[1].type, "log_workout")
+  assert.match(actions[1].exercise_name, /run/i)
+  assert.equal(actions[1].distance_km, 2)
 })
 
 test("coach logging rules emit delete_workout_log for persisted workout delete requests", () => {

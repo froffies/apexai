@@ -234,6 +234,44 @@ test("normalizeCoachResponse blocks AI workout persistence when a persisted work
   assert.equal(payload.actions.some((action) => action.type === "log_workout"), false)
 })
 
+test("normalizeCoachResponse keeps validated mixed actions when the AI reply falls back generically", () => {
+  const payload = normalizeCoachResponse({
+    reply: "I have the details, but I couldn't save it just now.",
+    actions: [],
+    warnings: [],
+  }, {
+    mealContext: {
+      readyToLog: false,
+      alreadyLogged: false,
+      clarifyQuestion: "How much steak did you have?",
+    },
+    workoutContext: {
+      readyToLog: false,
+      alreadyLogged: false,
+      clarifyQuestion: "How many reps did you do for Squat?",
+    },
+    validatedActions: [
+      {
+        type: "log_meal",
+        food_name: "steak",
+        quantity: "1 meal",
+        calories: 180,
+        protein_g: 12,
+        carbs_g: 18,
+        fat_g: 6,
+      },
+      {
+        type: "clarify",
+        message: "How many reps did you do for Squat?",
+      },
+    ],
+  })
+
+  assert.equal(payload.actions.some((action) => action.type === "log_meal"), true)
+  assert.equal(payload.actions.some((action) => action.type === "clarify"), true)
+  assert.doesNotMatch(payload.reply, /couldn't save it just now/i)
+})
+
 test("normalizeCoachResponse drops deterministic meal clarification when the AI already returned a meal persistence action", () => {
   const payload = normalizeCoachResponse({
     reply: "I logged 200g chicken and 200g rice for you.",

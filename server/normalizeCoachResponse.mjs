@@ -1,7 +1,7 @@
 import {
   buildDeterministicMealDeletionAction,
   buildDeterministicMealActions,
-  buildDeterministicWorkoutAction,
+  buildDeterministicWorkoutActions,
   buildDeterministicWorkoutDeletionAction,
   deterministicAlreadyLoggedReply,
   deterministicClarifyActionFromSession,
@@ -16,6 +16,37 @@ import {
   summarizeCoachAction,
   summarizeCoachActions,
 } from "./coachLoggingRules.mjs"
+
+function actionDedupeKey(action = {}) {
+  const type = String(action?.type || "").trim()
+  if (!type) return ""
+  if (type === "clarify") return `clarify:${String(action?.message || "").trim().toLowerCase()}`
+  if (type === "log_meal" || type === "update_meal_log" || type === "delete_meal_log") {
+    return [
+      type,
+      String(action?.meal_id || "").trim(),
+      String(action?.food_name || "").trim().toLowerCase(),
+      String(action?.quantity || "").trim().toLowerCase(),
+      Number(action?.calories || 0),
+      Number(action?.protein_g || 0),
+      Number(action?.carbs_g || 0),
+      Number(action?.fat_g || 0),
+    ].join(":")
+  }
+  if (type === "log_workout" || type === "update_workout_log" || type === "delete_workout_log") {
+    return [
+      type,
+      String(action?.workout_id || "").trim(),
+      String(action?.exercise_name || action?.workout_type || "").trim().toLowerCase(),
+      Number(action?.sets || 0),
+      Number(action?.reps || 0),
+      Number(action?.weight_kg || 0),
+      Number(action?.duration_seconds || 0),
+      Number(action?.distance_km || 0),
+    ].join(":")
+  }
+  return `${type}:${JSON.stringify(action)}`
+}
 
 function extractImplicitActions(value) {
   const directAction = normalizeAction(value?.action)
@@ -64,7 +95,7 @@ export function normalizeCoachResponse(value, context = {}) {
   })
   const deterministicMealDeleteAction = buildDeterministicMealDeletionAction(context.mealContext)
   const deterministicWorkoutDeleteAction = buildDeterministicWorkoutDeletionAction(context.workoutContext)
-  const deterministicWorkoutAction = buildDeterministicWorkoutAction({
+  const deterministicWorkoutActions = buildDeterministicWorkoutActions({
     workoutSession: context.workoutContext,
     explicitActions,
   })
@@ -96,7 +127,7 @@ export function normalizeCoachResponse(value, context = {}) {
 
   const filteredExplicitActions = explicitActions.filter((action) => {
     if ((deterministicMealActions.length || deterministicMealDeleteAction) && isMealPersistenceAction(action)) return false
-    if ((deterministicWorkoutAction || deterministicWorkoutDeleteAction) && isWorkoutPersistenceAction(action)) return false
+    if ((deterministicWorkoutActions.length || deterministicWorkoutDeleteAction) && isWorkoutPersistenceAction(action)) return false
     if (context.mealContext?.readyToLog && action?.type === "clarify") return false
     if (context.workoutContext?.readyToLog && action?.type === "clarify") return false
     if (context.mealContext?.alreadyLogged && isMealPersistenceAction(action)) return false
@@ -122,8 +153,8 @@ export function normalizeCoachResponse(value, context = {}) {
   const explicitMealPersistenceAction = filteredExplicitActions.find(isMealPersistenceAction)
   const explicitWorkoutPersistenceAction = filteredExplicitActions.find(isWorkoutPersistenceAction)
   const deterministicClarifyActions = [
-    ...(!deterministicMealActions.length && !explicitMealPersistenceAction && mealClarifyAction ? [mealClarifyAction] : []),
-    ...(!deterministicWorkoutAction && !explicitWorkoutPersistenceAction && workoutClarifyAction ? [workoutClarifyAction] : []),
+    ...(!deterministicMealActions.length && !explicitMealPersistenceAction && !hasValidatedMealPersistence && mealClarifyAction ? [mealClarifyAction] : []),
+    ...(!deterministicWorkoutActions.length && !explicitWorkoutPersistenceAction && !hasValidatedWorkoutPersistence && workoutClarifyAction ? [workoutClarifyAction] : []),
   ]
 
   let actions = []
@@ -141,8 +172,9 @@ export function normalizeCoachResponse(value, context = {}) {
     forcedReply = summarizeCoachAction(deterministicWorkoutDeleteAction)
   } else {
     actions = [
+      ...validatedActions,
       ...deterministicMealActions,
-      ...(deterministicWorkoutAction ? [deterministicWorkoutAction] : []),
+      ...deterministicWorkoutActions,
       ...deterministicClarifyActions,
       ...filteredExplicitActions,
     ]
@@ -151,8 +183,12 @@ export function normalizeCoachResponse(value, context = {}) {
       .slice(0, 8)
   }
 
+  const seenActionKeys = new Set()
   const seenClarifyMessages = new Set()
   actions = actions.filter((action) => {
+    const key = actionDedupeKey(action)
+    if (key && seenActionKeys.has(key)) return false
+    if (key) seenActionKeys.add(key)
     if (action?.type !== "clarify") return true
     const message = String(action?.message || "").trim().toLowerCase()
     if (!message) {
@@ -182,6 +218,17 @@ export function normalizeCoachResponse(value, context = {}) {
 
   if (context.persistenceAttempted && context.persistenceSucceeded === false) {
     reply = "I have the details, but I couldn't save it just now."
+  }
+
+  if (
+    /^i have the details, but i couldn't save it just now\.$/i.test(reply)
+    && actions.length
+    && !(context.persistenceAttempted && context.persistenceSucceeded === false)
+  ) {
+    reply = actions.map((action) => summarizeCoachAction(action)).filter(Boolean).join(" ")
+      || summarizeCoachActions(actions)
+      || summarizeCoachAction(actions[0])
+      || reply
   }
 
   return {
