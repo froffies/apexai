@@ -424,10 +424,12 @@ function buildPersistedMealSession(session, action, mealId) {
 
 function buildPersistedWorkoutSession(session, action, workoutId) {
   const base = session && typeof session === "object" ? session : createEmptyWorkoutSession()
-  const summary = String(
-    base?.summary
-    || action?.workout_type
+  const persistedExercise = String(action?.exercise_name || action?.workout_type || base?.exercise_name || base?.workout_type || "").trim()
+  const persistedWorkoutType = String(action?.workout_type || action?.exercise_name || base?.workout_type || base?.exercise_name || "").trim()
+  const persistedSummary = String(
+    action?.workout_type
     || action?.exercise_name
+    || base?.summary
     || ""
   ).trim()
   return {
@@ -440,8 +442,10 @@ function buildPersistedWorkoutSession(session, action, workoutId) {
     suppressed: false,
     suppressionReply: "",
     persisted: true,
+    exercise_name: persistedExercise,
+    workout_type: persistedWorkoutType,
     persistedWorkoutId: workoutId,
-    persistedSummary: summary,
+    persistedSummary: persistedSummary,
     persistedAt: new Date().toISOString(),
     alreadyLogged: false,
     correctionRequested: false,
