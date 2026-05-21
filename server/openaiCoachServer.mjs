@@ -1291,6 +1291,7 @@ async function handleCoach(request, response) {
         mealContext,
         workoutContext,
         nutritionStatusReply,
+        validatedActions: combinedDeterministicActions,
       }),
       meal_session: mealContext,
       workout_session: workoutContext,

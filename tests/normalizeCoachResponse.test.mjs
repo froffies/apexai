@@ -157,6 +157,83 @@ test("normalizeCoachResponse preserves deterministic workout logs alongside meal
   assert.match(payload.reply, /how many eggs/i)
 })
 
+test("normalizeCoachResponse blocks AI meal persistence when the meal still needs unresolved clarification and no validated meal save exists", () => {
+  const payload = normalizeCoachResponse({
+    reply: "Great job on the pushups! You had 2 large eggs, which I'll log now.",
+    actions: [
+      { type: "log_workout", exercise_name: "Pushups", workout_type: "Pushups", reps: 4, sets: 1 },
+      { type: "log_meal", food_name: "2 large eggs", quantity: "2 large eggs", calories: 148, protein_g: 12.6, carbs_g: 1.1, fat_g: 10.2 },
+    ],
+    warnings: [],
+  }, {
+    prompt: "i had eggs and did 4 pushups",
+    mealContext: {
+      clarifyQuestion: "How many eggs did you have?",
+      readyToLog: false,
+      alreadyLogged: false,
+      answerOnly: false,
+    },
+    workoutContext: {
+      readyToLog: true,
+      alreadyLogged: false,
+      persistedWorkoutId: "",
+      correctionRequested: false,
+      exercise_name: "Pushups",
+      workout_type: "Pushups",
+      muscle_group: "full_body",
+      sets: 1,
+      reps: 4,
+      weight_kg: 0,
+      duration_seconds: 0,
+      distance_km: 0,
+    },
+    validatedActions: [
+      { type: "log_workout", exercise_name: "Pushups", workout_type: "Pushups", reps: 4, sets: 1 },
+      { type: "clarify", message: "How many eggs did you have?" },
+    ],
+  })
+
+  assert.equal(payload.actions.some((action) => action.type === "log_workout"), true)
+  assert.equal(payload.actions.some((action) => action.type === "log_meal"), false)
+  assert.equal(payload.actions.some((action) => action.type === "clarify"), true)
+})
+
+test("normalizeCoachResponse blocks AI workout persistence when a persisted workout is idle and the turn is advancing a meal follow-up", () => {
+  const payload = normalizeCoachResponse({
+    reply: "I've updated your log to 18 eggs and your pushups are logged too.",
+    actions: [
+      { type: "update_meal_log", food_name: "18 eggs", quantity: "1 meal", calories: 1332, protein_g: 113.4, carbs_g: 9.9, fat_g: 91.8 },
+      { type: "log_workout", exercise_name: "Pushups", workout_type: "Pushups", reps: 4, sets: 1 },
+    ],
+    warnings: [],
+  }, {
+    prompt: "18",
+    mealContext: {
+      readyToLog: true,
+      alreadyLogged: false,
+      clarifyQuestion: "",
+      persistedMealId: "meal_1",
+      correctionRequested: true,
+      summary: "18 eggs",
+    },
+    workoutContext: {
+      readyToLog: false,
+      alreadyLogged: true,
+      persistedWorkoutId: "workout_1",
+      persistedSummary: "Pushups",
+      summary: "Pushups",
+      correctionRequested: false,
+      deleteRequested: false,
+    },
+    validatedActions: [
+      { type: "update_meal_log", meal_id: "meal_1", food_name: "18 eggs", quantity: "1 meal", calories: 1332, protein_g: 113.4, carbs_g: 9.9, fat_g: 91.8 },
+    ],
+  })
+
+  assert.equal(payload.actions.filter((action) => action.type === "update_meal_log").length, 1)
+  assert.equal(payload.actions.some((action) => action.type === "log_workout"), false)
+})
+
 test("normalizeCoachResponse drops deterministic meal clarification when the AI already returned a meal persistence action", () => {
   const payload = normalizeCoachResponse({
     reply: "I logged 200g chicken and 200g rice for you.",
@@ -175,6 +252,14 @@ test("normalizeCoachResponse drops deterministic meal clarification when the AI 
       readyToLog: false,
       alreadyLogged: false,
     },
+    validatedActions: [{
+      type: "log_meal",
+      food_name: "200g chicken, plus 200g rice",
+      calories: 410,
+      protein_g: 38,
+      carbs_g: 36,
+      fat_g: 6,
+    }],
   })
 
   assert.equal(payload.actions.filter((action) => action.type === "clarify").length, 0)

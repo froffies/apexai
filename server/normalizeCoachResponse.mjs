@@ -68,6 +68,31 @@ export function normalizeCoachResponse(value, context = {}) {
     workoutSession: context.workoutContext,
     explicitActions,
   })
+  const validatedActions = safeArray(context.validatedActions, 8).map(normalizeAction).filter(Boolean)
+  const hasValidatedMealPersistence = validatedActions.some(isMealPersistenceAction)
+  const hasValidatedWorkoutPersistence = validatedActions.some(isWorkoutPersistenceAction)
+  const mealHasPendingWork = Boolean(
+    context.mealContext
+    && !context.mealContext.alreadyLogged
+    && (
+      context.mealContext.deleteRequested
+      || context.mealContext.suppressed
+      || context.mealContext.readyToLog
+      || context.mealContext.clarifyQuestion
+      || context.mealContext.correctionRequested
+    )
+  )
+  const workoutHasPendingWork = Boolean(
+    context.workoutContext
+    && !context.workoutContext.alreadyLogged
+    && (
+      context.workoutContext.deleteRequested
+      || context.workoutContext.suppressed
+      || context.workoutContext.readyToLog
+      || context.workoutContext.clarifyQuestion
+      || context.workoutContext.correctionRequested
+    )
+  )
 
   const filteredExplicitActions = explicitActions.filter((action) => {
     if ((deterministicMealActions.length || deterministicMealDeleteAction) && isMealPersistenceAction(action)) return false
@@ -76,6 +101,21 @@ export function normalizeCoachResponse(value, context = {}) {
     if (context.workoutContext?.readyToLog && action?.type === "clarify") return false
     if (context.mealContext?.alreadyLogged && isMealPersistenceAction(action)) return false
     if (context.workoutContext?.alreadyLogged && isWorkoutPersistenceAction(action)) return false
+    if (
+      isMealPersistenceAction(action)
+      && !hasValidatedMealPersistence
+      && context.mealContext?.clarifyQuestion
+      && !context.mealContext?.readyToLog
+      && !context.mealContext?.answerOnly
+    ) return false
+    if (
+      isWorkoutPersistenceAction(action)
+      && !hasValidatedWorkoutPersistence
+      && context.workoutContext?.persistedWorkoutId
+      && !context.workoutContext?.readyToLog
+      && !context.workoutContext?.correctionRequested
+      && !context.workoutContext?.deleteRequested
+    ) return false
     return true
   })
 
@@ -89,9 +129,9 @@ export function normalizeCoachResponse(value, context = {}) {
   let actions = []
   let forcedReply = ""
 
-  if (context.mealContext?.alreadyLogged) {
+  if (context.mealContext?.alreadyLogged && !workoutHasPendingWork) {
     forcedReply = deterministicAlreadyLoggedReply(context.mealContext, "meal")
-  } else if (context.workoutContext?.alreadyLogged) {
+  } else if (context.workoutContext?.alreadyLogged && !mealHasPendingWork) {
     forcedReply = deterministicAlreadyLoggedReply(context.workoutContext, "workout")
   } else if (deterministicMealDeleteAction) {
     actions = [deterministicMealDeleteAction]
