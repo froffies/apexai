@@ -1198,6 +1198,46 @@ test("intent graph keeps stacked mixed turns as separate meal and workout candid
   assert.match(String(next.workoutSession.candidateActivities[1]?.parsedWorkout?.exercise_name || ""), /run/i)
 })
 
+test("mixed workout clarification follow-ups keep the primary exercise and preserve secondary candidates", () => {
+  const first = buildCoachSessionState({
+    recentMessages: [],
+    currentMessage: "i did bench 80kg and ran 2km",
+    mealSession: emptyMealSessionState(),
+    workoutSession: emptyWorkoutSessionState(),
+  })
+
+  const carriedWorkoutSession = {
+    ...first.workoutSession,
+    active: false,
+    readyToLog: false,
+    clarifyQuestion: "",
+    persisted: true,
+    persistedWorkoutId: "workout_run",
+    persistedSummary: "Bench 80kg",
+    persistedAt: "2026-05-21T03:00:00Z",
+  }
+
+  const next = buildCoachSessionState({
+    recentMessages: [
+      user("i did bench 80kg and ran 2km"),
+      assistant("I've logged your run. How many reps did you do for the bench?"),
+    ],
+    currentMessage: "5 reps",
+    mealSession: emptyMealSessionState(),
+    workoutSession: carriedWorkoutSession,
+  })
+
+  assert.ok(next.workoutSession)
+  assert.match(String(next.workoutSession.exercise_name || ""), /bench/i)
+  assert.match(String(next.workoutSession.summary || ""), /bench/i)
+  assert.equal(Boolean(next.workoutSession.readyToLog), true)
+  assert.ok(Array.isArray(next.workoutSession.candidateActivities))
+  assert.equal(next.workoutSession.candidateActivities.length, 2)
+  assert.match(String(next.workoutSession.candidateActivities[0]?.parsedWorkout?.exercise_name || ""), /bench/i)
+  assert.equal(Number(next.workoutSession.candidateActivities[0]?.parsedWorkout?.reps || 0), 5)
+  assert.match(String(next.workoutSession.candidateActivities[1]?.parsedWorkout?.exercise_name || ""), /run/i)
+})
+
 test("frustrated log reversal threads do not turn complaint text into meal or workout entities", () => {
   const conversation = [
     user("log this as workout"),

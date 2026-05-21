@@ -101,6 +101,10 @@ function cleanText(value) {
     .trim()
 }
 
+function safeArray(value, limit = 8) {
+  return Array.isArray(value) ? value.slice(0, limit) : []
+}
+
 function stripCorrectionLead(text) {
   let normalized = String(text || "").trim()
   let changed = true
@@ -177,6 +181,28 @@ function normalizeWorkoutSession(session = {}) {
     ...emptyWorkoutSessionState(),
     ...session,
     clarificationCounts: { ...(session?.clarificationCounts || {}) },
+    candidateActivities: Array.isArray(session?.candidateActivities)
+      ? session.candidateActivities
+        .map((activity) => ({
+          ...activity,
+          primary: Boolean(activity?.primary),
+          text: String(activity?.text || ""),
+          parsedWorkout: activity?.parsedWorkout && typeof activity.parsedWorkout === "object"
+            ? {
+                ...activity.parsedWorkout,
+                exercise_name: String(activity.parsedWorkout.exercise_name || ""),
+                workout_type: String(activity.parsedWorkout.workout_type || activity.parsedWorkout.exercise_name || ""),
+                muscle_group: String(activity.parsedWorkout.muscle_group || "full_body"),
+                sets: Number(activity.parsedWorkout.sets || 0),
+                reps: Number(activity.parsedWorkout.reps || 0),
+                weight_kg: Number(activity.parsedWorkout.weight_kg || 0),
+                duration_seconds: Number(activity.parsedWorkout.duration_seconds || 0),
+                distance_km: Number(activity.parsedWorkout.distance_km || 0),
+              }
+            : null,
+        }))
+        .filter((activity) => activity.parsedWorkout)
+      : [],
   }
 }
 
@@ -1162,6 +1188,71 @@ function extractWorkoutThread(recentMessages = [], currentMessage = "", existing
   return thread
 }
 
+function normalizeWorkoutCandidateActivity(activity = {}) {
+  if (!activity?.parsedWorkout || typeof activity.parsedWorkout !== "object") return null
+  return {
+    ...activity,
+    primary: Boolean(activity?.primary),
+    text: String(activity?.text || ""),
+    parsedWorkout: {
+      ...activity.parsedWorkout,
+      exercise_name: String(activity.parsedWorkout.exercise_name || ""),
+      workout_type: String(activity.parsedWorkout.workout_type || activity.parsedWorkout.exercise_name || ""),
+      muscle_group: String(activity.parsedWorkout.muscle_group || "full_body"),
+      sets: Number(activity.parsedWorkout.sets || 0),
+      reps: Number(activity.parsedWorkout.reps || 0),
+      weight_kg: Number(activity.parsedWorkout.weight_kg || 0),
+      duration_seconds: Number(activity.parsedWorkout.duration_seconds || 0),
+      distance_km: Number(activity.parsedWorkout.distance_km || 0),
+    },
+  }
+}
+
+function primaryWorkoutCandidateActivity(activities = []) {
+  return activities.find((activity) => activity?.primary) || activities[0] || null
+}
+
+function shouldReuseWorkoutCandidateActivities(session = null, currentMessage = "", parsedWorkout = null) {
+  const normalized = cleanText(currentMessage)
+  if (!normalized) return false
+  const candidateActivities = Array.isArray(session?.candidateActivities) ? session.candidateActivities : []
+  if (candidateActivities.length < 2) return false
+  if (suppressionRequested(currentMessage) || workoutDeleteRequested(currentMessage)) return false
+  if (looksLikeStandaloneMealMessage(currentMessage) || isExplicitMealStart(currentMessage)) return false
+  return Boolean(
+    (hasWorkoutClarificationContext(session) || session?.persisted)
+    && (
+      WORKOUT_CONTINUATION_PATTERN.test(normalized)
+      || hasWorkoutMetricDetail(parsedWorkout)
+      || Number(parsedWorkout?.duration_seconds || 0) > 0
+      || Number(parsedWorkout?.distance_km || 0) > 0
+      || workoutReferenceMessage(normalized)
+      || workoutCorrectionRequested(currentMessage)
+    )
+  )
+}
+
+function buildUpdatedPrimaryWorkoutCandidate(activity = null, state = null) {
+  const parsedWorkout = activity?.parsedWorkout && typeof activity.parsedWorkout === "object"
+    ? activity.parsedWorkout
+    : {}
+  return {
+    ...(activity || {}),
+    primary: true,
+    parsedWorkout: {
+      ...parsedWorkout,
+      exercise_name: String(state?.exercise_name || parsedWorkout.exercise_name || ""),
+      workout_type: String(state?.workout_type || parsedWorkout.workout_type || parsedWorkout.exercise_name || ""),
+      muscle_group: String(state?.muscle_group || parsedWorkout.muscle_group || "full_body"),
+      sets: Number(state?.sets || parsedWorkout.sets || 0),
+      reps: Number(state?.reps || parsedWorkout.reps || 0),
+      weight_kg: Number(state?.weight_kg || parsedWorkout.weight_kg || 0),
+      duration_seconds: Number(state?.duration_seconds || parsedWorkout.duration_seconds || 0),
+      distance_km: Number(state?.distance_km || parsedWorkout.distance_km || 0),
+    },
+  }
+}
+
 function emptyParsedWorkoutState() {
   return {
     active: false,
@@ -1599,14 +1690,29 @@ function buildWorkoutSessionState(recentMessages = [], currentMessage = "", exis
     suppressionReply: suppressed ? "Okay, I won't save that." : "",
   }
 
+  const preservedCandidateActivities = safeArray(prior.candidateActivities, 8)
+    .map((activity) => normalizeWorkoutCandidateActivity(activity))
+    .filter(Boolean)
+  const currentParsedWorkout = parseWorkoutMessage(currentMessage)
+  const reusesCandidateActivities = shouldReuseWorkoutCandidateActivities(prior, currentMessage, currentParsedWorkout)
+
   if ((prior.active || prior.persisted) && !isExplicitMealStart(normalizedCurrent)) {
     mergeWorkoutMetrics(state, prior)
   }
 
-  for (const entry of thread) {
-    if (entry.role !== "user") continue
-    const parsed = parseWorkoutMessage(entry.content)
-    if (parsed) mergeWorkoutMetrics(state, parsed)
+  if (reusesCandidateActivities) {
+    const primaryCandidate = primaryWorkoutCandidateActivity(preservedCandidateActivities)
+    if (primaryCandidate?.parsedWorkout) {
+      mergeWorkoutMetrics(state, primaryCandidate.parsedWorkout)
+    }
+    if (currentParsedWorkout) mergeWorkoutMetrics(state, currentParsedWorkout)
+    state.candidateActivities = preservedCandidateActivities
+  } else {
+    for (const entry of thread) {
+      if (entry.role !== "user") continue
+      const parsed = parseWorkoutMessage(entry.content)
+      if (parsed) mergeWorkoutMetrics(state, parsed)
+    }
   }
 
   if (!state.sets && state.reps) state.sets = 1
@@ -1621,6 +1727,15 @@ function buildWorkoutSessionState(recentMessages = [], currentMessage = "", exis
   state.readyToLog = isCardio
     ? Boolean(state.exercise_name && (state.duration_seconds > 0 || state.distance_km > 0))
     : Boolean(state.exercise_name && state.reps > 0)
+
+  if (preservedCandidateActivities.length) {
+    const primaryCandidate = primaryWorkoutCandidateActivity(preservedCandidateActivities)
+    const secondaryCandidates = preservedCandidateActivities.filter((activity) => activity !== primaryCandidate)
+    state.candidateActivities = [
+      buildUpdatedPrimaryWorkoutCandidate(primaryCandidate, state),
+      ...secondaryCandidates,
+    ]
+  }
 
   const impliedCorrectionRequested = Boolean(
     prior.persistedWorkoutId
@@ -1709,6 +1824,7 @@ export function emptyWorkoutSessionState() {
       correctionRequested: false,
       deleteRequested: false,
       thread_messages: [],
+      candidateActivities: [],
     }
   }
 
