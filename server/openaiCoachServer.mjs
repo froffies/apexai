@@ -1129,10 +1129,12 @@ async function handleCoach(request, response) {
     const workoutAction = workoutContext?.readyToLog
       ? buildDeterministicWorkoutAction({ workoutSession: workoutContext, explicitActions: [] })
       : null
+    const mealClarifyAction = deterministicClarifyActionFromSession(mealContext)
+    const workoutClarifyAction = deterministicClarifyActionFromSession(workoutContext)
     const explicitMixedLogRequest = /\b(?:log|save|track|add)\s+all\s+that\b/i.test(String(body.message || ""))
     const impliedMixedLogRequest = Boolean(
       mealContext?.intentGraph?.hasMixedDomains
-      && workoutAction
+      && (workoutAction || workoutClarifyAction)
       && (mealContext?.intentGraph?.loggingIntent || explicitMixedLogRequest)
     )
     const mixedMealEstimateActions = (
@@ -1141,7 +1143,7 @@ async function handleCoach(request, response) {
       && !mealContext.readyToLog
       && !mealContext.answerOnly
       && !mealContext.persistedMealId
-      && workoutAction
+      && (workoutAction || workoutClarifyAction)
     )
       ? buildDeterministicMealActions({
           mealSession: mealContext,
@@ -1161,9 +1163,6 @@ async function handleCoach(request, response) {
       }, "deterministic")
       return
     }
-
-    const mealClarifyAction = deterministicClarifyActionFromSession(mealContext)
-    const workoutClarifyAction = deterministicClarifyActionFromSession(workoutContext)
     const clarifyActions = [
       ...(mixedMealEstimateActions.length ? [] : [mealClarifyAction]),
       workoutClarifyAction,

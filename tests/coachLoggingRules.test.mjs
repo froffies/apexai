@@ -130,6 +130,37 @@ test("coach logging rules can build a loose estimated meal action for mixed log-
   assert.ok(action.calories > 0)
 })
 
+test("coach logging rules do not loose-estimate a single unresolved count-based meal", () => {
+  const action = buildDeterministicMealAction({
+    mealSession: {
+      readyToLog: false,
+      alreadyLogged: false,
+      wantsLogging: true,
+      summary: "eggs",
+      items: [
+        {
+          baseName: "egg",
+          label: "Eggs",
+          category: "food",
+          quantity: null,
+          exclusions: [],
+        },
+      ],
+      pendingClarification: {
+        type: "quantity",
+        targetReference: "egg",
+        targetBaseName: "egg",
+        targetLabel: "Eggs",
+      },
+    },
+    explicitActions: [],
+    allowLooseEstimate: true,
+    prompt: "i had eggs and did 4 pushups",
+  })
+
+  assert.equal(action, null)
+})
+
 test("coach logging rules preserve grouped same-food preparations and all related macros", () => {
   const action = buildDeterministicMealAction({
     mealSession: {
@@ -186,6 +217,31 @@ test("coach logging rules preserve grouped same-food preparations and all relate
   assert.ok(action.calories > 1900)
   assert.ok(action.protein_g > 110)
   assert.ok(action.fat_g > 160)
+})
+
+test("coach logging rules strip trailing log directives from persisted meal action names", () => {
+  const action = buildDeterministicMealAction({
+    mealSession: {
+      readyToLog: true,
+      alreadyLogged: false,
+      summary: "1 serve eggs bacon, plus 1 slice toast, plus 1l water can you log all that",
+      persistedMealId: "",
+      correctionRequested: false,
+    },
+    explicitActions: [
+      {
+        type: "log_meal",
+        calories: 650,
+        protein_g: 28,
+        carbs_g: 42,
+        fat_g: 34,
+      },
+    ],
+    prompt: "i had eggs bacon and toast for breakfast also did 20 min run and drank a litre of water can you log all that",
+  })
+
+  assert.ok(action)
+  assert.equal(action.food_name, "1 serve eggs bacon, plus 1 slice toast, plus 1l water")
 })
 
 test("coach logging rules upgrade deterministic meal actions into updates when correcting a persisted meal", () => {

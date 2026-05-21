@@ -196,6 +196,26 @@ test("coach session state treats additive follow-ups on a persisted meal as upda
   assert.match(next.mealSession.summary, /chips with gravy/i)
 })
 
+test("coach session state keeps strong workout clauses out of meal fragments in mixed turns", () => {
+  const next = buildCoachSessionState({
+    recentMessages: [],
+    currentMessage: "had steak and squatted 100kg",
+    mealSession: emptyMealSessionState(),
+    workoutSession: emptyWorkoutSessionState(),
+  })
+
+  assert.ok(next.mealSession)
+  assert.ok(next.workoutSession)
+  assert.equal(next.mealSession.summary, "steak")
+  assert.equal(next.workoutSession.exercise_name, "Squat")
+  assert.equal(next.workoutSession.weight_kg, 100)
+  assert.match(next.workoutSession.clarifyQuestion, /how many reps/i)
+  assert.deepEqual(
+    (next.mealSession.candidateFragments?.workout || []).map((fragment) => fragment.text),
+    ["squatted 100kg"]
+  )
+})
+
 test("coach session state turns post-save delete intent into a deterministic meal deletion request", () => {
   const initial = replayCoachConversation([
     user("i had pie and eggs and milk"),

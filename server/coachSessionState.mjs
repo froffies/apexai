@@ -541,7 +541,8 @@ function classifyCoachClauseDomain({
     return { domain: "meal", mealPreview, parsedWorkout, mealLike, workoutLike, directiveOnly, nutritionQuestion, workoutQuestion, deleteOrSuppress, correction }
   }
   if (mealLike && workoutLike) {
-    const domain = previousDomain || (hasWorkoutMetricDetail(parsedWorkout) ? "workout" : "meal")
+    const preferWorkout = strongWorkoutSignal || hasWorkoutMetricDetail(parsedWorkout)
+    const domain = preferWorkout ? "workout" : (previousDomain || "meal")
     return { domain, mealPreview, parsedWorkout, mealLike, workoutLike, directiveOnly, nutritionQuestion, workoutQuestion, deleteOrSuppress, correction }
   }
   if (previousDomain === "meal" && /^(?:and|with|plus|then)\b/i.test(normalized)) {

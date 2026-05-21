@@ -16,6 +16,8 @@ export function titleCase(text) {
 const COUNT_UNITS = new Set(["egg", "slice", "cup", "tin", "can", "block", "bunch", "serve", "bowl", "plate", "mug", "tbsp", "tsp"])
 const MASS_UNITS = new Map([["g", 1], ["kg", 1000]])
 const VOLUME_UNITS = new Map([["ml", 1], ["l", 1000]])
+const COUNT_REQUIRED_LOOSE_ESTIMATE_BASES = new Set(["egg"])
+const TRAILING_LOG_COMMAND_PATTERN = /\s+\b(?:(?:can|could)\s+you|please|just)?\s*(?:log|save|track|add)\s+(?:all\s+that|that|it)\b.*$/i
 
 const PORTION_PATTERN = /(?<amount>\d+(?:\.\d+)?)\s*(?:large|medium|small|fresh|squeezed|salted|unsalted|wholemeal|wholegrain|rye)?\s*(?<unit>kg|g|ml|l|tbsp|tablespoons?|tsp|teaspoons?|cups?|slices?|tins?|cans?|blocks?|bunch(?:es)?|serves?|servings?|bowls?|plates?|mugs?|eggs?)\b/i
 
@@ -493,7 +495,9 @@ export function normalizeMealAction(action) {
   if (!action || typeof action !== "object") return action
   if (!isMealPersistenceAction(action)) return action
 
-  const foodName = String(action.food_name || action.name || "").trim()
+  const foodName = String(action.food_name || action.name || "")
+    .replace(TRAILING_LOG_COMMAND_PATTERN, "")
+    .trim()
   const quantity =
     typeof action.quantity === "number"
       ? String(action.quantity)
@@ -578,6 +582,44 @@ function normalizeSessionItem(item = {}) {
   }
 }
 
+function normalizeSessionBaseName(item = {}) {
+  const value = String(item.baseName || item.base_name || item.label || "").trim().toLowerCase()
+  if (!value) return ""
+  if (value === "eggs") return "egg"
+  return value
+}
+
+function rootSessionItems(mealSession) {
+  return safeArray(mealSession?.items, 24)
+    .map((item) => normalizeSessionItem(item))
+    .filter((item) => !item.attachedTo)
+}
+
+function blocksLooseEstimateForSingleCountItem(mealSession) {
+  if (String(mealSession?.pendingClarification?.type || "") !== "quantity") return false
+  const roots = rootSessionItems(mealSession)
+  if (roots.length !== 1) return false
+  const [root] = roots
+  const baseName = normalizeSessionBaseName(root)
+  if (!COUNT_REQUIRED_LOOSE_ESTIMATE_BASES.has(baseName)) return false
+  const quantity = normalizeItemQuantity(root.quantity)
+  return !quantity || !Number.isFinite(quantity.amount)
+}
+
+function canUseLooseEstimate(mealSession, allowLooseEstimate = false) {
+  return Boolean(
+    allowLooseEstimate
+    && !mealSession?.readyToLog
+    && !mealSession?.alreadyLogged
+    && !mealSession?.suppressed
+    && !mealSession?.persistedMealId
+    && !mealSession?.correctionRequested
+    && String(mealSession?.summary || "").trim()
+    && safeArray(mealSession?.items, 24).length > 0
+    && !blocksLooseEstimateForSingleCountItem(mealSession)
+  )
+}
+
 function buildMealSessionSubset(mealSession, group = null) {
   if (!group) return mealSession
   return {
@@ -597,16 +639,7 @@ function buildSingleDeterministicMealAction({
   mealTypeOverride = "",
   allowLooseEstimate = false,
 }) {
-  const looseEstimateAllowed = (
-    allowLooseEstimate
-    && !mealSession?.readyToLog
-    && !mealSession?.alreadyLogged
-    && !mealSession?.suppressed
-    && !mealSession?.persistedMealId
-    && !mealSession?.correctionRequested
-    && String(mealSession?.summary || "").trim()
-    && safeArray(mealSession?.items, 24).length > 0
-  )
+  const looseEstimateAllowed = canUseLooseEstimate(mealSession, allowLooseEstimate)
   if ((!mealSession?.readyToLog && !looseEstimateAllowed) || mealSession?.alreadyLogged || mealSession?.suppressed || (mealSession?.answerOnly && !allowAnswerOnly)) return null
   const shouldPersist =
     looseEstimateAllowed
@@ -658,16 +691,7 @@ function buildSingleDeterministicMealAction({
 
 export function buildDeterministicMealActions(args = {}) {
   const { mealSession } = args
-  const looseEstimateAllowed = (
-    args.allowLooseEstimate
-    && !mealSession?.readyToLog
-    && !mealSession?.alreadyLogged
-    && !mealSession?.suppressed
-    && !mealSession?.persistedMealId
-    && !mealSession?.correctionRequested
-    && String(mealSession?.summary || "").trim()
-    && safeArray(mealSession?.items, 24).length > 0
-  )
+  const looseEstimateAllowed = canUseLooseEstimate(mealSession, args.allowLooseEstimate)
   if ((!mealSession?.readyToLog && !looseEstimateAllowed) || mealSession?.alreadyLogged || mealSession?.suppressed || (mealSession?.answerOnly && !args.allowAnswerOnly)) return []
 
   const groups = safeArray(mealSession?.meal_groups, 8).filter((group) => (

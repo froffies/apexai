@@ -38,6 +38,7 @@ const META_COMPLAINT_PATTERN = /\b(?:you asked|i gave you|why can(?:'|’)t you 
 const VAGUE_REFERENCE_PATTERN = /^(?:the\s+)?(?:eggs?|tea|coffee|toast|beans?|chicken|rice|butter|oil|salmon|milk|drink|pizza|burger|chips)\b/i
 const SHARED_EACH_PATTERN = /^(?:about|around|roughly|approx(?:imately)?|bout)?\s*(?<amount>\d+(?:\.\d+)?|half|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty)\s*(?<unit>g|kg|lb|lbs|pound|pounds|ml|l|litre|litres|liter|liters|cup|cups|bowl|bowls|plate|plates|mug|mugs|serve|serves|serving|servings|slice|slices|tbsp|tablespoon|tablespoons|tsp|teaspoon|teaspoons|egg|eggs)\s+each$/i
 const INLINE_CORRECTION_PATTERN = /\b(?:no wait|i meant|make that|change that|update that|sorry)\b/i
+const TRAILING_LOG_DIRECTIVE_PATTERN = /\b(?:(?:can|could)\s+you|please|just)?\s*(?:log|save|track|add)\s+(?:all\s+that|that|it)\b.*$/i
 const PACKAGED_UNIT_PATTERN = /\b(?:tin|tins|can|cans|block|blocks|bunch|bunches)\b/i
 const RELATION_PATTERNS = [
   { relation: "cooked_in", pattern: /\b(?:cooked|fried|grilled|baked|roasted|boiled|poached|scrambled|steamed)\s+in\b/i },
@@ -177,6 +178,7 @@ function stripLead(text = "") {
   return String(text || "")
     .replace(MEAL_START_PATTERN, "")
     .replace(CORRECTION_PREFIX, "")
+    .replace(TRAILING_LOG_DIRECTIVE_PATTERN, "")
     .replace(/\b(?:please|thanks|thank you)\b/gi, "")
     .trim()
 }
