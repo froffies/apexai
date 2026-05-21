@@ -927,6 +927,60 @@ test("coach session state keeps a persisted workout idle when a numeric reply is
   assert.equal(next.workoutSession.clarifyQuestion, "")
 })
 
+test("coach session state keeps a persisted workout idle during a meal-only correction follow-up", () => {
+  const first = buildCoachSessionState({
+    recentMessages: [],
+    currentMessage: "had steak and squatted 100kg",
+    mealSession: emptyMealSessionState(),
+    workoutSession: emptyWorkoutSessionState(),
+  })
+
+  const second = buildCoachSessionState({
+    recentMessages: [
+      user("had steak and squatted 100kg"),
+      assistant("How many reps did you do for Squat?"),
+    ],
+    currentMessage: "5 reps",
+    mealSession: first.mealSession,
+    workoutSession: first.workoutSession,
+  })
+
+  const next = buildCoachSessionState({
+    recentMessages: [
+      user("had steak and squatted 100kg"),
+      assistant("I've logged your steak as a snack (estimated) and just need to know how many reps you did for your squat."),
+      user("5 reps"),
+      assistant("I've logged your squat at 100kg for 5 reps."),
+    ],
+    currentMessage: "300g",
+    mealSession: {
+      ...second.mealSession,
+      persisted: true,
+      persistedMealId: "meal_steak",
+      persistedSummary: "steak",
+      summary: "steak",
+      active: false,
+      readyToLog: false,
+      alreadyLogged: true,
+    },
+    workoutSession: {
+      ...second.workoutSession,
+      persisted: true,
+      persistedWorkoutId: "workout_squat",
+      persistedSummary: "Squat",
+      summary: "Squat",
+      active: false,
+      readyToLog: false,
+      alreadyLogged: false,
+    },
+  })
+
+  assert.ok(next.mealSession)
+  assert.ok(next.workoutSession)
+  assert.equal(Boolean(next.workoutSession.readyToLog), false)
+  assert.equal(Boolean(next.workoutSession.alreadyLogged), true)
+})
+
 test("coach session state keeps a new explicit meal isolated from the previously saved meal", () => {
   const initial = replayCoachConversation([
     user("i had egg"),

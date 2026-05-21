@@ -1499,7 +1499,11 @@ function looksWorkoutSpecificMessage(message = "") {
 }
 
 function shouldKeepPersistedWorkoutIdleDuringMealFollowUp(currentMessage = "", previousMealSession = null, previousWorkoutSession = null, nextMealSession = null, nextWorkoutSession = null) {
-  if (!previousMealSession?.active || !hasMealClarificationContext(previousMealSession)) return false
+  const previousMealHadPendingOrPersistedContext = Boolean(
+    (previousMealSession?.active && hasMealClarificationContext(previousMealSession))
+    || previousMealSession?.persisted
+  )
+  if (!previousMealHadPendingOrPersistedContext) return false
   if (!previousWorkoutSession?.persisted) return false
   if (!nextMealSession || !(nextMealSession.readyToLog || nextMealSession.clarifyQuestion || nextMealSession.correctionRequested)) return false
   if (!nextWorkoutSession?.persistedWorkoutId || nextWorkoutSession.correctionRequested || nextWorkoutSession.deleteRequested) return false
