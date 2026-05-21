@@ -979,6 +979,7 @@ test("coach session state keeps a persisted workout idle during a meal-only corr
   assert.ok(next.workoutSession)
   assert.equal(Boolean(next.workoutSession.readyToLog), false)
   assert.equal(Boolean(next.workoutSession.alreadyLogged), true)
+  assert.match(String(next.workoutSession.summary || ""), /Squat/)
 })
 
 test("coach session state keeps a new explicit meal isolated from the previously saved meal", () => {

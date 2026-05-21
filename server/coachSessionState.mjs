@@ -1768,7 +1768,7 @@ export function buildCoachSessionState({
 
   if (shouldKeepPersistedWorkoutIdleDuringMealFollowUp(currentMessage, mealSession, workoutSession, nextMealSession, nextWorkoutSession)) {
     nextWorkoutSession = {
-      ...nextWorkoutSession,
+      ...normalizeWorkoutSession(workoutSession),
       active: false,
       readyToLog: false,
       clarifyQuestion: "",
