@@ -11,6 +11,7 @@ import {
   deterministicClarifyActionFromSession,
   formatDeterministicMealAnswer,
 } from "../server/coachLoggingRules.mjs"
+import { buildCoachSessionState, emptyMealSessionState, emptyWorkoutSessionState } from "../server/coachSessionState.mjs"
 
 test("coach logging rules build a deterministic meal action from ready session state and explicit macros", () => {
   const action = buildDeterministicMealAction({
@@ -618,6 +619,27 @@ test("coach logging rules can emit multiple deterministic workout actions from c
   assert.equal(actions[1].type, "log_workout")
   assert.match(actions[1].exercise_name, /run/i)
   assert.equal(actions[1].distance_km, 2)
+})
+
+test("coach logging rules emit multiple mixed workout actions from graph-native candidate activities", () => {
+  const next = buildCoachSessionState({
+    recentMessages: [],
+    currentMessage: "i had eggs and did 4 pushups and ran 2km",
+    mealSession: emptyMealSessionState(),
+    workoutSession: emptyWorkoutSessionState(),
+    recentMeals: [],
+  })
+
+  const actions = buildDeterministicWorkoutActions({
+    workoutSession: next.workoutSession,
+    explicitActions: [],
+  })
+
+  assert.equal(actions.length, 2)
+  assert.match(String(actions[0]?.exercise_name || ""), /pushups/i)
+  assert.equal(Number(actions[0]?.reps || 0), 4)
+  assert.match(String(actions[1]?.exercise_name || ""), /run/i)
+  assert.equal(Number(actions[1]?.distance_km || 0), 2)
 })
 
 test("coach logging rules emit delete_workout_log for persisted workout delete requests", () => {

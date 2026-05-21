@@ -686,11 +686,54 @@ function reduceMealFragments(graph, recentMessages, existingSession, recentMeals
   return nextSession
 }
 
+function workoutCandidateReadyFromParsed(parsed = null) {
+  if (!parsed || !cleanText(parsed.exercise_name || parsed.workout_type || "")) return false
+  const isCardio = cleanText(parsed.muscle_group || "") === "cardio" || cardioAliases.has(cleanText(parsed.exercise_name || parsed.workout_type || ""))
+  return isCardio
+    ? Boolean(Number(parsed.duration_seconds || 0) > 0 || Number(parsed.distance_km || 0) > 0)
+    : Boolean(Number(parsed.reps || 0) > 0)
+}
+
+function parsedWorkoutDetailScore(parsed = null) {
+  if (!parsed || typeof parsed !== "object") return -1
+  let score = 0
+  if (cleanText(parsed.exercise_name || parsed.workout_type || "")) score += 2
+  if (Number(parsed.sets || 0) > 0) score += 1
+  if (Number(parsed.reps || 0) > 0) score += 3
+  if (Number(parsed.weight_kg || 0) > 0) score += 1
+  if (Number(parsed.duration_seconds || 0) > 0) score += 2
+  if (Number(parsed.distance_km || 0) > 0) score += 2
+  return score
+}
+
+function selectPreferredWorkoutParse(initialParsed = null, fallbackParsed = null) {
+  if (!initialParsed) return fallbackParsed
+  if (!fallbackParsed) return initialParsed
+  const initialScore = parsedWorkoutDetailScore(initialParsed)
+  const fallbackScore = parsedWorkoutDetailScore(fallbackParsed)
+  if (fallbackScore > initialScore) return fallbackParsed
+  if (!cleanText(initialParsed.exercise_name || initialParsed.workout_type || "") && cleanText(fallbackParsed.exercise_name || fallbackParsed.workout_type || "")) {
+    return fallbackParsed
+  }
+  if (!hasWorkoutMetricDetail(initialParsed) && hasWorkoutMetricDetail(fallbackParsed)) {
+    return fallbackParsed
+  }
+  return initialParsed
+}
+
 function reduceWorkoutFragments(graph, recentMessages, existingSession) {
   if (!Array.isArray(graph?.workoutFragments) || !graph.workoutFragments.length) return null
 
   const parsedFragments = graph.workoutFragments
-    .map((fragment) => ({ ...fragment, parsedWorkout: fragment.parsedWorkout || parseWorkoutMessage(fragment.text) }))
+    .map((fragment) => {
+      const normalizedText = normalizeWorkoutFragment(stripMixedTurnLead(fragment.text || fragment.rawText || ""))
+      const reparsedWorkout = parseWorkoutMessage(normalizedText)
+      return {
+        ...fragment,
+        text: normalizedText || fragment.text,
+        parsedWorkout: selectPreferredWorkoutParse(fragment.parsedWorkout || null, reparsedWorkout),
+      }
+    })
     .filter((fragment) => fragment.parsedWorkout || WORKOUT_START_PATTERN.test(cleanText(fragment.text)) || workoutReferenceMessage(fragment.text))
 
   if (!parsedFragments.length) return null
@@ -1552,6 +1595,35 @@ function persistedWorkoutFollowUpLooksLikeUpdate(message, session, nextState = n
   const nextSummary = cleanText(nextState?.summary || "")
   const persistedSummary = cleanText(session.persistedSummary || session.summary || "")
   if (!nextSummary || nextSummary === persistedSummary) return false
+
+  const candidateActivities = safeArray(session?.candidateActivities, 8)
+    .map((activity) => normalizeWorkoutCandidateActivity(activity))
+    .filter(Boolean)
+  if (candidateActivities.length >= 2) {
+    const primary = primaryWorkoutCandidateActivity(candidateActivities)
+    const primaryParsed = primary?.parsedWorkout || null
+    const parsedCurrent = parseWorkoutMessage(message)
+    const parsedExercise = cleanText(parsedCurrent?.exercise_name || parsedCurrent?.workout_type || "")
+    const nextExercise = cleanText(nextState?.exercise_name || nextState?.workout_type || "")
+    const primaryExercise = cleanText(primaryParsed?.exercise_name || primaryParsed?.workout_type || "")
+    const primaryWasReady = workoutCandidateReadyFromParsed(primaryParsed)
+    const primaryNowReady = workoutCandidateReadyFromParsed({
+      exercise_name: nextState?.exercise_name || primaryParsed?.exercise_name || "",
+      workout_type: nextState?.workout_type || primaryParsed?.workout_type || primaryParsed?.exercise_name || "",
+      muscle_group: nextState?.muscle_group || primaryParsed?.muscle_group || "full_body",
+      sets: Number(nextState?.sets || primaryParsed?.sets || 0),
+      reps: Number(nextState?.reps || primaryParsed?.reps || 0),
+      weight_kg: Number(nextState?.weight_kg || primaryParsed?.weight_kg || 0),
+      duration_seconds: Number(nextState?.duration_seconds || primaryParsed?.duration_seconds || 0),
+      distance_km: Number(nextState?.distance_km || primaryParsed?.distance_km || 0),
+    })
+    const hasReadySecondary = candidateActivities.some((activity) => activity !== primary && workoutCandidateReadyFromParsed(activity?.parsedWorkout))
+    const metricOnlyFollowUp = Boolean(parsedCurrent && hasWorkoutMetricDetail(parsedCurrent) && !parsedExercise)
+    const primaryMatchesNext = primaryExercise && nextExercise && (nextExercise.includes(primaryExercise) || primaryExercise.includes(nextExercise))
+    if (hasReadySecondary && !primaryWasReady && primaryNowReady && (metricOnlyFollowUp || primaryMatchesNext)) {
+      return false
+    }
+  }
 
   const parsed = parseWorkoutMessage(message)
   if (!parsed) return false

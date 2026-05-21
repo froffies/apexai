@@ -1238,6 +1238,41 @@ test("mixed workout clarification follow-ups keep the primary exercise and prese
   assert.match(String(next.workoutSession.candidateActivities[1]?.parsedWorkout?.exercise_name || ""), /run/i)
 })
 
+test("mixed workout follow-ups do not turn a pending primary candidate into a correction of a saved secondary workout", () => {
+  const first = buildCoachSessionState({
+    recentMessages: [],
+    currentMessage: "i did bench 80kg and ran 2km",
+    mealSession: emptyMealSessionState(),
+    workoutSession: emptyWorkoutSessionState(),
+  })
+
+  const carriedWorkoutSession = {
+    ...first.workoutSession,
+    active: false,
+    readyToLog: false,
+    clarifyQuestion: "",
+    persisted: true,
+    persistedWorkoutId: "workout_run",
+    persistedSummary: "Run",
+    persistedAt: "2026-05-21T03:00:00Z",
+  }
+
+  const next = buildCoachSessionState({
+    recentMessages: [
+      user("i did bench 80kg and ran 2km"),
+      assistant("I've logged your run. How many reps did you do for the bench?"),
+    ],
+    currentMessage: "5 reps",
+    mealSession: emptyMealSessionState(),
+    workoutSession: carriedWorkoutSession,
+  })
+
+  assert.ok(next.workoutSession)
+  assert.match(String(next.workoutSession.exercise_name || ""), /bench/i)
+  assert.equal(Boolean(next.workoutSession.readyToLog), true)
+  assert.equal(Boolean(next.workoutSession.correctionRequested), false)
+})
+
 test("frustrated log reversal threads do not turn complaint text into meal or workout entities", () => {
   const conversation = [
     user("log this as workout"),
