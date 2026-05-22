@@ -146,7 +146,7 @@ function shouldUseLegacy(conversation, currentMessage, existingSession) {
 function extractQuantity(text = "") {
   const normalized = cleanText(text)
   if (!normalized) return null
-  const quantityMatch = normalized.match(/^(?<amount>\d+(?:\.\d+)?|a couple|couple|half|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty)\s*(?:(?<article>a)\s+)?(?<unit>kg|g|lb|lbs|pound|pounds|ml|l|litre|litres|liter|liters|cup|cups|bowl|bowls|plate|plates|mug|mugs|serve|serves|serving|servings|slice|slices|tbsp|tablespoon|tablespoons|tsp|teaspoon|teaspoons|egg|eggs)?\b/i)
+  const quantityMatch = normalized.match(/^(?<amount>\d+(?:\.\d+)?|a couple|couple|half|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty)\s*(?:(?<article>a)\s+)?(?:(?:hard\s+boiled|soft\s+boiled|hard|soft|fried|grilled|baked|boiled|poached|scrambled|toasted|roasted|steamed|raw|plain|salted|unsalted)\s+)?(?<unit>kg|g|lb|lbs|pound|pounds|ml|l|litre|litres|liter|liters|cup|cups|bowl|bowls|plate|plates|mug|mugs|serve|serves|serving|servings|slice|slices|tbsp|tablespoon|tablespoons|tsp|teaspoon|teaspoons|egg|eggs)?\b/i)
   if (!quantityMatch?.groups?.amount) return null
   const rawAmount = quantityMatch.groups.amount
   const amount = QUANTITY_WORDS.get(rawAmount) ?? Number(rawAmount)
@@ -304,23 +304,25 @@ function parseItemFragment(text = "", state) {
   const exclusions = extractExclusions(relationTail.lead)
   const sourceBaseName = baseNameFromText(relationTail.lead)
   const baseName = canonicalBaseName(sourceBaseName)
-  if (!baseName && quantity && state.pendingClarification?.type === "quantity") {
+  const foodUnitFallback = !baseName && quantity?.unit && ["egg", "serve", "slice", "cup", "bowl", "plate", "mug"].includes(quantity.unit) ? quantity.unit : null
+  const resolvedBaseName = baseName || canonicalBaseName(foodUnitFallback || "")
+  if (!resolvedBaseName && quantity && state.pendingClarification?.type === "quantity") {
     return { kind: "bind_quantity", quantity, preparations, exclusions }
   }
-  if (!baseName && relationTail.relation && state.pendingClarification?.type === "ingredient") {
+  if (!resolvedBaseName && relationTail.relation && state.pendingClarification?.type === "ingredient") {
     return { kind: "bind_ingredient", relation: relationTail.relation, ingredientText: relationTail.ingredientText }
   }
-  if (!baseName && /^cooked in\b|^fried in\b|^with\b/i.test(normalized)) {
+  if (!resolvedBaseName && /^cooked in\b|^fried in\b|^with\b/i.test(normalized)) {
     return { kind: "bind_ingredient", relation: normalized.startsWith("with ") ? "with" : "cooked_in", ingredientText: normalized.replace(/^(?:cooked|fried)\s+in\s+|^with\s+/i, "").trim() }
   }
-  if (!baseName && normalized && state.pendingClarification?.type === "variant") {
+  if (!resolvedBaseName && normalized && state.pendingClarification?.type === "variant") {
     return { kind: "bind_variant", variantText: raw }
   }
-  if (!baseName) return { kind: "ignore" }
+  if (!resolvedBaseName) return { kind: "ignore" }
   const item = {
-    base_name: baseName,
-    label: itemLabel(sourceBaseName || baseName),
-    category: detectCategory(baseName, quantity),
+    base_name: resolvedBaseName,
+    label: itemLabel(sourceBaseName || resolvedBaseName),
+    category: detectCategory(resolvedBaseName, quantity),
     quantity: quantity ? { ...quantity, text: String(quantity.text || "").replace(/\b(a couple)\b/i, "2") } : null,
     preparation: preparations,
     modifiers: [],
@@ -487,7 +489,7 @@ function missingDetails(state) {
       missing.push({ type: "quantity", item })
       continue
     }
-    if (item.preparation.some((value) => COOKING_PREPARATIONS.has(cleanText(value)))) {
+    if (item.preparation.some((value) => cleanText(value) === "fried")) {
       const hasCookedIn = state.items.some((candidate) => candidate.attached_to === itemReference(item) && candidate.relation === "cooked_in")
       if (!hasCookedIn) missing.push({ type: "ingredient", item, relation: "cooked_in" })
     }
@@ -554,7 +556,11 @@ function summarizeItem(state, item, attachmentOnly = false) {
   const quantity = item.quantity || (!attachmentOnly && !requiresQuantity(item, roots) ? defaultQuantityFor(item) : null)
   const quantityText = quantity?.text || ""
   const prepText = item.preparation.length ? `${item.preparation.join(" ")} ` : ""
-  const core = `${quantityText ? `${quantityText} ` : ""}${prepText}${cleanText(item.label || item.base_name)}`.replace(/\s+/g, " ").trim()
+  const prepAlreadyInQty = prepText && quantityText && item.preparation.every(
+    (prep) => cleanText(quantityText).includes(cleanText(prep))
+  )
+  const effectivePrepText = prepAlreadyInQty ? "" : prepText
+  const core = `${quantityText ? `${quantityText} ` : ""}${effectivePrepText}${cleanText(item.label || item.base_name)}`.replace(/\s+/g, " ").trim()
   const attachmentText = attachmentOnly ? "" : summarizeAttached(state, item)
   const exclusionText = item.exclusions.length ? ` with ${item.exclusions.join(" and ")}` : ""
   return `${core}${attachmentText}${exclusionText}`.replace(/\s+/g, " ").trim()
