@@ -100,8 +100,15 @@ export function normalizeCoachResponse(value, context = {}) {
     explicitActions,
   })
   const validatedActions = safeArray(context.validatedActions, 8).map(normalizeAction).filter(Boolean)
+  const responseHints = context.responseHints || {}
+  const hintAlreadyLoggedMeal = responseHints.already_logged?.meal || null
+  const hintAlreadyLoggedWorkout = responseHints.already_logged?.workout || null
+  const hintMealSuppression = String(responseHints.suppression_hint?.meal || "").trim()
+  const hintWorkoutSuppression = String(responseHints.suppression_hint?.workout || "").trim()
   const hasValidatedMealPersistence = validatedActions.some(isMealPersistenceAction)
   const hasValidatedWorkoutPersistence = validatedActions.some(isWorkoutPersistenceAction)
+  const hasValidatedMealDelete = validatedActions.some((action) => action?.type === "delete_meal_log")
+  const hasValidatedWorkoutDelete = validatedActions.some((action) => action?.type === "delete_workout_log")
   const mealHasPendingWork = Boolean(
     context.mealContext
     && !context.mealContext.alreadyLogged
@@ -126,8 +133,8 @@ export function normalizeCoachResponse(value, context = {}) {
   )
 
   const filteredExplicitActions = explicitActions.filter((action) => {
-    if ((deterministicMealActions.length || deterministicMealDeleteAction) && isMealPersistenceAction(action)) return false
-    if ((deterministicWorkoutActions.length || deterministicWorkoutDeleteAction) && isWorkoutPersistenceAction(action)) return false
+    if ((deterministicMealActions.length || deterministicMealDeleteAction || hasValidatedMealDelete) && isMealPersistenceAction(action)) return false
+    if ((deterministicWorkoutActions.length || deterministicWorkoutDeleteAction || hasValidatedWorkoutDelete) && isWorkoutPersistenceAction(action)) return false
     if (context.mealContext?.readyToLog && action?.type === "clarify") return false
     if (context.workoutContext?.readyToLog && action?.type === "clarify") return false
     if (context.mealContext?.alreadyLogged && isMealPersistenceAction(action)) return false
@@ -167,30 +174,22 @@ export function normalizeCoachResponse(value, context = {}) {
   ]
 
   let actions = []
-  let forcedReply = ""
+  const deterministicDeleteActions = [
+    ...(hasValidatedMealDelete || !deterministicMealDeleteAction ? [] : [deterministicMealDeleteAction]),
+    ...(hasValidatedWorkoutDelete || !deterministicWorkoutDeleteAction ? [] : [deterministicWorkoutDeleteAction]),
+  ]
 
-  if (context.mealContext?.alreadyLogged && !workoutHasPendingWork) {
-    forcedReply = deterministicAlreadyLoggedReply(context.mealContext, "meal")
-  } else if (context.workoutContext?.alreadyLogged && !mealHasPendingWork) {
-    forcedReply = deterministicAlreadyLoggedReply(context.workoutContext, "workout")
-  } else if (deterministicMealDeleteAction) {
-    actions = [deterministicMealDeleteAction]
-    forcedReply = summarizeCoachAction(deterministicMealDeleteAction)
-  } else if (deterministicWorkoutDeleteAction) {
-    actions = [deterministicWorkoutDeleteAction]
-    forcedReply = summarizeCoachAction(deterministicWorkoutDeleteAction)
-  } else {
-    actions = [
-      ...validatedActions,
-      ...deterministicMealActions,
-      ...deterministicWorkoutActions,
-      ...deterministicClarifyActions,
-      ...filteredExplicitActions,
-    ]
-      .map(normalizeMealAction)
-      .filter(shouldAllowAction)
-      .slice(0, 8)
-  }
+  actions = [
+    ...validatedActions,
+    ...deterministicDeleteActions,
+    ...deterministicMealActions,
+    ...deterministicWorkoutActions,
+    ...deterministicClarifyActions,
+    ...filteredExplicitActions,
+  ]
+    .map(normalizeMealAction)
+    .filter(shouldAllowAction)
+    .slice(0, 8)
 
   const seenActionKeys = new Set()
   const seenClarifyMessages = new Set()
@@ -214,9 +213,18 @@ export function normalizeCoachResponse(value, context = {}) {
   const alreadyLoggedReply =
     Boolean(context.mealContext?.alreadyLogged)
     || Boolean(context.workoutContext?.alreadyLogged)
+  const fallbackReply =
+    (context.mealContext?.alreadyLogged && !workoutHasPendingWork
+      ? (hintAlreadyLoggedMeal?.reply_hint || deterministicAlreadyLoggedReply(context.mealContext, "meal"))
+      : "")
+    || (context.workoutContext?.alreadyLogged && !mealHasPendingWork
+      ? (hintAlreadyLoggedWorkout?.reply_hint || deterministicAlreadyLoggedReply(context.workoutContext, "workout"))
+      : "")
+    || (hintMealSuppression || hintWorkoutSuppression)
+    || summarizeCoachAction(deterministicDeleteActions[0])
   let reply =
-    forcedReply ||
     originalReply ||
+    fallbackReply ||
     summarizeCoachActions(actions) ||
     summarizeCoachAction(actions[0]) ||
     "Tell me what happened or what you want to change, and I'll help you sort the next move."

@@ -91,9 +91,9 @@ test("normalizeCoachResponse builds a deterministic workout persistence action f
   assert.equal(payload.actions[0].reps, 6)
 })
 
-test("normalizeCoachResponse returns already-logged replies instead of reopening persisted sessions", () => {
+test("normalizeCoachResponse preserves AI replies for already-logged contexts while stripping duplicate persistence", () => {
   const mealPayload = normalizeCoachResponse({
-    reply: "I've logged that meal for you.",
+    reply: "That meal is already in today's log. Tell me what to update if you want it changed.",
     actions: [{ type: "log_meal", calories: 100, protein_g: 10, carbs_g: 10, fat_g: 2 }],
     warnings: [],
   }, {
@@ -104,7 +104,53 @@ test("normalizeCoachResponse returns already-logged replies instead of reopening
   })
 
   assert.equal(mealPayload.actions.length, 0)
+  assert.equal(mealPayload.reply, "That meal is already in today's log. Tell me what to update if you want it changed.")
+})
+
+test("normalizeCoachResponse falls back to the deterministic already-logged reply when the AI reply is blank", () => {
+  const mealPayload = normalizeCoachResponse({
+    reply: "   ",
+    actions: [{ type: "log_meal", calories: 100, protein_g: 10, carbs_g: 10, fat_g: 2 }],
+    warnings: [],
+  }, {
+    mealContext: {
+      alreadyLogged: true,
+      persistedSummary: "Greek yoghurt bowl",
+    },
+    responseHints: {
+      already_logged: {
+        meal: {
+          reply_hint: "I already saved Greek yoghurt bowl in today's nutrition log. If you want to change it, tell me what to update.",
+          summary: "Greek yoghurt bowl",
+        },
+      },
+      suppression_hint: {},
+    },
+  })
+
+  assert.equal(mealPayload.actions.length, 0)
   assert.match(mealPayload.reply, /already saved Greek yoghurt bowl/i)
+})
+
+test("normalizeCoachResponse preserves AI delete wording while keeping the validated delete action", () => {
+  const payload = normalizeCoachResponse({
+    reply: "Removed that meal from today's nutrition log.",
+    actions: [],
+    warnings: [],
+  }, {
+    mealContext: {
+      deleteRequested: true,
+      persistedMealId: "meal_123",
+      persistedSummary: "Burger",
+    },
+    validatedActions: [
+      { type: "delete_meal_log", meal_id: "meal_123", delete_confirmed: true },
+    ],
+  })
+
+  assert.equal(payload.actions.length, 1)
+  assert.equal(payload.actions[0].type, "delete_meal_log")
+  assert.equal(payload.reply, "Removed that meal from today's nutrition log.")
 })
 
 test("normalizeCoachResponse keeps deterministic clarify actions without overriding the AI reply", () => {

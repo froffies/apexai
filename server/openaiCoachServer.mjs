@@ -238,6 +238,7 @@ Core rules:
 - candidate_fragments contains the server's clause-level mixed-turn decomposition. Use it as a context hint for how the turn may split across meal and workout domains, not as absolute truth.
 - meal_context and workout_context are heuristic server-built session hints, not absolute truth. If they conflict with recent_messages, trust the actual conversation first and use the hints to stay oriented.
 - previous_meal_session and previous_workout_session are the raw client-held sessions from before this turn was parsed. Use them to understand continuity, especially if the new heuristic session looks incomplete or oddly shaped.
+- response_hints contains server-validated guardrails such as already-logged, suppression, delete, and answer-only context. Treat those as trusted state constraints, not optional suggestions.
 - If the user is frustrated, tired, embarrassed, or inconsistent, stay calm and useful. Do not be robotic or judgmental.
 - Answer the user's actual question first. Offer one useful next step when it helps.
 - Distinguish clearly between answering, clarifying, planning, and logging.
@@ -285,6 +286,9 @@ Core rules:
 - If validated_actions contain a clarify action but recent_messages show the user already answered it, do not ask again. Prefer the answer already given and align your returned actions with the now-complete context.
 - If validated_actions contain both meal and workout actions, acknowledge both naturally in one reply instead of picking only one domain.
 - If candidate_fragments.has_mixed_domains is true, the user sent a message containing both food and exercise. Handle both in your reply. If validated_actions already includes both a meal and workout action, confirm both. If only one side has a validated action, confirm that one and estimate or ask about the other - do not silently drop either side.
+- If response_hints.already_logged.meal or response_hints.already_logged.workout is present, explain that the relevant item is already saved and invite the user to update or delete it if they want a change. Do not return a new persistence action unless the user is actually changing something.
+- If response_hints.suppression_hint.meal or response_hints.suppression_hint.workout is present, acknowledge that you will not save that item. Return no new persistence action unless validated_actions includes an actual delete action for an already-saved item.
+- If validated_actions includes delete_meal_log or delete_workout_log, confirm the removal naturally in your reply. Do not invent replacement saves, and do not pretend nothing happened.
 - If the current turn sounds conversationally valid but the parser hints look odd or partial, use the conversation to repair the wording of the reply. Never mirror awkward parser fragments back to the user.
 - Clarify hints are not mandatory. If the user already gave enough detail to estimate and log safely, you may return a valid log or update action instead of a clarify action.
 - If the user asks to "log all that" and the message contains both food and training, do your best to handle both in one turn. If one part is still vague, you may still log the other part and ask one targeted follow-up for the missing piece.
@@ -1038,29 +1042,7 @@ async function handleCoach(request, response) {
     }
 
     const mealDeleteAction = buildDeterministicMealDeletionAction(mealContext)
-    if (mealDeleteAction) {
-      sendCoachPayload({
-        reply: summarizeCoachAction(mealDeleteAction),
-        actions: [mealDeleteAction],
-        warnings: [],
-        meal_session: mealContext,
-        workout_session: workoutContext,
-      }, "deterministic")
-      return
-    }
-
     const workoutDeleteAction = buildDeterministicWorkoutDeletionAction(workoutContext)
-    if (workoutDeleteAction) {
-      sendCoachPayload({
-        reply: summarizeCoachAction(workoutDeleteAction),
-        actions: [workoutDeleteAction],
-        warnings: [],
-        meal_session: mealContext,
-        workout_session: workoutContext,
-      }, "deterministic")
-      return
-    }
-
     const mealHasPendingWork = Boolean(
       mealContext
       && !mealContext.alreadyLogged
@@ -1071,8 +1053,34 @@ async function handleCoach(request, response) {
       && !workoutContext.alreadyLogged
       && (workoutContext.deleteRequested || workoutContext.suppressed || workoutContext.readyToLog || workoutContext.clarifyQuestion || workoutContext.correctionRequested)
     )
+    const mealAlreadyLoggedGuard = Boolean(mealContext?.alreadyLogged && !workoutHasPendingWork)
+    const workoutAlreadyLoggedGuard = Boolean(workoutContext?.alreadyLogged && !mealHasPendingWork)
+    const mealSuppressedGuard = Boolean(mealContext?.suppressed)
+    const workoutSuppressedGuard = Boolean(workoutContext?.suppressed)
 
-    if (mealContext?.alreadyLogged && !workoutHasPendingWork) {
+    if (!client && mealDeleteAction) {
+      sendCoachPayload({
+        reply: summarizeCoachAction(mealDeleteAction),
+        actions: [mealDeleteAction],
+        warnings: [],
+        meal_session: mealContext,
+        workout_session: workoutContext,
+      }, "deterministic")
+      return
+    }
+
+    if (!client && workoutDeleteAction) {
+      sendCoachPayload({
+        reply: summarizeCoachAction(workoutDeleteAction),
+        actions: [workoutDeleteAction],
+        warnings: [],
+        meal_session: mealContext,
+        workout_session: workoutContext,
+      }, "deterministic")
+      return
+    }
+
+    if (!client && mealAlreadyLoggedGuard) {
       sendCoachPayload({
         reply: deterministicAlreadyLoggedReply(mealContext, "meal"),
         actions: [],
@@ -1083,7 +1091,7 @@ async function handleCoach(request, response) {
       return
     }
 
-    if (mealContext?.suppressed) {
+    if (!client && mealSuppressedGuard) {
       sendCoachPayload({
         reply: mealContext.suppressionReply || "Okay, I won't save that.",
         actions: [],
@@ -1094,7 +1102,7 @@ async function handleCoach(request, response) {
       return
     }
 
-    if (workoutContext?.alreadyLogged && !mealHasPendingWork) {
+    if (!client && workoutAlreadyLoggedGuard) {
       sendCoachPayload({
         reply: deterministicAlreadyLoggedReply(workoutContext, "workout"),
         actions: [],
@@ -1105,7 +1113,7 @@ async function handleCoach(request, response) {
       return
     }
 
-    if (workoutContext?.suppressed) {
+    if (!client && workoutSuppressedGuard) {
       sendCoachPayload({
         reply: workoutContext.suppressionReply || "Okay, I won't save that.",
         actions: [],
@@ -1163,13 +1171,14 @@ async function handleCoach(request, response) {
       return
     }
     const clarifyActions = [
-      ...(mixedMealEstimateActions.length ? [] : [mealClarifyAction]),
-      workoutClarifyAction,
+      ...((mealDeleteAction || mealSuppressedGuard || mealAlreadyLoggedGuard || mixedMealEstimateActions.length) ? [] : [mealClarifyAction]),
+      ...((workoutDeleteAction || workoutSuppressedGuard || workoutAlreadyLoggedGuard) ? [] : [workoutClarifyAction]),
     ].filter(Boolean)
     const combinedDeterministicActions = [
-      ...(mealContext?.answerOnly ? [] : mealActions),
-      ...mixedMealEstimateActions,
-      ...workoutActions,
+      ...[mealDeleteAction, workoutDeleteAction].filter(Boolean),
+      ...((mealContext?.answerOnly || mealDeleteAction || mealSuppressedGuard || mealAlreadyLoggedGuard) ? [] : mealActions),
+      ...((mealDeleteAction || mealSuppressedGuard || mealAlreadyLoggedGuard) ? [] : mixedMealEstimateActions),
+      ...((workoutDeleteAction || workoutSuppressedGuard || workoutAlreadyLoggedGuard) ? [] : workoutActions),
       ...clarifyActions,
     ]
     const nutritionStatusReply = buildDeterministicNutritionStatusReply({
@@ -1267,6 +1276,25 @@ async function handleCoach(request, response) {
         answer_only: Boolean(mealContext?.answerOnly),
         answer_only_meal_hint: answerOnlyMealHint,
         validated_action_types: combinedDeterministicActions.map((action) => action?.type).filter(Boolean),
+        already_logged: {
+          meal: mealAlreadyLoggedGuard
+            ? {
+                reply_hint: deterministicAlreadyLoggedReply(mealContext, "meal"),
+                summary: String(mealContext?.persistedSummary || mealContext?.summary || ""),
+              }
+            : null,
+          workout: workoutAlreadyLoggedGuard
+            ? {
+                reply_hint: deterministicAlreadyLoggedReply(workoutContext, "workout"),
+                summary: String(workoutContext?.persistedSummary || workoutContext?.summary || ""),
+              }
+            : null,
+        },
+        suppression_hint: {
+          meal: mealSuppressedGuard ? (mealContext?.suppressionReply || "Okay, I won't save that.") : "",
+          workout: workoutSuppressedGuard ? (workoutContext?.suppressionReply || "Okay, I won't save that.") : "",
+        },
+        delete_hint: [mealDeleteAction, workoutDeleteAction].filter(Boolean).map((action) => summarizeCoachAction(action)),
       },
     }
 
@@ -1291,6 +1319,7 @@ async function handleCoach(request, response) {
         workoutContext,
         nutritionStatusReply,
         validatedActions: combinedDeterministicActions,
+        responseHints: payload.response_hints,
       }),
       meal_session: mealContext,
       workout_session: workoutContext,
