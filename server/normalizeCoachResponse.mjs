@@ -79,6 +79,7 @@ export function normalizeCoachResponse(value, context = {}) {
     throw new Error("OpenAI returned an invalid coach payload")
   }
 
+  const preferAIFirst = Boolean(context.preferAIFirst)
   const explicitActions = [
     ...safeArray(value.actions, 8),
     ...extractImplicitActions(value),
@@ -99,18 +100,39 @@ export function normalizeCoachResponse(value, context = {}) {
     workoutSession: context.workoutContext,
     explicitActions,
   })
+  const candidatePersistenceActionsInput = safeArray(context.candidatePersistenceActions, 8).map(normalizeAction).filter(Boolean)
   const validatedActions = safeArray(context.validatedActions, 8).map(normalizeAction).filter(Boolean)
   const responseHints = context.responseHints || {}
   const hintAlreadyLoggedMeal = responseHints.already_logged?.meal || null
   const hintAlreadyLoggedWorkout = responseHints.already_logged?.workout || null
+  const hintMealClarify = String(responseHints.clarify_hints?.meal || "").trim()
+  const hintWorkoutClarify = String(responseHints.clarify_hints?.workout || "").trim()
   const hintMealSuppression = String(responseHints.suppression_hint?.meal || "").trim()
   const hintWorkoutSuppression = String(responseHints.suppression_hint?.workout || "").trim()
   const hasValidatedMealPersistence = validatedActions.some(isMealPersistenceAction)
   const hasValidatedWorkoutPersistence = validatedActions.some(isWorkoutPersistenceAction)
   const hasValidatedMealDelete = validatedActions.some((action) => action?.type === "delete_meal_log")
   const hasValidatedWorkoutDelete = validatedActions.some((action) => action?.type === "delete_workout_log")
-  const deterministicMealActions = hasValidatedMealPersistence ? [] : deterministicMealActionsRaw
-  const deterministicWorkoutActions = hasValidatedWorkoutPersistence ? [] : deterministicWorkoutActionsRaw
+  const candidatePersistenceActions = candidatePersistenceActionsInput.length
+    ? candidatePersistenceActionsInput
+    : [
+        ...deterministicMealActionsRaw,
+        ...deterministicWorkoutActionsRaw,
+      ]
+  const candidateMealPersistenceActions = candidatePersistenceActions.filter(isMealPersistenceAction)
+  const candidateWorkoutPersistenceActions = candidatePersistenceActions.filter(isWorkoutPersistenceAction)
+  const aiRequestedMealPersistence = explicitActions.some(isMealPersistenceAction)
+  const aiRequestedWorkoutPersistence = explicitActions.some(isWorkoutPersistenceAction)
+  const deterministicMealActions = hasValidatedMealPersistence
+    ? []
+    : (preferAIFirst
+      ? (aiRequestedMealPersistence ? candidateMealPersistenceActions : [])
+      : candidateMealPersistenceActions)
+  const deterministicWorkoutActions = hasValidatedWorkoutPersistence
+    ? []
+    : (preferAIFirst
+      ? (aiRequestedWorkoutPersistence ? candidateWorkoutPersistenceActions : [])
+      : candidateWorkoutPersistenceActions)
   const mealHasPendingWork = Boolean(
     context.mealContext
     && !context.mealContext.alreadyLogged
@@ -137,6 +159,8 @@ export function normalizeCoachResponse(value, context = {}) {
   const filteredExplicitActions = explicitActions.filter((action) => {
     if ((deterministicMealActions.length || deterministicMealDeleteAction || hasValidatedMealDelete || hasValidatedMealPersistence) && isMealPersistenceAction(action)) return false
     if ((deterministicWorkoutActions.length || deterministicWorkoutDeleteAction || hasValidatedWorkoutDelete || hasValidatedWorkoutPersistence) && isWorkoutPersistenceAction(action)) return false
+    if (preferAIFirst && isMealPersistenceAction(action) && !hasValidatedMealPersistence && !candidateMealPersistenceActions.length) return false
+    if (preferAIFirst && isWorkoutPersistenceAction(action) && !hasValidatedWorkoutPersistence && !candidateWorkoutPersistenceActions.length) return false
     if (context.mealContext?.readyToLog && action?.type === "clarify") return false
     if (context.workoutContext?.readyToLog && action?.type === "clarify") return false
     if (context.mealContext?.alreadyLogged && isMealPersistenceAction(action)) return false
@@ -170,10 +194,12 @@ export function normalizeCoachResponse(value, context = {}) {
 
   const explicitMealPersistenceAction = filteredExplicitActions.find(isMealPersistenceAction)
   const explicitWorkoutPersistenceAction = filteredExplicitActions.find(isWorkoutPersistenceAction)
-  const deterministicClarifyActions = [
-    ...(!deterministicMealActions.length && !explicitMealPersistenceAction && !hasValidatedMealPersistence && mealClarifyAction ? [mealClarifyAction] : []),
-    ...(!deterministicWorkoutActions.length && !explicitWorkoutPersistenceAction && !hasValidatedWorkoutPersistence && workoutClarifyAction ? [workoutClarifyAction] : []),
-  ]
+  const deterministicClarifyActions = preferAIFirst
+    ? []
+    : [
+        ...(!deterministicMealActions.length && !explicitMealPersistenceAction && !hasValidatedMealPersistence && mealClarifyAction ? [mealClarifyAction] : []),
+        ...(!deterministicWorkoutActions.length && !explicitWorkoutPersistenceAction && !hasValidatedWorkoutPersistence && workoutClarifyAction ? [workoutClarifyAction] : []),
+      ]
 
   let actions = []
   const deterministicDeleteActions = [
@@ -211,6 +237,24 @@ export function normalizeCoachResponse(value, context = {}) {
 
   const originalReply =
     typeof value.reply === "string" && value.reply.trim() ? value.reply.trim() : ""
+  const singleCandidatePersistenceAction = candidatePersistenceActions.length === 1
+    ? normalizeMealAction(candidatePersistenceActions[0])
+    : null
+  if (
+    preferAIFirst
+    && originalReply
+    && replyClaimsPersistence(originalReply)
+    && !actions.some(isPersistenceAction)
+    && singleCandidatePersistenceAction
+  ) {
+    actions = [
+      ...actions,
+      singleCandidatePersistenceAction,
+    ]
+      .map(normalizeMealAction)
+      .filter(shouldAllowAction)
+      .slice(0, 8)
+  }
   const hasPersistenceAction = actions.some(isPersistenceAction)
   const alreadyLoggedReply =
     Boolean(context.mealContext?.alreadyLogged)
@@ -223,6 +267,8 @@ export function normalizeCoachResponse(value, context = {}) {
       ? (hintAlreadyLoggedWorkout?.reply_hint || deterministicAlreadyLoggedReply(context.workoutContext, "workout"))
       : "")
     || (hintMealSuppression || hintWorkoutSuppression)
+    || hintMealClarify
+    || hintWorkoutClarify
     || summarizeCoachAction(deterministicDeleteActions[0])
   let reply =
     originalReply ||

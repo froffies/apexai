@@ -91,6 +91,122 @@ test("normalizeCoachResponse builds a deterministic workout persistence action f
   assert.equal(payload.actions[0].reps, 6)
 })
 
+test("normalizeCoachResponse does not auto-persist a ready meal on the AI-first path when the AI did not request it", () => {
+  const payload = normalizeCoachResponse({
+    reply: "That looks like 17 fried eggs cooked in butter, plus your Earl Grey tea.",
+    actions: [],
+    warnings: [],
+  }, {
+    preferAIFirst: true,
+    prompt: "i just did",
+    mealContext: {
+      readyToLog: true,
+      alreadyLogged: false,
+      summary: "17 fried eggs cooked in 100g salted butter, plus 250ml Earl Grey tea with no milk and no sugar",
+      persistedMealId: "",
+      correctionRequested: false,
+    },
+    candidatePersistenceActions: [{
+      type: "log_meal",
+      meal_type: "snack",
+      food_name: "17 fried eggs cooked in 100g salted butter, plus 250ml Earl Grey tea with no milk and no sugar",
+      quantity: "1 meal",
+      calories: 2230,
+      protein_g: 164,
+      carbs_g: 47,
+      fat_g: 236,
+      estimated: true,
+      nutrition_source: "Coach estimate from accumulated meal details across chat",
+    }],
+  })
+
+  assert.equal(payload.actions.length, 0)
+})
+
+test("normalizeCoachResponse canonicalizes AI-requested meal persistence from server candidates on the AI-first path", () => {
+  const payload = normalizeCoachResponse({
+    reply: "I've logged that meal for you.",
+    actions: [{ type: "log_meal", calories: 0, protein_g: 0, carbs_g: 0, fat_g: 0 }],
+    warnings: [],
+  }, {
+    preferAIFirst: true,
+    prompt: "i just did",
+    mealContext: {
+      readyToLog: true,
+      alreadyLogged: false,
+      summary: "17 fried eggs cooked in 100g salted butter, plus 250ml Earl Grey tea with no milk and no sugar",
+      persistedMealId: "",
+      correctionRequested: false,
+    },
+    candidatePersistenceActions: [{
+      type: "log_meal",
+      meal_type: "snack",
+      food_name: "17 fried eggs cooked in 100g salted butter, plus 250ml Earl Grey tea with no milk and no sugar",
+      quantity: "1 meal",
+      calories: 2230,
+      protein_g: 164,
+      carbs_g: 47,
+      fat_g: 236,
+      estimated: true,
+      nutrition_source: "Coach estimate from accumulated meal details across chat",
+    }],
+  })
+
+  assert.equal(payload.actions.length, 1)
+  assert.equal(payload.actions[0].type, "log_meal")
+  assert.equal(payload.actions[0].food_name, "17 fried eggs cooked in 100g salted butter, plus 250ml Earl Grey tea with no milk and no sugar")
+})
+
+test("normalizeCoachResponse binds a single candidate persistence action when the AI reply confirms the save but omits actions", () => {
+  const payload = normalizeCoachResponse({
+    reply: "Updated today's nutrition: 1 bowl chips with gravy.",
+    actions: [],
+    warnings: [],
+  }, {
+    preferAIFirst: true,
+    candidatePersistenceActions: [{
+      type: "update_meal_log",
+      meal_id: "meal_chips",
+      meal_type: "snack",
+      food_name: "1 bowl chips with gravy",
+      quantity: "1 meal",
+      calories: 240,
+      protein_g: 13,
+      carbs_g: 20,
+      fat_g: 11,
+      estimated: true,
+      nutrition_source: "Coach estimate from accumulated meal details across chat",
+    }],
+  })
+
+  assert.equal(payload.actions.length, 1)
+  assert.equal(payload.actions[0].type, "update_meal_log")
+  assert.equal(payload.actions[0].meal_id, "meal_chips")
+})
+
+test("normalizeCoachResponse does not auto-inject clarify actions on the AI-first path", () => {
+  const payload = normalizeCoachResponse({
+    reply: "How many eggs did you have?",
+    actions: [],
+    warnings: [],
+  }, {
+    preferAIFirst: true,
+    mealContext: {
+      clarifyQuestion: "How many eggs did you have?",
+      readyToLog: false,
+      alreadyLogged: false,
+    },
+    responseHints: {
+      clarify_hints: {
+        meal: "How many eggs did you have?",
+      },
+    },
+  })
+
+  assert.equal(payload.actions.length, 0)
+  assert.equal(payload.reply, "How many eggs did you have?")
+})
+
 test("normalizeCoachResponse preserves AI replies for already-logged contexts while stripping duplicate persistence", () => {
   const mealPayload = normalizeCoachResponse({
     reply: "That meal is already in today's log. Tell me what to update if you want it changed.",
