@@ -136,6 +136,20 @@ test("graph-native meal session preserves logging intent across a quantity clari
   assert.equal(session.summary, "300g steak")
 })
 
+test("mixed meal and workout starts stay graph-native and do not create pushup nutrition junk", () => {
+  const { session } = replayMealConversation([
+    user("i had milk and did a pushup and then i had eggs"),
+  ])
+
+  assertGraphNativeSession(session)
+  assert.equal(session.readyToLog, false)
+  assert.deepEqual(
+    session.items.filter((item) => !item.attached_to).map((item) => item.base_name).sort(),
+    ["egg", "milk"],
+  )
+  assert.equal(session.items.some((item) => /push/i.test(item.base_name)), false)
+})
+
 test("meal session keeps pending milk clarification intact during a workout-only follow-up", () => {
   const existingSession = {
     ...emptyMealSession(),

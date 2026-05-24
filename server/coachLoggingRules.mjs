@@ -612,11 +612,15 @@ function rootSessionItems(mealSession) {
     .filter((item) => !item.attachedTo)
 }
 
-function blocksLooseEstimateForSinglePendingQuantityItem(mealSession) {
+function blocksLooseEstimateForPendingQuantityItem(mealSession) {
   if (String(mealSession?.pendingClarification?.type || "") !== "quantity") return false
   const roots = rootSessionItems(mealSession)
-  if (roots.length !== 1) return false
-  const [root] = roots
+  if (!roots.length) return false
+  const targetBaseName = String(mealSession?.pendingClarification?.targetBaseName || "").trim().toLowerCase()
+  const targetReference = String(mealSession?.pendingClarification?.targetReference || "").trim().toLowerCase()
+  const root = roots.find((item) => normalizeSessionBaseName(item) === targetBaseName)
+    || roots.find((item) => targetReference && targetReference.includes(normalizeSessionBaseName(item)))
+    || roots[0]
   const baseName = normalizeSessionBaseName(root)
   if (!baseName) return false
   const quantity = normalizeItemQuantity(root.quantity)
@@ -644,7 +648,7 @@ function canUseLooseEstimate(mealSession, allowLooseEstimate = false, prompt = "
     && !mealSession?.correctionRequested
     && String(mealSession?.summary || "").trim()
     && safeArray(mealSession?.items, 24).length > 0
-    && !blocksLooseEstimateForSinglePendingQuantityItem(mealSession)
+    && !blocksLooseEstimateForPendingQuantityItem(mealSession)
     && !blocksLooseEstimateForAmbiguousPendingDrinkQuantity(mealSession, prompt)
   )
 }

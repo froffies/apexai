@@ -25,7 +25,7 @@ const DRINK_WORDS = ["tea", "coffee", "juice", "water", "milk", "smoothie", "sha
 const INGREDIENT_WORDS = ["butter", "oil", "cheese", "sugar", "milk", "cream", "sauce", "gravy", "dressing", "vegemite", "jam", "honey", "salt", "pesto", "mayo"]
 const FOOD_HINTS = ["egg", "eggs", "chicken", "rice", "beef", "pork", "lamb", "fish", "salmon", "tuna", "toast", "bread", "tea", "coffee", "juice", "milk", "beans", "oats", "yoghurt", "yogurt", "butter", "oil", "cheese", "potato", "salad", "apple", "banana", "celery", "chocolate", "pasta", "chips", "fries", "burger", "taco", "tacos", "vegemite", "berry", "berries", "whey", "almond milk"]
 const COUNT_REQUIRED = new Set(["egg"])
-const STOPWORDS = new Set(["i", "had", "have", "ate", "drank", "also", "just", "the", "a", "an", "my", "for", "to", "at", "with", "and", "plus", "of", "it", "that", "this", "was", "were", "is", "are", "did", "do", "done", "log", "track", "save", "add", "include", "today"])
+const STOPWORDS = new Set(["i", "had", "have", "ate", "drank", "also", "just", "then", "the", "a", "an", "my", "for", "to", "at", "with", "and", "plus", "of", "it", "that", "this", "was", "were", "is", "are", "did", "do", "done", "log", "track", "save", "add", "include", "today"])
 
 const MEAL_START_PATTERN = /^(?:please\s+)?(?:(?:i\s+)?(?:had|ate|drank)|log|track|save|add|include)\b/i
 const CORRECTION_PREFIX = /^(?:actually|sorry|correction|no\s+wait|wait|i meant|make that|change that(?: to)?|update that(?: to)?|instead)\b/i
@@ -96,6 +96,16 @@ const isIngredient = (name = "") => INGREDIENT_WORDS.some((word) => containsWord
 const isWorkoutish = (text = "") => WORKOUTISH_PATTERN.test(cleanText(text))
 const looksFoodish = (text = "") => FOOD_HINTS.some((word) => containsWord(text, word))
 
+function isMixedMealWorkoutStart(currentMessage = "", existingSession = null) {
+  const normalized = cleanText(currentMessage)
+  if (existingSession?.active || existingSession?.persisted || !MEAL_START_PATTERN.test(normalized)) return false
+  const clauses = splitGraphClauses(currentMessage).map((fragment) => cleanText(fragment))
+  return (
+    clauses.some((fragment) => isWorkoutish(fragment))
+    && clauses.some((fragment) => !isWorkoutish(fragment) && looksFoodish(fragment))
+  )
+}
+
 export function detectQuestionOnlyTurn(text) {
   return legacyDetectQuestionOnlyTurn(text)
 }
@@ -156,6 +166,9 @@ function isGraphNativeFriendlyFreshTurn(conversation = [], currentMessage = "", 
 
 function shouldUseLegacy(conversation, currentMessage, existingSession) {
   const normalizedCurrent = cleanText(currentMessage)
+  if (isMixedMealWorkoutStart(currentMessage, existingSession) || isWorkoutOnlyFollowUpTurn(currentMessage, existingSession)) {
+    return false
+  }
   const joined = cleanText([...conversation.map((entry) => entry.content || ""), currentMessage].join(" "))
   const assistantMealTurns = conversation.filter((entry) => entry.role === "assistant" && /\b(?:how much|how many|what type|what kind|cooked in|fried in|used for|before i can log|need more detail)\b/i.test(cleanText(entry.content || ""))).length
   const currentClauses = splitGraphClauses(currentMessage)
@@ -350,6 +363,9 @@ function splitGraphClauses(text = "") {
   const normalized = String(text || "").trim()
   if (!normalized) return []
   const compact = normalized
+    .replace(/\bthen i had\b/gi, "|i had")
+    .replace(/\bthen i ate\b/gi, "|i ate")
+    .replace(/\bthen i drank\b/gi, "|i drank")
     .replace(/\balso did\b/gi, "|did")
     .replace(/\boh and i did\b/gi, "|i did")
     .replace(/\bplus\b/gi, "|")
@@ -414,7 +430,15 @@ function findDrinkTarget(state) {
 
 function findVariantDrinkTarget(state, text = "") {
   const normalized = cleanText(text)
-  if (!normalized || hasDigits(normalized) || detectQuestionOnlyTurn(text) || isWorkoutish(normalized) || MEAL_START_PATTERN.test(normalized)) return null
+  if (
+    !normalized
+    || hasDigits(normalized)
+    || detectQuestionOnlyTurn(text)
+    || isWorkoutish(normalized)
+    || MEAL_START_PATTERN.test(normalized)
+    || /\b(?:i\s+had|i\s+ate|i\s+drank|had|ate|drank)\b/i.test(normalized)
+    || (looksFoodish(normalized) && !mentionsDrink(normalized))
+  ) return null
   const drinkRoots = unresolvedRoots(state).filter((item) => item.category === "drink")
   if (drinkRoots.length !== 1) return null
   const target = drinkRoots[0]
