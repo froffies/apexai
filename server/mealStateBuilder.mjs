@@ -40,6 +40,7 @@ const SHARED_EACH_PATTERN = /^(?:about|around|roughly|approx(?:imately)?|bout)?\
 const INLINE_CORRECTION_PATTERN = /\b(?:no wait|i meant|make that|change that|update that|sorry)\b/i
 const TRAILING_LOG_DIRECTIVE_PATTERN = /\b(?:(?:can|could)\s+you|please|just)?\s*(?:log|save|track|add)\s+(?:all\s+that|that|it)\b.*$/i
 const PACKAGED_UNIT_PATTERN = /\b(?:tin|tins|can|cans|block|blocks|bunch|bunches)\b/i
+const WORKOUT_ONLY_FOLLOW_UP_PATTERN = /^(?:i\s+did\s+\d+(?:\.\d+)?(?:\s+total)?|\d+(?:\.\d+)?\s*(?:reps?|sets?|kg|km|mi|miles?|min|mins|minutes)(?:\s*,\s*\d+(?:\.\d+)?\s*(?:reps?|sets?|kg|km|mi|miles?|min|mins|minutes))*)$/i
 const RELATION_PATTERNS = [
   { relation: "cooked_in", pattern: /\b(?:cooked|fried|grilled|baked|roasted|boiled|poached|scrambled|steamed)\s+in\b/i },
   { relation: "mixed_with", pattern: /\bmixed with\b/i },
@@ -193,6 +194,34 @@ function shouldUseLegacy(conversation, currentMessage, existingSession) {
     || (activeGraphSession && /\bthat were\b|\bwere just\b/.test(normalizedCurrent))
     || (activeGraphSession && /^\s*the\s+\w+.*\bhad\b/i.test(normalizedCurrent))
   )
+}
+
+function isWorkoutOnlyFollowUpTurn(currentMessage = "", existingSession = null) {
+  if (!existingSession?.mealConversation && !existingSession?.active && !existingSession?.persisted) return false
+  const normalizedCurrent = cleanText(currentMessage)
+  if (!normalizedCurrent) return false
+  if (MEAL_START_PATTERN.test(normalizedCurrent)) return false
+  if (mentionsDrink(currentMessage) || looksFoodish(currentMessage)) return false
+  if (/\b(?:with|without|cooked in|fried in|no sugar|no milk)\b/i.test(normalizedCurrent)) return false
+  return WORKOUT_ONLY_FOLLOW_UP_PATTERN.test(normalizedCurrent) || isWorkoutish(normalizedCurrent)
+}
+
+function preserveExistingSessionForIgnoredTurn(conversation = [], currentMessage = "", existingSession = null) {
+  const threadMessages = conversation.map((entry) => ({ role: entry.role, content: String(entry.content || "") }))
+  const intentGraph = buildIntentGraph(conversation, currentMessage, existingSession)
+  return {
+    ...baseSession(),
+    ...(existingSession || {}),
+    thread_messages: threadMessages,
+    answerOnly: detectQuestionOnlyTurn(currentMessage),
+    intentGraph,
+    candidateFragments: {
+      meal: safeArray(intentGraph.mealFragments, 16),
+      workout: safeArray(intentGraph.workoutFragments, 16),
+      general: safeArray(intentGraph.generalFragments, 16),
+    },
+    graphNative: Boolean(existingSession?.graphNative),
+  }
 }
 
 function extractEmbeddedQuantity(text = "") {
@@ -840,6 +869,9 @@ export function emptyMealSession() {
 
 export function buildMealStateFromConversation(recentMessages = [], currentMessage = "", existingSession = null) {
   const conversation = normalizeConversation(recentMessages, currentMessage, existingSession)
+  if (isWorkoutOnlyFollowUpTurn(currentMessage, existingSession)) {
+    return preserveExistingSessionForIgnoredTurn(conversation, currentMessage, existingSession)
+  }
   if (shouldUseLegacy(conversation, currentMessage, existingSession)) {
     return buildLegacyMealStateFromConversation(recentMessages, currentMessage, existingSession)
   }
@@ -932,6 +964,9 @@ export function mealStateNeedsClarification(mealState) {
 
 export function buildMealContext(recentMessages = [], currentMessage = "", existingSession = null) {
   const conversation = normalizeConversation(recentMessages, currentMessage, existingSession)
+  if (isWorkoutOnlyFollowUpTurn(currentMessage, existingSession)) {
+    return preserveExistingSessionForIgnoredTurn(conversation, currentMessage, existingSession)
+  }
   if (shouldUseLegacy(conversation, currentMessage, existingSession)) {
     return buildLegacyMealContext(recentMessages, currentMessage, existingSession)
   }

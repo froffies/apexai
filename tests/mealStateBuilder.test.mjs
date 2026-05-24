@@ -136,6 +136,64 @@ test("graph-native meal session preserves logging intent across a quantity clari
   assert.equal(session.summary, "300g steak")
 })
 
+test("meal session keeps pending milk clarification intact during a workout-only follow-up", () => {
+  const existingSession = {
+    ...emptyMealSession(),
+    active: true,
+    mealConversation: true,
+    graphNative: false,
+    wantsLogging: true,
+    summary: "light milk, plus eggs",
+    clarifyQuestion: "How much light milk did you have?",
+    pendingClarification: {
+      type: "quantity",
+      targetReference: "milk::light::light",
+      targetBaseName: "milk",
+      targetLabel: "Light Milk",
+      expectedValueType: "number",
+    },
+    items: [
+      {
+        base_name: "milk",
+        label: "Light Milk",
+        category: "drink",
+        quantity: null,
+        preparation: [],
+        modifiers: ["Light"],
+        exclusions: [],
+        attached_to: null,
+        relation: null,
+        variant_key: "light",
+        meal_type: "",
+      },
+      {
+        base_name: "egg",
+        label: "Eggs",
+        category: "food",
+        quantity: null,
+        preparation: [],
+        modifiers: [],
+        exclusions: [],
+        attached_to: null,
+        relation: null,
+        variant_key: "",
+        meal_type: "",
+      },
+    ],
+  }
+
+  const next = buildMealContext([
+    user("i had milk and did a pushup and then i had eggs"),
+    assistant("How much light milk did you have?"),
+  ], "i did 45 total", existingSession)
+
+  assert.ok(next)
+  assert.equal(next.summary, "light milk, plus eggs")
+  assert.equal(next.clarifyQuestion, "How much light milk did you have?")
+  assert.equal(next.pendingClarification?.targetBaseName, "milk")
+  assert.equal(next.items.find((item) => item.base_name === "egg")?.quantity || null, null)
+})
+
 test("graph-native meal session handles explicit drink modifiers on a fresh turn", () => {
   const session = buildMealContext([], "i had earl grey tea 250ml no sugar no milk", emptyMealSession())
 

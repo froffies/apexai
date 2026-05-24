@@ -623,7 +623,18 @@ function blocksLooseEstimateForSinglePendingQuantityItem(mealSession) {
   return !quantity || !Number.isFinite(quantity.amount)
 }
 
-function canUseLooseEstimate(mealSession, allowLooseEstimate = false) {
+function blocksLooseEstimateForAmbiguousPendingDrinkQuantity(mealSession, prompt = "") {
+  if (/\b(?:log|save|track|add)\s+all\s+that\b/i.test(String(prompt || ""))) return false
+  if (String(mealSession?.pendingClarification?.type || "") !== "quantity") return false
+  const unresolvedRoots = rootSessionItems(mealSession).filter((item) => {
+    const quantity = normalizeItemQuantity(item.quantity)
+    return !quantity || !Number.isFinite(quantity.amount)
+  })
+  if (unresolvedRoots.length < 2) return false
+  return unresolvedRoots.some((item) => String(item.category || "").trim().toLowerCase() === "drink")
+}
+
+function canUseLooseEstimate(mealSession, allowLooseEstimate = false, prompt = "") {
   return Boolean(
     allowLooseEstimate
     && !mealSession?.readyToLog
@@ -634,6 +645,7 @@ function canUseLooseEstimate(mealSession, allowLooseEstimate = false) {
     && String(mealSession?.summary || "").trim()
     && safeArray(mealSession?.items, 24).length > 0
     && !blocksLooseEstimateForSinglePendingQuantityItem(mealSession)
+    && !blocksLooseEstimateForAmbiguousPendingDrinkQuantity(mealSession, prompt)
   )
 }
 
@@ -656,7 +668,7 @@ function buildSingleDeterministicMealAction({
   mealTypeOverride = "",
   allowLooseEstimate = false,
 }) {
-  const looseEstimateAllowed = canUseLooseEstimate(mealSession, allowLooseEstimate)
+  const looseEstimateAllowed = canUseLooseEstimate(mealSession, allowLooseEstimate, prompt)
   if ((!mealSession?.readyToLog && !looseEstimateAllowed) || mealSession?.alreadyLogged || mealSession?.suppressed || (mealSession?.answerOnly && !allowAnswerOnly)) return null
   const shouldPersist =
     looseEstimateAllowed
@@ -708,7 +720,7 @@ function buildSingleDeterministicMealAction({
 
 export function buildDeterministicMealActions(args = {}) {
   const { mealSession } = args
-  const looseEstimateAllowed = canUseLooseEstimate(mealSession, args.allowLooseEstimate)
+  const looseEstimateAllowed = canUseLooseEstimate(mealSession, args.allowLooseEstimate, args.prompt)
   if ((!mealSession?.readyToLog && !looseEstimateAllowed) || mealSession?.alreadyLogged || mealSession?.suppressed || (mealSession?.answerOnly && !args.allowAnswerOnly)) return []
 
   const groups = safeArray(mealSession?.meal_groups, 8).filter((group) => (
