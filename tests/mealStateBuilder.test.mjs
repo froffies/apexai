@@ -150,6 +150,24 @@ test("mixed meal and workout starts stay graph-native and do not create pushup n
   assert.equal(session.items.some((item) => /push/i.test(item.base_name)), false)
 })
 
+test("workout-only follow-ups do not mutate an unresolved mixed-turn meal candidate", () => {
+  const { snapshots } = replayMealConversation([
+    user("i had milk and did a pushup and then i had eggs"),
+    assistant("How much milk did you have?"),
+    user("i did 14 pushups"),
+  ])
+
+  const before = snapshots[0].session
+  const after = snapshots[1].session
+  assertGraphNativeSession(after)
+  assert.equal(after.readyToLog, false)
+  assert.equal(after.pendingClarification?.targetBaseName, before.pendingClarification?.targetBaseName)
+  assert.deepEqual(
+    after.items.filter((item) => !item.attached_to).map((item) => item.base_name).sort(),
+    ["egg", "milk"],
+  )
+})
+
 test("meal session keeps pending milk clarification intact during a workout-only follow-up", () => {
   const existingSession = {
     ...emptyMealSession(),

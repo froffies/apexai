@@ -165,6 +165,27 @@ test("coach logging rules can build a loose estimated meal action for mixed log-
   assert.ok(action.calories > 0)
 })
 
+test("loose estimates do not save a multi-item meal while a quantity clarification is pending", () => {
+  const action = buildDeterministicMealAction({
+    mealSession: {
+      readyToLog: false,
+      alreadyLogged: false,
+      summary: "milk, plus eggs",
+      persistedMealId: "",
+      correctionRequested: false,
+      pendingClarification: { type: "quantity", targetReference: "milk", targetBaseName: "milk" },
+      items: [
+        { baseName: "milk", label: "Milk", category: "drink", quantity: null },
+        { baseName: "egg", label: "Eggs", category: "food", quantity: null },
+      ],
+    },
+    allowLooseEstimate: true,
+    prompt: "i had milk and did a pushup and then i had eggs",
+  })
+
+  assert.equal(action, null)
+})
+
 test("coach logging rules do not loose-estimate a single unresolved count-based meal", () => {
   const action = buildDeterministicMealAction({
     mealSession: {
