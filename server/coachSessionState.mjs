@@ -1664,50 +1664,6 @@ function looksWorkoutSpecificMessage(message = "") {
   )
 }
 
-function shouldKeepPersistedWorkoutIdleDuringMealFollowUp(currentMessage = "", previousMealSession = null, previousWorkoutSession = null, nextMealSession = null, nextWorkoutSession = null) {
-  const previousMealHadPendingOrPersistedContext = Boolean(
-    (previousMealSession?.active && hasMealClarificationContext(previousMealSession))
-    || previousMealSession?.persisted
-  )
-  if (!previousMealHadPendingOrPersistedContext) return false
-  if (!previousWorkoutSession?.persisted) return false
-  if (!nextMealSession || !(nextMealSession.readyToLog || nextMealSession.clarifyQuestion || nextMealSession.correctionRequested)) return false
-  if (!nextWorkoutSession?.persistedWorkoutId || nextWorkoutSession.correctionRequested || nextWorkoutSession.deleteRequested) return false
-  if (!nextWorkoutSession.readyToLog) return false
-  return !looksWorkoutSpecificMessage(currentMessage)
-}
-
-function shouldPreserveMealClarificationAcrossWorkoutFollowUp(currentMessage = "", previousMealSession = null, previousWorkoutSession = null, nextMealSession = null, nextWorkoutSession = null) {
-  if (nextMealSession) return false
-  if (!previousMealSession?.active || !hasMealClarificationContext(previousMealSession)) return false
-  if (!previousWorkoutSession?.active || !hasWorkoutClarificationContext(previousWorkoutSession)) return false
-  if (!nextWorkoutSession || !(nextWorkoutSession.readyToLog || nextWorkoutSession.clarifyQuestion || nextWorkoutSession.correctionRequested)) return false
-  return looksWorkoutSpecificMessage(currentMessage)
-}
-
-function shouldDiscardInvalidMealSessionForWorkoutFollowUp(currentMessage = "", mealSession = null, workoutSession = null, priorWorkoutSession = null) {
-  if (!mealSession || !workoutSession) return false
-  if (!mealSession.invalidStructure) return false
-  if (Array.isArray(mealSession.items) && mealSession.items.length) return false
-  if (mealSession.summary || mealSession.readyToLog || mealSession.clarifyQuestion) return false
-
-  const hasOrphanQuantity = Array.isArray(mealSession.pendingQuantities) && mealSession.pendingQuantities.length > 0
-  const hasPendingClarification = Boolean(mealSession.pendingClarification)
-  if (!hasOrphanQuantity && !hasPendingClarification) return false
-
-  const priorWorkout = normalizeWorkoutSession(priorWorkoutSession)
-  const workoutHasContext = Boolean(
-    workoutSession.active
-    || workoutSession.persisted
-    || priorWorkout.active
-    || priorWorkout.persisted
-  )
-  if (!workoutHasContext) return false
-
-  const parsed = parseWorkoutMessage(currentMessage)
-  return hasWorkoutMetricDetail(parsed)
-}
-
 function buildWorkoutSessionState(recentMessages = [], currentMessage = "", existingSession = null) {
   const prior = normalizeWorkoutSession(existingSession)
   const normalizedCurrent = cleanText(currentMessage)
@@ -1942,32 +1898,10 @@ export function buildCoachSessionState({
     nextMealSession = buildGenericSuppressedMealSession(recentMessages, currentMessage)
   }
 
-  if (shouldDiscardInvalidMealSessionForWorkoutFollowUp(currentMessage, nextMealSession, nextWorkoutSession, workoutSession)) {
-    nextMealSession = null
-  }
-
-  if (shouldPreserveMealClarificationAcrossWorkoutFollowUp(currentMessage, mealSession, workoutSession, nextMealSession, nextWorkoutSession)) {
-    nextMealSession = {
-      ...mealSession,
-      active: true,
-      alreadyLogged: false,
-      suppressed: false,
-      suppressionReply: "",
-      thread_messages: buildThreadMessages(recentMessages, currentMessage),
-    }
-  }
-
-  if (shouldKeepPersistedWorkoutIdleDuringMealFollowUp(currentMessage, mealSession, workoutSession, nextMealSession, nextWorkoutSession)) {
-    nextWorkoutSession = {
-      ...normalizeWorkoutSession(workoutSession),
-      active: false,
-      readyToLog: false,
-      clarifyQuestion: "",
-      alreadyLogged: true,
-      correctionRequested: false,
-      deleteRequested: false,
-    }
-  }
+  // Cross-domain deterministic blockers have been removed.
+  // Both states now hydrate based strictly on their own domain parsers.
+  // Ambiguities (e.g., standalone numbers) are passed to the AI to resolve
+  // via candidate_fragments and conversational context.
 
   return {
     mealSession: attachIntentGraph(nextMealSession, intentGraph, recentMessages, currentMessage),

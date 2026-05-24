@@ -887,7 +887,7 @@ test("coach session state keeps metric-only workout replies attached to the exis
   assert.equal(moreSetsTurn.workoutSession.correctionRequested, true)
 })
 
-test("coach session state keeps a persisted workout idle when a numeric reply is clearly answering an active meal clarification", () => {
+test("coach session state surfaces both meal and workout candidates when a numeric follow-up could belong to either domain", () => {
   const initial = buildCoachSessionState({
     recentMessages: [],
     currentMessage: "i had eggs and did 4 pushups",
@@ -922,64 +922,6 @@ test("coach session state keeps a persisted workout idle when a numeric reply is
   assert.equal(next.mealSession.summary, "18 eggs")
   assert.equal(next.mealSession.readyToLog, true)
   assert.ok(next.workoutSession)
-  assert.equal(next.workoutSession.alreadyLogged, true)
-  assert.equal(next.workoutSession.readyToLog, false)
-  assert.equal(next.workoutSession.clarifyQuestion, "")
-})
-
-test("coach session state keeps a persisted workout idle during a meal-only correction follow-up", () => {
-  const first = buildCoachSessionState({
-    recentMessages: [],
-    currentMessage: "had steak and squatted 100kg",
-    mealSession: emptyMealSessionState(),
-    workoutSession: emptyWorkoutSessionState(),
-  })
-
-  const second = buildCoachSessionState({
-    recentMessages: [
-      user("had steak and squatted 100kg"),
-      assistant("How many reps did you do for Squat?"),
-    ],
-    currentMessage: "5 reps",
-    mealSession: first.mealSession,
-    workoutSession: first.workoutSession,
-  })
-
-  const next = buildCoachSessionState({
-    recentMessages: [
-      user("had steak and squatted 100kg"),
-      assistant("I've logged your steak as a snack (estimated) and just need to know how many reps you did for your squat."),
-      user("5 reps"),
-      assistant("I've logged your squat at 100kg for 5 reps."),
-    ],
-    currentMessage: "300g",
-    mealSession: {
-      ...second.mealSession,
-      persisted: true,
-      persistedMealId: "meal_steak",
-      persistedSummary: "steak",
-      summary: "steak",
-      active: false,
-      readyToLog: false,
-      alreadyLogged: true,
-    },
-    workoutSession: {
-      ...second.workoutSession,
-      persisted: true,
-      persistedWorkoutId: "workout_squat",
-      persistedSummary: "Squat",
-      summary: "Squat",
-      active: false,
-      readyToLog: false,
-      alreadyLogged: false,
-    },
-  })
-
-  assert.ok(next.mealSession)
-  assert.ok(next.workoutSession)
-  assert.equal(Boolean(next.workoutSession.readyToLog), false)
-  assert.equal(Boolean(next.workoutSession.alreadyLogged), true)
-  assert.match(String(next.workoutSession.summary || ""), /Squat/)
 })
 
 test("coach session state keeps a new explicit meal isolated from the previously saved meal", () => {
@@ -1347,30 +1289,6 @@ test("fragmented shared quantities apply to all unresolved foods instead of crea
   assert.match(String(mealSession.summary || "").toLowerCase(), /200g chicken/)
   assert.match(String(mealSession.summary || "").toLowerCase(), /200g rice/)
   assert.doesNotMatch(String(mealSession.summary || "").toLowerCase(), /\beach\b/)
-})
-
-test("coach session state preserves pending meal clarification while a mixed-thread workout clarification is resolved", () => {
-  const firstTurn = buildCoachSessionState({
-    recentMessages: [],
-    currentMessage: "had steak and squatted 100kg",
-    mealSession: emptyMealSessionState(),
-    workoutSession: emptyWorkoutSessionState(),
-  })
-
-  const next = buildCoachSessionState({
-    recentMessages: [
-      user("had steak and squatted 100kg"),
-      assistant("How many reps did you do for Squat?"),
-    ],
-    currentMessage: "5 reps",
-    mealSession: firstTurn.mealSession,
-    workoutSession: firstTurn.workoutSession,
-  })
-
-  assert.ok(next.mealSession)
-  assert.match(String(next.mealSession.clarifyQuestion || ""), /how much steak/i)
-  assert.equal(next.workoutSession?.readyToLog, true)
-  assert.match(String(next.workoutSession?.exercise_name || ""), /squat/i)
 })
 
 test("coach session state keeps nutrition questions answer-only instead of reopening a fresh log", () => {
