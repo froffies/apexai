@@ -467,6 +467,13 @@ function hasWorkoutClarificationContext(session = null) {
   return Boolean(session?.active && session?.clarifyQuestion)
 }
 
+function isMealQuantityFragment(text = "") {
+  const normalized = String(text || "").trim()
+  if (!normalized) return false
+  return /^(?:about|around|roughly|bout)\s+(?:\d+(?:\.\d+)?|half|a half|a couple|couple|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty)\s*(?:g|grams?|ml|millilit(?:er|re)s?|l|lit(?:er|re)s?|cup|cups|bowl|bowls|slice|slices|egg|eggs|serve|serves|serving|servings|plate|plates|mug|mugs|tbsp|tablespoons?|tsp|teaspoons?|lb|lbs|pound|pounds)\b(?:\s+each)?$/i.test(normalized)
+    || /^(?:\d+(?:\.\d+)?|half|a half|a couple|couple|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty)\s*(?:g|grams?|ml|millilit(?:er|re)s?|l|lit(?:er|re)s?|cup|cups|bowl|bowls|slice|slices|egg|eggs|serve|serves|serving|servings|plate|plates|mug|mugs|tbsp|tablespoons?|tsp|teaspoons?|lb|lbs|pound|pounds)\b(?:\s+each)?$/i.test(normalized)
+}
+
 function isNumericLikeFragment(text = "") {
   return /^(?:about|around|bout|roughly)?\s*\d+(?:\.\d+)?(?:\s*(?:g|kg|lb|lbs|pound|pounds|ml|l|litre|litres|liter|liters|cup|cups|tbsp|tablespoon|tablespoons|tsp|teaspoon|teaspoons|min|mins|minutes|km|mi|miles?|sets?|reps?))?(?:\s+each)?$/i.test(String(text || "").trim())
 }
@@ -1199,8 +1206,8 @@ function extractWorkoutThread(recentMessages = [], currentMessage = "", existing
     || (workoutCorrectionRequested(currentMessage) && !currentLooksMealLike && (currentLooksWorkoutLike || existingSession?.active || existingSession?.persisted))
     || (suppressionRequested(currentMessage) && (existingSession?.active || existingSession?.persisted))
     || (WORKOUT_FINALISE_PATTERN.test(normalizedCurrent) && hasExistingWorkoutContext)
-    || (existingSession?.active && !currentLooksMealLike && (/\d/.test(normalizedCurrent) || workoutReferenceMessage(normalizedCurrent)))
-    || (existingSession?.persisted && !currentLooksMealLike && !isExplicitMealStart(normalizedCurrent) && (/\d/.test(normalizedCurrent) || workoutReferenceMessage(normalizedCurrent)))
+    || (existingSession?.active && !currentLooksMealLike && !isMealQuantityFragment(currentMessage) && (/\d/.test(normalizedCurrent) || workoutReferenceMessage(normalizedCurrent)))
+    || (existingSession?.persisted && !currentLooksMealLike && !isExplicitMealStart(normalizedCurrent) && !isMealQuantityFragment(currentMessage) && (/\d/.test(normalizedCurrent) || workoutReferenceMessage(normalizedCurrent)))
   )
 
   if (!shouldTrack) return []
@@ -1350,6 +1357,7 @@ function parseWorkoutMessage(message) {
   const text = cleanText(message)
   if (!text) return null
   if (VAGUE_WORKOUT_REFERENCE_PATTERN.test(text)) return null
+  if (isMealQuantityFragment(message)) return null
 
   const cardioMatch = text.match(/(?:(?<minutes>\d+(?:\.\d+)?)\s*(?:min|mins|minutes)\s*(?<exercise>incline treadmill|treadmill|bike|rower|run|running|walk|walking|elliptical|stairmaster))|(?<exercise2>incline treadmill|treadmill|bike|rower|run|running|walk|walking|elliptical|stairmaster)\s*(?:for)?\s*(?<minutes2>\d+(?:\.\d+)?)\s*(?:min|mins|minutes)/)
   if (cardioMatch?.groups) {
@@ -1475,6 +1483,23 @@ function parseWorkoutMessage(message) {
     return {
       exercise_name: exercise,
       workout_type: exercise,
+      muscle_group: "cardio",
+      sets: 1,
+      reps: 0,
+      weight_kg: 0,
+      duration_seconds: 0,
+      distance_km: distanceKm > 0 ? Number(distanceKm.toFixed(2)) : 0,
+    }
+  }
+
+  const bareDistanceOnly = text.match(/^(?<distance>\d+(?:\.\d+)?)\s*(?<unit>km|mi|miles?)\b$/)
+  if (bareDistanceOnly?.groups) {
+    const rawUnit = cleanText(bareDistanceOnly.groups.unit || "km")
+    const rawDistance = Number(bareDistanceOnly.groups.distance || 0)
+    const distanceKm = rawUnit === "mi" || rawUnit === "miles" ? rawDistance * 1.60934 : rawDistance
+    return {
+      exercise_name: "",
+      workout_type: "",
       muscle_group: "cardio",
       sets: 1,
       reps: 0,

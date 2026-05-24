@@ -10,6 +10,10 @@ function assistant(content) {
   return { role: "assistant", content }
 }
 
+function normalizeValueText(text) {
+  return String(text || "").trim().toLowerCase()
+}
+
 function replayCoachConversation(conversation, recentLimit = 18) {
   let mealSession = emptyMealSessionState()
   let workoutSession = emptyWorkoutSessionState()
@@ -922,6 +926,67 @@ test("coach session state surfaces both meal and workout candidates when a numer
   assert.equal(next.mealSession.summary, "18 eggs")
   assert.equal(next.mealSession.readyToLog, true)
   assert.ok(next.workoutSession)
+})
+
+test("mixed thread: steak + squat follow-up quantity hygiene", () => {
+  const steakSquat = replayCoachConversation([
+    user("had steak and squatted 100kg"),
+    assistant("How many reps and how much steak?"),
+    user("5 reps"),
+    user("300g"),
+  ])
+
+  assert.ok(steakSquat.mealSession)
+  assert.equal(steakSquat.mealSession.readyToLog, true)
+  assert.match(String(steakSquat.mealSession.summary || ""), /300g steak/i)
+
+  assert.ok(steakSquat.workoutSession)
+  assert.notEqual(normalizeValueText(steakSquat.workoutSession.exercise_name), "300g")
+  assert.equal(Array.isArray(steakSquat.workoutSession.candidateActivities) ? steakSquat.workoutSession.candidateActivities.length : 0, 0)
+  assert.equal(steakSquat.workoutSession.readyToLog, true)
+})
+
+test("mixed thread: meal quantity follow-up does not trigger workout for drinks", () => {
+  const milk = replayCoachConversation([
+    user("i had milk"),
+    user("250ml"),
+  ])
+
+  assert.ok(milk.mealSession)
+  assert.match(String(milk.mealSession.summary || ""), /250ml milk/i)
+  assert.ok(!milk.workoutSession || !milk.workoutSession.readyToLog)
+  assert.notEqual(normalizeValueText(milk.workoutSession?.exercise_name), "250ml")
+})
+
+test("mixed thread: real workout continuation still works for bench and cardio", () => {
+  const bench = replayCoachConversation([
+    user("bench"),
+    user("5 reps at 60kg"),
+  ])
+  assert.ok(bench.workoutSession)
+  assert.equal(bench.workoutSession.readyToLog, true)
+  assert.equal(bench.workoutSession.weight_kg, 60)
+  assert.equal(bench.workoutSession.reps, 5)
+
+  const run = replayCoachConversation([
+    user("run"),
+    user("2km"),
+  ])
+  assert.ok(run.workoutSession)
+  assert.equal(run.workoutSession.distance_km, 2)
+  assert.equal(run.workoutSession.readyToLog, true)
+})
+
+test("mixed thread: meal quantity follow-up for yoghurt works without a workout claim", () => {
+  const yoghurt = replayCoachConversation([
+    user("i had yoghurt"),
+    user("250g"),
+  ])
+
+  assert.ok(yoghurt.mealSession)
+  assert.match(String(yoghurt.mealSession.summary || ""), /250g yoghurt/i)
+  assert.ok(!yoghurt.workoutSession || !yoghurt.workoutSession.readyToLog)
+  assert.notEqual(normalizeValueText(yoghurt.workoutSession?.exercise_name), "250g")
 })
 
 test("coach session state keeps a new explicit meal isolated from the previously saved meal", () => {
