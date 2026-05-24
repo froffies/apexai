@@ -88,14 +88,14 @@ export function normalizeCoachResponse(value, context = {}) {
 
   const mealClarifyAction = deterministicClarifyActionFromSession(context.mealContext)
   const workoutClarifyAction = deterministicClarifyActionFromSession(context.workoutContext)
-  const deterministicMealActions = buildDeterministicMealActions({
+  const deterministicMealActionsRaw = buildDeterministicMealActions({
     mealSession: context.mealContext,
     explicitActions,
     prompt: context.prompt,
   })
   const deterministicMealDeleteAction = buildDeterministicMealDeletionAction(context.mealContext)
   const deterministicWorkoutDeleteAction = buildDeterministicWorkoutDeletionAction(context.workoutContext)
-  const deterministicWorkoutActions = buildDeterministicWorkoutActions({
+  const deterministicWorkoutActionsRaw = buildDeterministicWorkoutActions({
     workoutSession: context.workoutContext,
     explicitActions,
   })
@@ -109,6 +109,8 @@ export function normalizeCoachResponse(value, context = {}) {
   const hasValidatedWorkoutPersistence = validatedActions.some(isWorkoutPersistenceAction)
   const hasValidatedMealDelete = validatedActions.some((action) => action?.type === "delete_meal_log")
   const hasValidatedWorkoutDelete = validatedActions.some((action) => action?.type === "delete_workout_log")
+  const deterministicMealActions = hasValidatedMealPersistence ? [] : deterministicMealActionsRaw
+  const deterministicWorkoutActions = hasValidatedWorkoutPersistence ? [] : deterministicWorkoutActionsRaw
   const mealHasPendingWork = Boolean(
     context.mealContext
     && !context.mealContext.alreadyLogged
@@ -133,8 +135,8 @@ export function normalizeCoachResponse(value, context = {}) {
   )
 
   const filteredExplicitActions = explicitActions.filter((action) => {
-    if ((deterministicMealActions.length || deterministicMealDeleteAction || hasValidatedMealDelete) && isMealPersistenceAction(action)) return false
-    if ((deterministicWorkoutActions.length || deterministicWorkoutDeleteAction || hasValidatedWorkoutDelete) && isWorkoutPersistenceAction(action)) return false
+    if ((deterministicMealActions.length || deterministicMealDeleteAction || hasValidatedMealDelete || hasValidatedMealPersistence) && isMealPersistenceAction(action)) return false
+    if ((deterministicWorkoutActions.length || deterministicWorkoutDeleteAction || hasValidatedWorkoutDelete || hasValidatedWorkoutPersistence) && isWorkoutPersistenceAction(action)) return false
     if (context.mealContext?.readyToLog && action?.type === "clarify") return false
     if (context.workoutContext?.readyToLog && action?.type === "clarify") return false
     if (context.mealContext?.alreadyLogged && isMealPersistenceAction(action)) return false

@@ -362,6 +362,67 @@ test("normalizeCoachResponse keeps validated mixed actions when the AI reply fal
   assert.doesNotMatch(payload.reply, /couldn't save it just now/i)
 })
 
+test("normalizeCoachResponse does not rebuild duplicate deterministic meal or workout actions when validated actions already include them", () => {
+  const payload = normalizeCoachResponse({
+    reply: "I've logged 18 eggs and 1 set of 4 pushups for you.",
+    actions: [],
+    warnings: [],
+  }, {
+    prompt: "18",
+    mealContext: {
+      readyToLog: true,
+      alreadyLogged: false,
+      summary: "18 eggs",
+      clarifyQuestion: "",
+      persistedMealId: "",
+      correctionRequested: false,
+    },
+    workoutContext: {
+      readyToLog: true,
+      alreadyLogged: false,
+      persistedWorkoutId: "",
+      correctionRequested: false,
+      exercise_name: "Pushups",
+      workout_type: "Pushups",
+      muscle_group: "full_body",
+      sets: 1,
+      reps: 4,
+      weight_kg: 0,
+      duration_seconds: 0,
+      distance_km: 0,
+    },
+    validatedActions: [
+      {
+        type: "log_meal",
+        meal_type: "snack",
+        food_name: "18 eggs",
+        quantity: "1 meal",
+        calories: 148,
+        protein_g: 12.6,
+        carbs_g: 1.1,
+        fat_g: 10.2,
+        estimated: true,
+        nutrition_source: "Coach estimate from accumulated meal details across chat",
+      },
+      {
+        type: "log_workout",
+        exercise_name: "Pushups",
+        workout_type: "Pushups",
+        muscle_group: "full_body",
+        sets: 1,
+        reps: 4,
+        weight_kg: 0,
+        duration_seconds: 0,
+        distance_km: 0,
+      },
+    ],
+  })
+
+  assert.equal(payload.actions.filter((action) => action.type === "log_meal").length, 1)
+  assert.equal(payload.actions.filter((action) => action.type === "log_workout").length, 1)
+  assert.equal(payload.actions.find((action) => action.type === "log_meal")?.calories, 148)
+})
+
 test("normalizeCoachResponse drops deterministic meal clarification when the AI already returned a meal persistence action", () => {
   const payload = normalizeCoachResponse({
     reply: "I logged 200g chicken and 200g rice for you.",
