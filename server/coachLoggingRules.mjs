@@ -16,7 +16,6 @@ export function titleCase(text) {
 const COUNT_UNITS = new Set(["egg", "slice", "cup", "tin", "can", "block", "bunch", "serve", "bowl", "plate", "mug", "tbsp", "tsp"])
 const MASS_UNITS = new Map([["g", 1], ["kg", 1000]])
 const VOLUME_UNITS = new Map([["ml", 1], ["l", 1000]])
-const COUNT_REQUIRED_LOOSE_ESTIMATE_BASES = new Set(["egg"])
 const TRAILING_LOG_COMMAND_PATTERN = /\s+\b(?:(?:can|could)\s+you|please|just)?\s*(?:log|save|track|add)\s+(?:all\s+that|that|it)\b.*$/i
 
 const PORTION_PATTERN = /(?<amount>\d+(?:\.\d+)?)\s*(?:large|medium|small|fresh|squeezed|salted|unsalted|wholemeal|wholegrain|rye)?\s*(?<unit>kg|g|ml|l|tbsp|tablespoons?|tsp|teaspoons?|cups?|slices?|tins?|cans?|blocks?|bunch(?:es)?|serves?|servings?|bowls?|plates?|mugs?|eggs?)\b/i
@@ -595,13 +594,13 @@ function rootSessionItems(mealSession) {
     .filter((item) => !item.attachedTo)
 }
 
-function blocksLooseEstimateForSingleCountItem(mealSession) {
+function blocksLooseEstimateForSinglePendingQuantityItem(mealSession) {
   if (String(mealSession?.pendingClarification?.type || "") !== "quantity") return false
   const roots = rootSessionItems(mealSession)
   if (roots.length !== 1) return false
   const [root] = roots
   const baseName = normalizeSessionBaseName(root)
-  if (!COUNT_REQUIRED_LOOSE_ESTIMATE_BASES.has(baseName)) return false
+  if (!baseName) return false
   const quantity = normalizeItemQuantity(root.quantity)
   return !quantity || !Number.isFinite(quantity.amount)
 }
@@ -616,7 +615,7 @@ function canUseLooseEstimate(mealSession, allowLooseEstimate = false) {
     && !mealSession?.correctionRequested
     && String(mealSession?.summary || "").trim()
     && safeArray(mealSession?.items, 24).length > 0
-    && !blocksLooseEstimateForSingleCountItem(mealSession)
+    && !blocksLooseEstimateForSinglePendingQuantityItem(mealSession)
   )
 }
 

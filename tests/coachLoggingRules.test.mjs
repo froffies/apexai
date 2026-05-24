@@ -163,6 +163,37 @@ test("coach logging rules do not loose-estimate a single unresolved count-based 
   assert.equal(action, null)
 })
 
+test("coach logging rules do not loose-estimate a single unresolved measured meal in a mixed turn", () => {
+  const action = buildDeterministicMealAction({
+    mealSession: {
+      readyToLog: false,
+      alreadyLogged: false,
+      wantsLogging: true,
+      summary: "steak",
+      items: [
+        {
+          baseName: "steak",
+          label: "Steak",
+          category: "food",
+          quantity: null,
+          exclusions: [],
+        },
+      ],
+      pendingClarification: {
+        type: "quantity",
+        targetReference: "steak",
+        targetBaseName: "steak",
+        targetLabel: "Steak",
+      },
+    },
+    explicitActions: [],
+    allowLooseEstimate: true,
+    prompt: "had steak and squatted 100kg",
+  })
+
+  assert.equal(action, null)
+})
+
 test("coach logging rules preserve grouped same-food preparations and all related macros", () => {
   const action = buildDeterministicMealAction({
     mealSession: {
