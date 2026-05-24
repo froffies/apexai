@@ -139,6 +139,7 @@ function normalizeMealSession(session = {}) {
   return {
     ...emptyMealSessionState(),
     ...session,
+    graphNative: Boolean(session?.graphNative),
     pendingClarification: session?.pendingClarification && typeof session.pendingClarification === "object"
       ? { ...session.pendingClarification }
       : null,
@@ -1045,7 +1046,9 @@ function buildMealSessionState(recentMessages = [], currentMessage = "", existin
   const startedNewMeal = prior.persisted && isExplicitMealStart(currentMessage) && !correctionRequested
   const historyForNext = (fullCorrectionRestatement || startedNewMeal) ? [] : recentMessages
   const shouldSeedPersistedSession = !fullCorrectionRestatement && (prior.active || (prior.persisted && !startedNewMeal))
-  const seededSession = shouldSeedPersistedSession ? seedLegacyMealSession(prior) : null
+  const seededSession = shouldSeedPersistedSession
+    ? ((prior.active && prior.graphNative) ? prior : seedLegacyMealSession(prior))
+    : null
   const next = buildLegacyMealContext(historyForNext, normalizedMealMessage, seededSession)
   if (!next) return null
 

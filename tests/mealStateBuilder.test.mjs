@@ -28,6 +28,11 @@ function replayMealConversation(conversation, recentLimit = 20) {
   return { session, snapshots, history }
 }
 
+function assertGraphNativeSession(session) {
+  assert.ok(session.intentGraph, "expected graph-native session to expose an intent graph")
+  assert.ok(session.candidateFragments, "expected graph-native session to expose candidate fragments")
+}
+
 test("meal session accumulates the exact fragmented egg and tea conversation into one ready-to-log meal", () => {
   const conversation = [
     user("i had egg and tea"),
@@ -49,11 +54,34 @@ test("meal session accumulates the exact fragmented egg and tea conversation int
 
   const { session } = replayMealConversation(conversation)
 
+  assertGraphNativeSession(session)
   assert.ok(session.active)
   assert.equal(session.readyToLog, true)
   assert.equal(session.summary, "17 fried eggs cooked in 100g salted butter, plus 250ml Earl Grey tea with no milk and no sugar")
   assert.equal(session.clarifyQuestion, "")
   assert.equal(session.items.filter((item) => !item.attached_to).length, 2)
+})
+
+test("graph-native meal session keeps the egg and tea clarification thread out of legacy fallback", () => {
+  const { snapshots } = replayMealConversation([
+    user("i had egg and tea"),
+    assistant("How many eggs did you have?"),
+    user("earl grey"),
+    assistant("How much earl grey tea did you have?"),
+    user("250ml no sugar no milk"),
+    assistant("How many eggs did you have?"),
+    user("17 fried eggs"),
+    assistant("What were the fried eggs cooked in?"),
+    user("cooked in 100g salted butter"),
+  ])
+
+  for (const snapshot of snapshots) assertGraphNativeSession(snapshot.session)
+  assert.equal(snapshots[0].session.clarifyQuestion, "How many eggs did you have?")
+  assert.equal(snapshots[1].session.clarifyQuestion, "How much earl grey tea did you have?")
+  assert.equal(snapshots[2].session.clarifyQuestion, "How many eggs did you have?")
+  assert.equal(snapshots[3].session.clarifyQuestion, "What were the fried eggs cooked in?")
+  assert.equal(snapshots[4].session.readyToLog, true)
+  assert.equal(snapshots[4].session.summary, "17 fried eggs cooked in 100g salted butter, plus 250ml Earl Grey tea with no milk and no sugar")
 })
 
 test("meal session clarification flow advances instead of repeating the same missing question", () => {

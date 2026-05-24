@@ -47,6 +47,7 @@ const RELATION_PATTERNS = [
   { relation: "on", pattern: /\bon\b/i },
   { relation: "with", pattern: /\bwith\b/i },
 ]
+const GENERIC_DRINK_BASES = new Set(["tea", "coffee", "juice", "water", "milk", "smoothie", "shake"])
 
 const baseSession = () => ({
   ...legacyEmptyMealSession(),
@@ -54,8 +55,10 @@ const baseSession = () => ({
   pendingClarification: null,
   structuralIssues: [],
   invalidStructure: false,
+  graphNative: false,
   intentGraph: null,
   candidateFragments: { meal: [], workout: [], general: [] },
+  nextClarificationReference: "",
 })
 
 const cleanText = (value = "") => String(value).toLowerCase().replace(/[’']/g, "'").replace(/\s+/g, " ").trim()
@@ -69,6 +72,16 @@ const containsWord = (text = "", word = "") => {
   if (!normalizedText || !normalizedWord) return false
   return new RegExp(`\\b${escapeRegex(normalizedWord).replace(/\s+/g, "\\s+")}\\b`, "i").test(normalizedText)
 }
+const baseNamesCompatible = (left = "", right = "") => {
+  const normalizedLeft = cleanText(left)
+  const normalizedRight = cleanText(right)
+  if (!normalizedLeft || !normalizedRight) return false
+  return (
+    singularize(normalizedLeft) === singularize(normalizedRight)
+    || containsWord(normalizedLeft, normalizedRight)
+    || containsWord(normalizedRight, normalizedLeft)
+  )
+}
 const canonicalBaseName = (value = "") => {
   const normalized = cleanText(value)
   if (!normalized) return ""
@@ -77,6 +90,7 @@ const canonicalBaseName = (value = "") => {
 const normalizeUnit = (unit = "") => UNIT_ALIASES.get(cleanText(unit)) || cleanText(unit)
 const hasDigits = (text = "") => /\d/.test(String(text))
 const isDrink = (name = "") => DRINK_WORDS.some((word) => containsWord(name, word))
+const mentionsDrink = (text = "") => DRINK_WORDS.some((word) => containsWord(text, word) || containsWord(text, `${singularize(word)}s`))
 const isIngredient = (name = "") => INGREDIENT_WORDS.some((word) => containsWord(name, word))
 const isWorkoutish = (text = "") => WORKOUTISH_PATTERN.test(cleanText(text))
 const looksFoodish = (text = "") => FOOD_HINTS.some((word) => containsWord(text, word))
@@ -108,6 +122,22 @@ function normalizeConversation(recentMessages = [], currentMessage = "", existin
   return [...safeArray(recentMessages, 18).filter((entry) => typeof entry?.content === "string"), { role: "user", content: String(currentMessage || "") }]
 }
 
+function isSimpleFoodDrinkStart(currentMessage = "") {
+  const normalizedCurrent = cleanText(currentMessage)
+  if (!MEAL_START_PATTERN.test(normalizedCurrent)) return false
+  if (/\b(?:with|without|cooked in|fried in|no sugar|no milk)\b/i.test(normalizedCurrent)) return false
+  if (INLINE_CORRECTION_PATTERN.test(normalizedCurrent) || PACKAGED_UNIT_PATTERN.test(normalizedCurrent)) return false
+  const currentClauses = splitGraphClauses(currentMessage)
+  if (currentClauses.length !== 2) return false
+  const normalizedClauses = currentClauses.map((fragment) => cleanText(fragment))
+  if (normalizedClauses.some((fragment) => !fragment || isWorkoutish(fragment) || detectQuestionOnlyTurn(fragment) || hasDigits(fragment))) return false
+  const drinkClauses = normalizedClauses.filter((fragment) => mentionsDrink(fragment))
+  const countFoodClauses = normalizedClauses.filter((fragment) => (
+    [...COUNT_REQUIRED].some((food) => containsWord(fragment, food) || containsWord(fragment, `${food}s`))
+  ))
+  return drinkClauses.length === 1 && countFoodClauses.length === 1
+}
+
 function shouldUseLegacy(conversation, currentMessage, existingSession) {
   const normalizedCurrent = cleanText(currentMessage)
   const joined = cleanText([...conversation.map((entry) => entry.content || ""), currentMessage].join(" "))
@@ -115,31 +145,37 @@ function shouldUseLegacy(conversation, currentMessage, existingSession) {
   const currentClauses = splitGraphClauses(currentMessage)
   const quantitySignals = (normalizedCurrent.match(/\b(?:\d+(?:\.\d+)?|half|couple)\b/g) || []).length
   const measuredAmountSignals = [...normalizedCurrent.matchAll(/\b(?:\d+(?:\.\d+)?|half)\s*(?:a\s+)?(?:kg|g|lb|lbs|pound|pounds|ml|l|litre|litres|liter|liters|cup|cups|bowl|bowls|plate|plates|mug|mugs|serve|serves|serving|servings|slice|slices|tbsp|tablespoon|tablespoons|tsp|teaspoon|teaspoons)\b/ig)].length
+  const activeSession = Boolean(existingSession?.active)
+  const activeGraphSession = Boolean(existingSession?.active && existingSession?.graphNative)
+  const simpleFoodDrinkStart = isSimpleFoodDrinkStart(currentMessage)
   return Boolean(
-    existingSession?.active
+    (activeSession && !activeGraphSession)
     ||
     existingSession?.persisted
-    || existingSession?.mealConversation
+    || (!activeGraphSession && existingSession?.mealConversation)
     || existingSession?.meal_groups?.length
     || existingSession?.declaredTotals?.length
     || existingSession?.pendingAttachments?.length
     || existingSession?.pendingQuantities?.length
     || existingSession?.correctionRequested
     || existingSession?.deleteRequested
-    || conversation.some((entry) => entry.role === "assistant")
-    || conversation.filter((entry) => entry.role === "user").length > 1
-    || currentClauses.length > 1
-    || !MEAL_START_PATTERN.test(cleanText(currentMessage))
+    || (!activeGraphSession && conversation.some((entry) => entry.role === "assistant"))
+    || (!activeGraphSession && conversation.filter((entry) => entry.role === "user").length > 1)
+    || (!activeGraphSession && !MEAL_START_PATTERN.test(cleanText(currentMessage)))
     || TIME_REFERENCE_PATTERN.test(cleanText(currentMessage))
     || INLINE_CORRECTION_PATTERN.test(cleanText(currentMessage))
     || PACKAGED_UNIT_PATTERN.test(cleanText(currentMessage))
     || quantitySignals > 1
     || measuredAmountSignals > 1
-    || /\b(?:tea|coffee|milk|juice|water|shake|smoothie|beer|wine|cola|soda)\b/i.test(cleanText(currentMessage))
-    || /\b(?:with|without|cooked in|fried in|no sugar|no milk)\b/i.test(cleanText(currentMessage))
+    || (!activeGraphSession && mentionsDrink(currentMessage) && !simpleFoodDrinkStart)
+    || (!activeGraphSession && /\b(?:with|without|cooked in|fried in|no sugar|no milk)\b/i.test(cleanText(currentMessage)))
     || CORRECTION_PREFIX.test(cleanText(currentMessage))
     || COMPLEX_PATTERN.test(joined)
-    || assistantMealTurns > 1
+    || (!activeGraphSession && assistantMealTurns > 1)
+    || (!activeGraphSession && currentClauses.length > 1 && !simpleFoodDrinkStart)
+    || (!activeGraphSession && currentClauses.length > 3)
+    || (activeGraphSession && /\bthat were\b|\bwere just\b/.test(normalizedCurrent))
+    || (activeGraphSession && /^\s*the\s+\w+.*\bhad\b/i.test(normalizedCurrent))
   )
 }
 
@@ -169,13 +205,14 @@ function extractPreparations(text = "") {
 function extractExclusions(text = "") {
   const normalized = cleanText(text)
   const exclusions = []
-  if (/\bno sugar\b|\bwithout sugar\b/.test(normalized)) exclusions.push("no sugar")
   if (/\bno milk\b|\bwithout milk\b/.test(normalized)) exclusions.push("no milk")
+  if (/\bno sugar\b|\bwithout sugar\b/.test(normalized)) exclusions.push("no sugar")
   return exclusions
 }
 
 function stripLead(text = "") {
   return String(text || "")
+    .replace(/,/g, " ")
     .replace(MEAL_START_PATTERN, "")
     .replace(CORRECTION_PREFIX, "")
     .replace(TRAILING_LOG_DIRECTIVE_PATTERN, "")
@@ -221,6 +258,26 @@ function itemLabel(baseName = "") {
   const normalized = cleanText(baseName)
   if (!normalized) return "Item"
   return titleCase(normalized)
+}
+
+function displayName(item = {}) {
+  const base = cleanText(item.label || item.base_name || "")
+  if (!base) return ""
+  if (item.category === "drink" && base.includes(" ") && !GENERIC_DRINK_BASES.has(base)) {
+    const parts = base.split(" ")
+    const tail = parts.at(-1) || ""
+    if (GENERIC_DRINK_BASES.has(tail)) {
+      return `${parts.slice(0, -1).map((part) => titleCase(part)).join(" ")} ${tail}`.trim()
+    }
+    return titleCase(base)
+  }
+  return base
+}
+
+function countDisplayName(item = {}) {
+  const base = cleanText(item.base_name || item.label || "")
+  if (!base) return ""
+  return base.endsWith("s") ? base : `${base}s`
 }
 
 function itemReference(item = {}) {
@@ -289,6 +346,24 @@ function findRootByBaseName(state, baseName = "") {
   return state.items.find((item) => !item.attached_to && singularize(item.base_name) === normalized) || null
 }
 
+function findDrinkTarget(state) {
+  if (state.lastDrinkKey) {
+    const named = unresolvedRoots(state).find((item) => item.category === "drink" && cleanText(item.base_name) === cleanText(state.lastDrinkKey))
+    if (named) return named
+  }
+  return unresolvedRoots(state).filter((item) => item.category === "drink").slice(-1)[0] || null
+}
+
+function findVariantDrinkTarget(state, text = "") {
+  const normalized = cleanText(text)
+  if (!normalized || hasDigits(normalized) || detectQuestionOnlyTurn(text) || isWorkoutish(normalized) || MEAL_START_PATTERN.test(normalized)) return null
+  const drinkRoots = unresolvedRoots(state).filter((item) => item.category === "drink")
+  if (drinkRoots.length !== 1) return null
+  const target = drinkRoots[0]
+  if (!GENERIC_DRINK_BASES.has(cleanText(target.base_name || ""))) return null
+  return target
+}
+
 function parseItemFragment(text = "", state) {
   const raw = stripLead(text)
   const normalized = cleanText(raw)
@@ -300,14 +375,32 @@ function parseItemFragment(text = "", state) {
   }
   const relationTail = splitRelationTail(raw)
   const quantity = extractQuantity(relationTail.lead)
-  const preparations = extractPreparations(relationTail.lead)
+  const relationPreparationMatch = relationTail.relation === "cooked_in"
+    ? raw.match(/\b(fried|grilled|baked|boiled|poached|scrambled|roasted|steamed)\s+in\b/i)
+    : null
+  const preparations = [...new Set([
+    ...extractPreparations(relationTail.lead),
+    ...(relationPreparationMatch?.[1] ? [cleanText(relationPreparationMatch[1])] : []),
+  ])]
   const exclusions = extractExclusions(relationTail.lead)
+  const variantDrinkTarget = !quantity && !relationTail.relation ? findVariantDrinkTarget(state, raw) : null
+  if (variantDrinkTarget) {
+    return {
+      kind: "bind_variant",
+      targetReference: itemReference(variantDrinkTarget),
+      variantText: raw,
+    }
+  }
   const sourceBaseName = baseNameFromText(relationTail.lead)
   const baseName = canonicalBaseName(sourceBaseName)
-  const foodUnitFallback = !baseName && quantity?.unit && ["egg", "serve", "slice", "cup", "bowl", "plate", "mug"].includes(quantity.unit) ? quantity.unit : null
+  const foodUnitFallback = !baseName && quantity?.unit === "egg" ? quantity.unit : null
   const resolvedBaseName = baseName || canonicalBaseName(foodUnitFallback || "")
   if (!resolvedBaseName && quantity && state.pendingClarification?.type === "quantity") {
     return { kind: "bind_quantity", quantity, preparations, exclusions }
+  }
+  if (!resolvedBaseName && exclusions.length) {
+    const target = findDrinkTarget(state)
+    if (target) return { kind: "bind_exclusions", targetReference: itemReference(target), exclusions }
   }
   if (!resolvedBaseName && relationTail.relation && state.pendingClarification?.type === "ingredient") {
     return { kind: "bind_ingredient", relation: relationTail.relation, ingredientText: relationTail.ingredientText }
@@ -416,23 +509,71 @@ function resolvePendingReply(state, text) {
   if (pending.type === "quantity") {
     const parsed = parseItemFragment(text, state)
     const target = findRootByReference(state, pending.targetReference) || findRootByBaseName(state, pending.targetBaseName)
+    const targetMatchesParsedItem = Boolean(
+      parsed.kind === "item"
+      && target
+      && baseNamesCompatible(parsed.item.base_name, target.base_name)
+    )
+    if (parsed.kind === "bind_variant") {
+      const variantTarget = parsed.targetReference ? findRootByReference(state, parsed.targetReference) : null
+      if (variantTarget) {
+        const suffix = cleanText(parsed.variantText).includes(cleanText(variantTarget.base_name))
+          ? parsed.variantText
+          : `${parsed.variantText} ${variantTarget.base_name}`
+        variantTarget.base_name = cleanText(suffix)
+        variantTarget.label = itemLabel(suffix)
+        state.pendingClarification = null
+        state.lastDrinkKey = cleanText(suffix)
+        state.nextClarificationReference = itemReference(variantTarget)
+        return true
+      }
+    }
     if (parsed.kind === "bind_quantity" && target) {
       target.quantity = { ...parsed.quantity }
       if (parsed.preparations.length) target.preparation = [...new Set([...target.preparation, ...parsed.preparations])]
       if (parsed.exclusions.length) target.exclusions = [...new Set([...target.exclusions, ...parsed.exclusions])]
       state.pendingClarification = null
       state.lastMainReference = itemReference(target)
+      if (target.category === "drink") state.lastDrinkKey = cleanText(target.base_name)
       return true
     }
-    if (parsed.kind === "item" && target && singularize(parsed.item.base_name) === singularize(target.base_name) && parsed.item.quantity) {
+    if (targetMatchesParsedItem && parsed.item.quantity) {
       target.quantity = { ...parsed.item.quantity }
       target.preparation = [...new Set([...target.preparation, ...parsed.item.preparation])]
       target.exclusions = [...new Set([...target.exclusions, ...parsed.item.exclusions])]
+      if (cleanText(parsed.item.base_name).length > cleanText(target.base_name).length) {
+        target.base_name = parsed.item.base_name
+        target.label = parsed.item.label
+      }
       state.pendingClarification = null
       state.lastMainReference = itemReference(target)
+      if (target.category === "drink") state.lastDrinkKey = cleanText(target.base_name)
       return true
     }
-    if (parsed.kind === "item" && target && singularize(parsed.item.base_name) === singularize(target.base_name)) {
+    if (targetMatchesParsedItem) {
+      pending.invalidReply = true
+      return true
+    }
+    if (
+      parsed.kind === "item"
+      && target
+      && /^(?:and|plus|also)\b/i.test(normalized)
+      && looksFoodish(parsed.item.base_name)
+    ) {
+      mergeRoot(state, parsed.item)
+      const mergedTarget = findRootByBaseName(state, parsed.item.base_name)
+      state.pendingClarification = null
+      state.nextClarificationReference = itemReference(mergedTarget || parsed.item)
+      return true
+    }
+    if (parsed.kind === "bind_exclusions") {
+      const exclusionTarget = parsed.targetReference ? findRootByReference(state, parsed.targetReference) : null
+      if (exclusionTarget) {
+        exclusionTarget.exclusions = [...new Set([...exclusionTarget.exclusions, ...parsed.exclusions])]
+        return true
+      }
+    }
+    if (parsed.kind === "item" && target && !MEAL_START_PATTERN.test(normalized)) {
       pending.invalidReply = true
       return true
     }
@@ -441,7 +582,8 @@ function resolvePendingReply(state, text) {
   if (pending.type === "ingredient") {
     const target = findRootByReference(state, pending.targetReference) || findRootByBaseName(state, pending.targetBaseName)
     if (!target) return false
-    const ingredient = parseIngredientItem(text)
+    const ingredientText = String(text || "").replace(/^(?:cooked|fried)\s+in\s+|^with\s+/i, "").trim()
+    const ingredient = parseIngredientItem(ingredientText)
     attachIngredient(state, ingredient, pending.relation || "cooked_in", target)
     state.pendingClarification = null
     return true
@@ -499,19 +641,23 @@ function missingDetails(state) {
 
 function quantityQuestion(item, invalid = false) {
   const base = singularize(item.base_name)
-  const label = item.label || itemLabel(item.base_name)
-  if (invalid) return COUNT_REQUIRED.has(base) ? `I'm asking how many ${cleanText(label)} you had.` : `I'm asking how much ${cleanText(label)} you had.`
-  return COUNT_REQUIRED.has(base) ? `How many ${cleanText(label)} did you have?` : `How much ${cleanText(label)} did you have?`
+  const label = cleanText(COUNT_REQUIRED.has(base) ? countDisplayName(item) : displayName(item))
+  if (invalid) return COUNT_REQUIRED.has(base) ? `I'm asking how many ${label} you had.` : `I'm asking how much ${label} you had.`
+  return COUNT_REQUIRED.has(base) ? `How many ${label} did you have?` : `How much ${label} did you have?`
 }
 
 function ingredientQuestion(item, relation = "cooked_in") {
   const preparation = item.preparation[0] ? `${cleanText(item.preparation[0])} ` : ""
-  if (relation === "cooked_in") return `What were the ${preparation}${cleanText(item.label || item.base_name)} cooked in?`.replace(/\s+/g, " ").trim()
-  return `What did you have with the ${cleanText(item.label || item.base_name)}?`
+  const subject = COUNT_REQUIRED.has(singularize(item.base_name)) ? countDisplayName(item) : displayName(item)
+  if (relation === "cooked_in") return `What were the ${preparation}${subject} cooked in?`.replace(/\s+/g, " ").trim()
+  return `What did you have with the ${subject}?`
 }
 
 function buildPendingClarification(state, missing = []) {
-  const first = missing[0]
+  const preferred = state.nextClarificationReference
+    ? missing.find((entry) => itemReference(entry.item) === cleanText(state.nextClarificationReference))
+    : null
+  const first = preferred || missing[0]
   if (!first) return null
   if (first.type === "quantity") {
     return {
@@ -560,7 +706,20 @@ function summarizeItem(state, item, attachmentOnly = false) {
     (prep) => cleanText(quantityText).includes(cleanText(prep))
   )
   const effectivePrepText = prepAlreadyInQty ? "" : prepText
-  const core = `${quantityText ? `${quantityText} ` : ""}${effectivePrepText}${cleanText(item.label || item.base_name)}`.replace(/\s+/g, " ").trim()
+  const nameText = COUNT_REQUIRED.has(singularize(item.base_name)) ? countDisplayName(item) : displayName(item)
+  const nameAlreadyInQty = Boolean(
+    nameText
+    && quantityText
+    && (
+      containsWord(quantityText, nameText)
+      || containsWord(quantityText, singularize(nameText))
+      || containsWord(quantityText, countDisplayName(item))
+    )
+  )
+  const replacePattern = new RegExp(`\\b(${escapeRegex(countDisplayName(item))}|${escapeRegex(singularize(nameText))}|${escapeRegex(nameText)})\\b`, "i")
+  const core = (nameAlreadyInQty
+    ? (effectivePrepText ? quantityText.replace(replacePattern, `${effectivePrepText.trim()} $1`) : `${quantityText}`)
+    : `${quantityText ? `${quantityText} ` : ""}${effectivePrepText}${nameText}`).replace(/\s+/g, " ").trim()
   const attachmentText = attachmentOnly ? "" : summarizeAttached(state, item)
   const exclusionText = item.exclusions.length ? ` with ${item.exclusions.join(" and ")}` : ""
   return `${core}${attachmentText}${exclusionText}`.replace(/\s+/g, " ").trim()
@@ -607,6 +766,11 @@ function processGraphTurn(state, turn) {
     }
     if (parsed.kind === "bind_ingredient") {
       attachIngredient(state, parseIngredientItem(parsed.ingredientText), parsed.relation || "cooked_in")
+      continue
+    }
+    if (parsed.kind === "bind_exclusions") {
+      const target = parsed.targetReference ? findRootByReference(state, parsed.targetReference) : findDrinkTarget(state)
+      if (target) target.exclusions = [...new Set([...target.exclusions, ...parsed.exclusions])]
       continue
     }
     if (parsed.kind === "bind_variant") {
@@ -657,6 +821,7 @@ export function buildMealStateFromConversation(recentMessages = [], currentMessa
   state.pendingQuantities = safeArray(existingSession?.pendingQuantities, 8).map((entry) => ({ ...entry }))
   state.clarificationCounts = { ...(existingSession?.clarificationCounts || {}) }
   state.pendingClarification = existingSession?.pendingClarification ? { ...existingSession.pendingClarification } : null
+  state.nextClarificationReference = String(existingSession?.nextClarificationReference || "")
   state.thread_messages = conversation.map((entry) => ({ role: entry.role, content: String(entry.content || "") }))
   state.answerOnly = detectQuestionOnlyTurn(currentMessage)
   state.wantsLogging = Boolean(existingSession?.wantsLogging) || /\b(?:i had|i ate|i drank|log|track|save|add|include)\b/i.test(cleanText(currentMessage))
@@ -699,11 +864,13 @@ export function buildMealStateFromConversation(recentMessages = [], currentMessa
       if (target && !target.quantity) target.quantity = defaultQuantityFor(target)
       missing = missingDetails(state)
       state.pendingClarification = null
+      state.shouldStopClarifying = true
     }
   }
 
   state.missingItems = missing
   state.pendingClarification = buildPendingClarification(state, missing)
+  state.nextClarificationReference = ""
   state.readyToLog = unresolvedRoots(state).length > 0 && missing.length === 0
   state.summary = summarizeState(state)
   state.meal_groups = buildMealGroups(state)
@@ -724,6 +891,7 @@ export function buildMealStateFromConversation(recentMessages = [], currentMessa
   state.lastMainKey = cleanText(unresolvedRoots(state).slice(-1)[0]?.base_name || state.lastMainKey)
   state.lastMainReference = itemReference(unresolvedRoots(state).slice(-1)[0] || {}) || state.lastMainReference || ""
   state.lastDrinkKey = cleanText(unresolvedRoots(state).filter((item) => item.category === "drink").slice(-1)[0]?.base_name || state.lastDrinkKey)
+  state.graphNative = true
   return state
 }
 
