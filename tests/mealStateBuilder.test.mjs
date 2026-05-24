@@ -115,6 +115,27 @@ test("meal session binds standalone numeric replies to the pending food quantity
   assert.equal(session.invalidStructure, false)
 })
 
+test("graph-native meal session treats bare had/ate/drank starts as logging intent", () => {
+  const session = buildMealContext([], "had steak", emptyMealSession())
+
+  assert.ok(session)
+  assert.equal(session.wantsLogging, true)
+  assert.equal(session.clarifyQuestion, "How much steak did you have?")
+})
+
+test("graph-native meal session preserves logging intent across a quantity clarification", () => {
+  const { session } = replayMealConversation([
+    user("had steak"),
+    assistant("How much steak did you have?"),
+    user("300g"),
+  ])
+
+  assert.ok(session)
+  assert.equal(session.wantsLogging, true)
+  assert.equal(session.readyToLog, true)
+  assert.equal(session.summary, "300g steak")
+})
+
 test("meal session preserves quantity clarification context and does not treat a food word as the missing number", () => {
   const { session, snapshots } = replayMealConversation([
     user("i had egg and cake"),

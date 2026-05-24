@@ -824,7 +824,7 @@ export function buildMealStateFromConversation(recentMessages = [], currentMessa
   state.nextClarificationReference = String(existingSession?.nextClarificationReference || "")
   state.thread_messages = conversation.map((entry) => ({ role: entry.role, content: String(entry.content || "") }))
   state.answerOnly = detectQuestionOnlyTurn(currentMessage)
-  state.wantsLogging = Boolean(existingSession?.wantsLogging) || /\b(?:i had|i ate|i drank|log|track|save|add|include)\b/i.test(cleanText(currentMessage))
+  state.wantsLogging = Boolean(existingSession?.wantsLogging) || MEAL_START_PATTERN.test(cleanText(currentMessage))
   state.wantsNutrition = Boolean(existingSession?.wantsNutrition) || /\b(?:calories|protein|carbs|fat|macro|macros)\b/i.test(cleanText(currentMessage))
   state.mealConversation = Boolean(existingSession?.mealConversation) || looksFoodish(currentMessage) || Boolean(existingSession?.active)
   state.intentGraph = buildIntentGraph(conversation, currentMessage, existingSession)
