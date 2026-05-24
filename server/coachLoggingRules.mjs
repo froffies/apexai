@@ -101,6 +101,17 @@ function baseNameMatches(candidate, baseName) {
   return sharedWords
 }
 
+function escapeRegex(value) {
+  return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+}
+
+function hasWholeFoodTerm(baseName, term) {
+  const normalizedBase = String(baseName || "").trim().toLowerCase()
+  const normalizedTerm = String(term || "").trim().toLowerCase()
+  if (!normalizedBase || !normalizedTerm) return false
+  return new RegExp(`\\b${escapeRegex(normalizedTerm).replace(/\s+/g, "\\s+")}\\b`, "i").test(normalizedBase)
+}
+
 function chooseBestCandidate(item, candidateFoodMatches = {}) {
   const keys = [
     String(item.baseName || "").toLowerCase(),
@@ -145,42 +156,49 @@ function fallbackProfileForItem(item) {
   const baseName = String(item.baseName || item.label || "").toLowerCase()
   const exclusions = safeArray(item.exclusions, 8).map((entry) => String(entry || "").toLowerCase())
 
-  if (baseName.includes("egg")) {
+  if (hasWholeFoodTerm(baseName, "egg") || hasWholeFoodTerm(baseName, "eggs")) {
     return {
       serving: { amount: 1, unit: "egg" },
       macros: { calories: 74, protein_g: 6.3, carbs_g: 0.55, fat_g: 5.1 },
     }
   }
 
-  if (baseName.includes("butter")) {
+  if (hasWholeFoodTerm(baseName, "butter")) {
     return {
       serving: { amount: 100, unit: "g" },
       macros: { calories: 717, protein_g: 0.9, carbs_g: 0.1, fat_g: 81.1 },
     }
   }
 
-  if (baseName.includes("olive oil") || baseName.endsWith(" oil")) {
+  if (hasWholeFoodTerm(baseName, "olive oil") || /\boil\b/i.test(baseName)) {
     return {
       serving: { amount: 100, unit: "g" },
       macros: { calories: 884, protein_g: 0, carbs_g: 0, fat_g: 100 },
     }
   }
 
-  if (baseName.includes("vegemite")) {
+  if (hasWholeFoodTerm(baseName, "vegemite")) {
     return {
       serving: { amount: 1, unit: "tbsp" },
       macros: { calories: 36, protein_g: 3.1, carbs_g: 2.6, fat_g: 0.1 },
     }
   }
 
-  if (baseName.includes("toast") || baseName.includes("bread")) {
+  if (hasWholeFoodTerm(baseName, "toast") || hasWholeFoodTerm(baseName, "bread")) {
     return {
       serving: { amount: 1, unit: "slice" },
       macros: { calories: 94, protein_g: 4, carbs_g: 15.5, fat_g: 1.4 },
     }
   }
 
-  if (baseName.includes("tea") || baseName.includes("coffee") || baseName.includes("water")) {
+  if (hasWholeFoodTerm(baseName, "steak")) {
+    return {
+      serving: { amount: 100, unit: "g" },
+      macros: { calories: 250, protein_g: 25, carbs_g: 0, fat_g: 17 },
+    }
+  }
+
+  if (hasWholeFoodTerm(baseName, "tea") || hasWholeFoodTerm(baseName, "coffee") || hasWholeFoodTerm(baseName, "water")) {
     if (exclusions.includes("no sugar") && exclusions.includes("no milk")) {
       return {
         serving: { amount: 250, unit: "ml" },
@@ -193,7 +211,7 @@ function fallbackProfileForItem(item) {
     }
   }
 
-  if (baseName.includes("juice")) {
+  if (hasWholeFoodTerm(baseName, "juice")) {
     return {
       serving: { amount: 250, unit: "ml" },
       macros: { calories: 110, protein_g: 0.5, carbs_g: 26, fat_g: 0.2 },

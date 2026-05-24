@@ -94,6 +94,39 @@ test("coach logging rules can estimate a deterministic meal action from session 
   assert.ok(action.fat_g > 150)
 })
 
+test("coach logging rules do not treat steak like tea when estimating fallback macros", () => {
+  const action = buildDeterministicMealAction({
+    mealSession: {
+      readyToLog: true,
+      alreadyLogged: false,
+      wantsLogging: true,
+      summary: "300g steak",
+      persistedMealId: "",
+      correctionRequested: false,
+      items: [
+        {
+          baseName: "steak",
+          label: "Steak",
+          category: "food",
+          quantity: { amount: 300, unit: "g", text: "300g" },
+          exclusions: [],
+        },
+      ],
+    },
+    explicitActions: [],
+    candidateFoodMatches: {},
+    prompt: "300g",
+  })
+
+  assert.ok(action)
+  assert.equal(action.type, "log_meal")
+  assert.equal(action.food_name, "300g steak")
+  assert.equal(action.calories, 750)
+  assert.equal(action.protein_g, 75)
+  assert.equal(action.carbs_g, 0)
+  assert.equal(action.fat_g, 51)
+})
+
 test("coach logging rules can build a loose estimated meal action for mixed log-all-that turns", () => {
   const action = buildDeterministicMealAction({
     mealSession: {
