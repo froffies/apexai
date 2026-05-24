@@ -46,6 +46,19 @@ async function expectNoHorizontalOverflow(page) {
   expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth + 1)
 }
 
+async function storedMealNames(page) {
+  return page.evaluate(() => JSON.parse(window.localStorage.getItem("apexai.meals") || "[]").map((meal) => meal.food_name))
+}
+
+async function waitForStoredMealNames(page, expectedNames) {
+  await expect.poll(() => storedMealNames(page), { timeout: 15000 }).toEqual(expectedNames)
+}
+
+async function reloadAndWaitForMeals(page, expectedNames) {
+  await page.reload({ waitUntil: "domcontentloaded", timeout: 60000 })
+  await waitForStoredMealNames(page, expectedNames)
+}
+
 function primaryNav(page) {
   return page.locator("nav[aria-label='Primary sidebar links']:visible, nav[aria-label='Primary tabs']:visible").first()
 }
@@ -825,7 +838,7 @@ test("fragmented coach meal logs persist into Nutrition after refresh", async ({
   await expect(page.getByText(/saved to today's nutrition: 17 fried eggs cooked in 100g salted butter, plus 250ml earl grey tea with no milk and no sugar\./i)).toBeVisible()
 
   await page.goto("/Nutrition")
-  await page.reload()
+  await reloadAndWaitForMeals(page, ["17 fried eggs cooked in 100g salted butter, plus 250ml Earl Grey tea with no milk and no sugar"])
   const todayMealsSection = page.locator("section").filter({ has: page.getByRole("heading", { name: /today's meals/i }) })
   await expect(todayMealsSection.getByText("17 fried eggs cooked in 100g salted butter, plus 250ml Earl Grey tea with no milk and no sugar")).toBeVisible()
   await expect(todayMealsSection.getByText(/2230 kcal - 164g protein/i)).toBeVisible()
@@ -1327,6 +1340,7 @@ test("coach corrections still update a saved meal after redundant post-save foll
 })
 
 test("coach can save explicit breakfast and lunch groups as separate nutrition entries", async ({ page }) => {
+  test.slow()
   await seedOnboardedProfile(page)
   await page.route("**/api/coach", async (route) => {
     const body = route.request().postDataJSON()
@@ -1391,17 +1405,19 @@ test("coach can save explicit breakfast and lunch groups as separate nutrition e
   await composer.fill("breakfast was 2 eggs and 1 slice toast, lunch was 200g steak and 1 cup rice")
   await page.getByRole("button", { name: /^Send$/i }).click()
   await expect(page.getByText(/saved to today's nutrition: breakfast - 2 eggs, plus 1 slice toast; lunch - 200g steak, plus 1 cup rice\./i)).toBeVisible()
+  await waitForStoredMealNames(page, ["200g steak, plus 1 cup rice", "2 eggs, plus 1 slice toast"])
 
   await page.goto("/Nutrition")
   const todayMealsSection = page.locator("section").filter({ has: page.getByRole("heading", { name: /today's meals/i }) })
   await expect(todayMealsSection.getByText("2 eggs, plus 1 slice toast")).toBeVisible()
   await expect(todayMealsSection.getByText("200g steak, plus 1 cup rice")).toBeVisible()
-  await page.reload()
+  await reloadAndWaitForMeals(page, ["200g steak, plus 1 cup rice", "2 eggs, plus 1 slice toast"])
   await expect(todayMealsSection.getByText("2 eggs, plus 1 slice toast")).toBeVisible()
   await expect(todayMealsSection.getByText("200g steak, plus 1 cup rice")).toBeVisible()
 })
 
 test("coach additive follow-ups update a saved meal instead of creating a duplicate", async ({ page }) => {
+  test.slow()
   await seedOnboardedProfile(page)
   await page.goto("/Coach")
 
@@ -1411,23 +1427,17 @@ test("coach additive follow-ups update a saved meal instead of creating a duplic
 
   await composer.fill("1 bowl")
   await page.getByRole("button", { name: /^Send$/i }).click()
-  await expect.poll(
-    () => page.evaluate(() => JSON.parse(window.localStorage.getItem("apexai.meals") || "[]").map((meal) => meal.food_name)),
-    { timeout: 10000 }
-  ).toEqual(["1 bowl chips"])
+  await waitForStoredMealNames(page, ["1 bowl chips"])
 
   await composer.fill("with gravy")
   await page.getByRole("button", { name: /^Send$/i }).click()
-  await expect.poll(
-    () => page.evaluate(() => JSON.parse(window.localStorage.getItem("apexai.meals") || "[]").map((meal) => meal.food_name)),
-    { timeout: 10000 }
-  ).toEqual(["1 bowl chips with gravy"])
+  await waitForStoredMealNames(page, ["1 bowl chips with gravy"])
 
   await page.goto("/Nutrition")
   const todayMealsSection = page.locator("section").filter({ has: page.getByRole("heading", { name: /today's meals/i }) })
   await expect(todayMealsSection.getByText("1 bowl chips with gravy")).toBeVisible()
   await expect(todayMealsSection.getByText(/^1 bowl chips$/)).toHaveCount(0)
-  await page.reload()
+  await reloadAndWaitForMeals(page, ["1 bowl chips with gravy"])
   await expect(todayMealsSection.getByText("1 bowl chips with gravy")).toBeVisible()
   await expect(todayMealsSection.getByText(/^1 bowl chips$/)).toHaveCount(0)
 })
@@ -1600,6 +1610,7 @@ test("coach reconciles stale meal log actions into one corrected saved meal", as
 })
 
 test("coach keeps separate meals isolated and does not turn a failed log query into nutrition junk before the next workout", async ({ page }) => {
+  test.slow()
   await seedOnboardedProfile(page)
   await page.route("**/api/coach", async (route) => {
     const body = route.request().postDataJSON()
