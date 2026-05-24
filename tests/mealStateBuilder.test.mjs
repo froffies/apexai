@@ -136,6 +136,35 @@ test("graph-native meal session preserves logging intent across a quantity clari
   assert.equal(session.summary, "300g steak")
 })
 
+test("graph-native meal session handles explicit drink modifiers on a fresh turn", () => {
+  const session = buildMealContext([], "i had earl grey tea 250ml no sugar no milk", emptyMealSession())
+
+  assert.ok(session)
+  assertGraphNativeSession(session)
+  assert.equal(session.readyToLog, true)
+  assert.equal(session.summary, "250ml Earl Grey tea with no milk and no sugar")
+})
+
+test("graph-native meal session keeps simple attachment turns out of legacy fallback", () => {
+  const session = buildMealContext([], "i had chips with gravy", emptyMealSession())
+
+  assert.ok(session)
+  assertGraphNativeSession(session)
+  assert.equal(session.readyToLog, false)
+  assert.equal(session.summary, "chips with gravy")
+  assert.equal(session.clarifyQuestion, "How much chips did you have?")
+})
+
+test("graph-native meal session keeps cooked-in turns out of legacy fallback", () => {
+  const session = buildMealContext([], "i had steak cooked in 20g butter", emptyMealSession())
+
+  assert.ok(session)
+  assertGraphNativeSession(session)
+  assert.equal(session.readyToLog, false)
+  assert.equal(session.summary, "steak cooked in 20g butter")
+  assert.equal(session.clarifyQuestion, "How much steak did you have?")
+})
+
 test("meal session preserves quantity clarification context and does not treat a food word as the missing number", () => {
   const { session, snapshots } = replayMealConversation([
     user("i had egg and cake"),

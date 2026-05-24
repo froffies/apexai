@@ -138,6 +138,21 @@ function isSimpleFoodDrinkStart(currentMessage = "") {
   return drinkClauses.length === 1 && countFoodClauses.length === 1
 }
 
+function isGraphNativeFriendlyFreshTurn(conversation = [], currentMessage = "", existingSession = null) {
+  const normalizedCurrent = cleanText(currentMessage)
+  if (existingSession?.active || existingSession?.persisted) return false
+  if (safeArray(conversation, 4).length > 1) return false
+  if (!MEAL_START_PATTERN.test(normalizedCurrent)) return false
+  if (detectQuestionOnlyTurn(normalizedCurrent)) return false
+  if (TIME_REFERENCE_PATTERN.test(normalizedCurrent)) return false
+  if (CORRECTION_PREFIX.test(normalizedCurrent) || INLINE_CORRECTION_PATTERN.test(normalizedCurrent)) return false
+  if (PACKAGED_UNIT_PATTERN.test(normalizedCurrent)) return false
+  if (isWorkoutish(normalizedCurrent)) return false
+  if (COMPLEX_PATTERN.test(normalizedCurrent)) return false
+  if (splitGraphClauses(currentMessage).length !== 1) return false
+  return /\b(?:with|without|cooked in|fried in|no sugar|no milk)\b/i.test(normalizedCurrent)
+}
+
 function shouldUseLegacy(conversation, currentMessage, existingSession) {
   const normalizedCurrent = cleanText(currentMessage)
   const joined = cleanText([...conversation.map((entry) => entry.content || ""), currentMessage].join(" "))
@@ -148,6 +163,7 @@ function shouldUseLegacy(conversation, currentMessage, existingSession) {
   const activeSession = Boolean(existingSession?.active)
   const activeGraphSession = Boolean(existingSession?.active && existingSession?.graphNative)
   const simpleFoodDrinkStart = isSimpleFoodDrinkStart(currentMessage)
+  const graphNativeFriendlyFreshTurn = isGraphNativeFriendlyFreshTurn(conversation, currentMessage, existingSession)
   return Boolean(
     (activeSession && !activeGraphSession)
     ||
@@ -167,16 +183,29 @@ function shouldUseLegacy(conversation, currentMessage, existingSession) {
     || PACKAGED_UNIT_PATTERN.test(cleanText(currentMessage))
     || quantitySignals > 1
     || measuredAmountSignals > 1
-    || (!activeGraphSession && mentionsDrink(currentMessage) && !simpleFoodDrinkStart)
-    || (!activeGraphSession && /\b(?:with|without|cooked in|fried in|no sugar|no milk)\b/i.test(cleanText(currentMessage)))
+    || (!activeGraphSession && mentionsDrink(currentMessage) && !simpleFoodDrinkStart && !graphNativeFriendlyFreshTurn)
+    || (!activeGraphSession && /\b(?:with|without|cooked in|fried in|no sugar|no milk)\b/i.test(cleanText(currentMessage)) && !graphNativeFriendlyFreshTurn)
     || CORRECTION_PREFIX.test(cleanText(currentMessage))
     || COMPLEX_PATTERN.test(joined)
     || (!activeGraphSession && assistantMealTurns > 1)
-    || (!activeGraphSession && currentClauses.length > 1 && !simpleFoodDrinkStart)
+    || (!activeGraphSession && currentClauses.length > 1 && !simpleFoodDrinkStart && !graphNativeFriendlyFreshTurn)
     || (!activeGraphSession && currentClauses.length > 3)
     || (activeGraphSession && /\bthat were\b|\bwere just\b/.test(normalizedCurrent))
     || (activeGraphSession && /^\s*the\s+\w+.*\bhad\b/i.test(normalizedCurrent))
   )
+}
+
+function extractEmbeddedQuantity(text = "") {
+  const normalized = cleanText(text)
+  if (!normalized) return null
+  const quantityMatch = normalized.match(/\b(?<amount>\d+(?:\.\d+)?|a couple|couple|half|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty)\s*(?:(?<article>a)\s+)?(?<unit>kg|g|lb|lbs|pound|pounds|ml|l|litre|litres|liter|liters|cup|cups|bowl|bowls|plate|plates|mug|mugs|serve|serves|serving|servings|slice|slices|tbsp|tablespoon|tablespoons|tsp|teaspoon|teaspoons|egg|eggs)\b/i)
+  if (!quantityMatch?.groups?.amount) return null
+  const rawAmount = quantityMatch.groups.amount
+  const amount = QUANTITY_WORDS.get(rawAmount) ?? Number(rawAmount)
+  if (!Number.isFinite(amount)) return null
+  const unit = normalizeUnit(quantityMatch.groups.unit || "")
+  const textValue = unit ? quantityMatch[0].trim().replace(/\s+/g, " ") : `${rawAmount}`
+  return { amount, unit, text: textValue.trim(), modifier: "" }
 }
 
 function extractQuantity(text = "") {
@@ -393,10 +422,12 @@ function parseItemFragment(text = "", state) {
   }
   const sourceBaseName = baseNameFromText(relationTail.lead)
   const baseName = canonicalBaseName(sourceBaseName)
-  const foodUnitFallback = !baseName && quantity?.unit === "egg" ? quantity.unit : null
+  const embeddedQuantity = !quantity && !relationTail.relation ? extractEmbeddedQuantity(relationTail.lead) : null
+  const resolvedQuantity = quantity || embeddedQuantity
+  const foodUnitFallback = !baseName && resolvedQuantity?.unit === "egg" ? resolvedQuantity.unit : null
   const resolvedBaseName = baseName || canonicalBaseName(foodUnitFallback || "")
-  if (!resolvedBaseName && quantity && state.pendingClarification?.type === "quantity") {
-    return { kind: "bind_quantity", quantity, preparations, exclusions }
+  if (!resolvedBaseName && resolvedQuantity && state.pendingClarification?.type === "quantity") {
+    return { kind: "bind_quantity", quantity: resolvedQuantity, preparations, exclusions }
   }
   if (!resolvedBaseName && exclusions.length) {
     const target = findDrinkTarget(state)
@@ -412,13 +443,13 @@ function parseItemFragment(text = "", state) {
     return { kind: "bind_variant", variantText: raw }
   }
   if (!resolvedBaseName) return { kind: "ignore" }
-  const item = {
-    base_name: resolvedBaseName,
-    label: itemLabel(sourceBaseName || resolvedBaseName),
-    category: detectCategory(resolvedBaseName, quantity),
-    quantity: quantity ? { ...quantity, text: String(quantity.text || "").replace(/\b(a couple)\b/i, "2") } : null,
-    preparation: preparations,
-    modifiers: [],
+    const item = {
+      base_name: resolvedBaseName,
+      label: itemLabel(sourceBaseName || resolvedBaseName),
+      category: detectCategory(resolvedBaseName, resolvedQuantity),
+      quantity: resolvedQuantity ? { ...resolvedQuantity, text: String(resolvedQuantity.text || "").replace(/\b(a couple)\b/i, "2") } : null,
+      preparation: preparations,
+      modifiers: [],
     exclusions,
     attached_to: null,
     relation: null,
