@@ -207,6 +207,70 @@ test("normalizeCoachResponse does not auto-inject clarify actions on the AI-firs
   assert.equal(payload.reply, "How many eggs did you have?")
 })
 
+test("normalizeCoachResponse replaces invented mixed-thread meal specifics with the pending clarification question", () => {
+  const payload = normalizeCoachResponse({
+    reply: "You had milk and 2 large eggs. Great job on doing a pushup! How many reps did you do?",
+    actions: [],
+    warnings: [],
+  }, {
+    preferAIFirst: true,
+    mealContext: {
+      readyToLog: false,
+      alreadyLogged: false,
+      pendingClarification: {
+        type: "quantity",
+        targetReference: "egg",
+        targetBaseName: "egg",
+        targetLabel: "Eggs",
+      },
+    },
+    workoutContext: {
+      readyToLog: false,
+      alreadyLogged: false,
+      clarifyQuestion: "How many reps did you do for Pushup?",
+      exercise_name: "Pushup",
+      workout_type: "Pushup",
+    },
+    responseHints: {
+      clarify_hints: {
+        meal: "How many eggs did you have?",
+        workout: "How many reps did you do for Pushup?",
+      },
+    },
+  })
+
+  assert.equal(payload.actions.length, 0)
+  assert.equal(payload.reply, "How many eggs did you have?")
+})
+
+test("normalizeCoachResponse keeps a good AI clarify reply when it already asks for the missing meal quantity", () => {
+  const payload = normalizeCoachResponse({
+    reply: "Got it. How much light milk did you have?",
+    actions: [],
+    warnings: [],
+  }, {
+    preferAIFirst: true,
+    mealContext: {
+      readyToLog: false,
+      alreadyLogged: false,
+      pendingClarification: {
+        type: "quantity",
+        targetReference: "milk::light::light",
+        targetBaseName: "milk",
+        targetLabel: "Light Milk",
+      },
+    },
+    responseHints: {
+      clarify_hints: {
+        meal: "How much light milk did you have?",
+      },
+    },
+  })
+
+  assert.equal(payload.actions.length, 0)
+  assert.equal(payload.reply, "Got it. How much light milk did you have?")
+})
+
 test("normalizeCoachResponse preserves AI replies for already-logged contexts while stripping duplicate persistence", () => {
   const mealPayload = normalizeCoachResponse({
     reply: "That meal is already in today's log. Tell me what to update if you want it changed.",

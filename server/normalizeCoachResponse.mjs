@@ -17,6 +17,49 @@ import {
   summarizeCoachActions,
 } from "./coachLoggingRules.mjs"
 
+function cleanReplyText(value = "") {
+  return String(value || "").toLowerCase().replace(/[’']/g, "'").replace(/\s+/g, " ").trim()
+}
+
+function escapeRegex(value = "") {
+  return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+}
+
+function tokenVariants(value = "") {
+  const normalized = cleanReplyText(value)
+  if (!normalized) return []
+  return [...new Set([
+    normalized,
+    normalized.endsWith("s") ? normalized.slice(0, -1) : `${normalized}s`,
+  ].filter(Boolean))]
+}
+
+function replyAddressesMealQuantityClarification(reply = "", mealContext = null) {
+  if (String(mealContext?.pendingClarification?.type || "") !== "quantity") return false
+  const normalizedReply = cleanReplyText(reply)
+  if (!/\bhow\s+(?:much|many)\b/.test(normalizedReply)) return false
+  const targetTokens = [
+    ...tokenVariants(mealContext?.pendingClarification?.targetLabel || ""),
+    ...tokenVariants(mealContext?.pendingClarification?.targetBaseName || ""),
+    ...tokenVariants(mealContext?.pendingClarification?.targetReference || ""),
+  ]
+  return targetTokens.some((token) => (
+    token
+    && new RegExp(`\\bhow\\s+(?:much|many)\\b[^?.!]{0,60}\\b${escapeRegex(token)}\\b`, "i").test(normalizedReply)
+  ))
+}
+
+function replyAddressesWorkoutClarification(reply = "", workoutContext = null) {
+  if (!String(workoutContext?.clarifyQuestion || "").trim()) return false
+  const normalizedReply = cleanReplyText(reply)
+  if (!/\b(?:how\s+many|what|which)\b/.test(normalizedReply)) return false
+  const targetTokens = [
+    ...tokenVariants(workoutContext?.exercise_name || ""),
+    ...tokenVariants(workoutContext?.workout_type || ""),
+  ]
+  return targetTokens.some((token) => token && normalizedReply.includes(token))
+}
+
 function actionDedupeKey(action = {}) {
   const type = String(action?.type || "").trim()
   if (!type) return ""
@@ -276,6 +319,31 @@ export function normalizeCoachResponse(value, context = {}) {
     summarizeCoachActions(actions) ||
     summarizeCoachAction(actions[0]) ||
     "Tell me what happened or what you want to change, and I'll help you sort the next move."
+
+  const hasMealPersistenceAction = actions.some(isMealPersistenceAction)
+  const hasWorkoutPersistenceAction = actions.some(isWorkoutPersistenceAction)
+  const shouldGuardPendingMealQuantityReply = Boolean(
+    preferAIFirst
+    && hintMealClarify
+    && String(context.mealContext?.pendingClarification?.type || "") === "quantity"
+    && !hasMealPersistenceAction
+    && !hasValidatedMealPersistence
+  )
+  if (
+    shouldGuardPendingMealQuantityReply
+    && !replyAddressesMealQuantityClarification(reply, context.mealContext)
+  ) {
+    const clarifyParts = [hintMealClarify]
+    if (
+      hintWorkoutClarify
+      && !hasWorkoutPersistenceAction
+      && !hasValidatedWorkoutPersistence
+      && !replyAddressesWorkoutClarification(reply, context.workoutContext)
+    ) {
+      clarifyParts.push(hintWorkoutClarify)
+    }
+    reply = clarifyParts.join(" ").trim() || reply
+  }
 
   if (replyClaimsPersistence(reply) && !hasPersistenceAction && !alreadyLoggedReply) {
     reply = context.nutritionStatusReply || "I have the details, but I couldn't save it just now."
