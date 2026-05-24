@@ -60,6 +60,34 @@ function replyAddressesWorkoutClarification(reply = "", workoutContext = null) {
   return targetTokens.some((token) => token && normalizedReply.includes(token))
 }
 
+function replyAcknowledgesWorkoutCompletion(reply = "", workoutContext = null) {
+  if (!workoutContext?.readyToLog) return false
+  if (replyAddressesWorkoutClarification(reply, workoutContext)) return false
+  const normalizedReply = cleanReplyText(reply)
+  if (!normalizedReply) return false
+
+  const targetTokens = [
+    ...tokenVariants(workoutContext?.exercise_name || ""),
+    ...tokenVariants(workoutContext?.workout_type || ""),
+  ]
+  const mentionsWorkout = targetTokens.some((token) => token && new RegExp(`\\b${escapeRegex(token)}\\b`, "i").test(normalizedReply))
+  if (!mentionsWorkout) return false
+
+  const repText = Number.isFinite(Number(workoutContext?.reps)) && Number(workoutContext.reps) > 0
+    ? String(Number(workoutContext.reps))
+    : ""
+  const setText = Number.isFinite(Number(workoutContext?.sets)) && Number(workoutContext.sets) > 0
+    ? String(Number(workoutContext.sets))
+    : ""
+  const mentionsMetrics = Boolean(
+    (repText && new RegExp(`\\b${escapeRegex(repText)}\\b`, "i").test(normalizedReply))
+    || (setText && new RegExp(`\\b${escapeRegex(setText)}\\s+set`, "i").test(normalizedReply))
+    || /\b(?:great work|nice work|well done|done|you did)\b/i.test(normalizedReply)
+  )
+
+  return mentionsMetrics
+}
+
 function actionDedupeKey(action = {}) {
   const type = String(action?.type || "").trim()
   if (!type) return ""
@@ -290,6 +318,27 @@ export function normalizeCoachResponse(value, context = {}) {
     && !actions.some(isPersistenceAction)
     && singleCandidatePersistenceAction
   ) {
+    actions = [
+      ...actions,
+      singleCandidatePersistenceAction,
+    ]
+      .map(normalizeMealAction)
+      .filter(shouldAllowAction)
+      .slice(0, 8)
+  }
+  const shouldRecoverSingleWorkoutActionDuringMealClarification = Boolean(
+    preferAIFirst
+    && originalReply
+    && !actions.some(isPersistenceAction)
+    && !hasValidatedWorkoutPersistence
+    && singleCandidatePersistenceAction
+    && isWorkoutPersistenceAction(singleCandidatePersistenceAction)
+    && context.workoutContext?.readyToLog
+    && String(context.mealContext?.pendingClarification?.type || "") === "quantity"
+    && replyAddressesMealQuantityClarification(originalReply, context.mealContext)
+    && replyAcknowledgesWorkoutCompletion(originalReply, context.workoutContext)
+  )
+  if (shouldRecoverSingleWorkoutActionDuringMealClarification) {
     actions = [
       ...actions,
       singleCandidatePersistenceAction,
