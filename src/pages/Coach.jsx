@@ -40,6 +40,16 @@ import {
   storageKeys,
   workoutsForDate,
 } from "@/lib/fitnessDefaults"
+import {
+  buildPersistedMealSession,
+  buildPersistedWorkoutSession,
+  createEmptyMealSession,
+  createEmptyWorkoutSession,
+  hasMeaningfulMealSession,
+  hasMeaningfulWorkoutSession,
+  resolveCoachSessionStates,
+  sanitizeMealSummaryText,
+} from "@/lib/coachSessionMerge.js"
 import { recommendProgressionBlock } from "@/lib/progressionEngine"
 import { advanceActiveWorkout, getCurrentActiveExercise, logSetToActiveWorkout, summarizeActiveWorkout, summarizeRecovery } from "@/lib/workoutIntelligence"
 import { todayISO, uid, useLocalStorage } from "@/lib/useLocalStorage"
@@ -50,73 +60,6 @@ function createStarterMessage() {
     role: "assistant",
     content: "Tell me what happened today, what you ate, what you trained, or what you want to change, and I'll help you sort the next move.",
     timestamp: new Date().toISOString(),
-  }
-}
-
-function createEmptyMealSession() {
-  return {
-    active: false,
-    items: [],
-    meal_groups: [],
-    clarificationAttempts: 0,
-    clarificationCounts: {},
-    readyToLog: false,
-    shouldStopClarifying: false,
-    summary: "",
-    clarifyQuestion: "",
-    wantsLogging: false,
-    wantsNutrition: false,
-    answerOnly: false,
-    suppressed: false,
-    suppressionReply: "",
-    referenceMeal: null,
-    pendingClarification: null,
-    pendingQuantities: [],
-    structuralIssues: [],
-    mealConversation: false,
-    lastMainKey: "",
-    lastDrinkKey: "",
-    currentMealType: "",
-    persisted: false,
-    persistedMealId: "",
-    persistedSummary: "",
-    persistedAt: "",
-    alreadyLogged: false,
-    correctionRequested: false,
-    deleteRequested: false,
-    thread_messages: [],
-  }
-}
-
-function createEmptyWorkoutSession() {
-  return {
-    active: false,
-    workoutConversation: false,
-    exercise_name: "",
-    workout_type: "",
-    muscle_group: "full_body",
-    sets: 0,
-    reps: 0,
-    weight_kg: 0,
-    duration_seconds: 0,
-    distance_km: 0,
-    clarificationAttempts: 0,
-    clarificationCounts: {},
-    readyToLog: false,
-    shouldStopClarifying: false,
-    clarifyQuestion: "",
-    summary: "",
-    wantsLogging: false,
-    persisted: false,
-    persistedWorkoutId: "",
-    persistedSummary: "",
-    persistedAt: "",
-    alreadyLogged: false,
-    correctionRequested: false,
-    deleteRequested: false,
-    suppressed: false,
-    suppressionReply: "",
-    thread_messages: [],
   }
 }
 
@@ -378,121 +321,6 @@ function resolveMealNutritionSource(action, fallback = "") {
   if (explicit) return explicit
   if (fallback) return fallback
   return "Coach estimate from user-described ingredients and amounts"
-}
-
-function sanitizeMealSummaryText(value) {
-  let next = String(value || "")
-    .replace(/\s+/g, " ")
-    .trim()
-  if (!next) return ""
-
-  const repeatedPhrasePattern = /\b(?<phrase>(?:\d+(?:\.\d+)?\s*[a-z]+\s+)?(?:[a-z]+(?:\s+[a-z]+){0,4}))\s+(?:and|,)\s+\k<phrase>\b/gi
-  let previous = ""
-  while (next !== previous) {
-    previous = next
-    next = next.replace(repeatedPhrasePattern, "$<phrase>")
-      .replace(/\s+,/g, ",")
-      .replace(/,\s*,/g, ", ")
-      .replace(/\s+/g, " ")
-      .trim()
-  }
-  return next
-}
-
-function buildPersistedMealSession(session, action, mealId) {
-  const base = session && typeof session === "object" ? session : createEmptyMealSession()
-  return {
-    ...createEmptyMealSession(),
-    ...base,
-    active: false,
-    readyToLog: false,
-    shouldStopClarifying: false,
-    clarifyQuestion: "",
-    answerOnly: false,
-    suppressed: false,
-    suppressionReply: "",
-    referenceMeal: null,
-    persisted: true,
-    persistedMealId: mealId,
-    persistedSummary: sanitizeMealSummaryText(action?.food_name || base?.summary || ""),
-    persistedAt: new Date().toISOString(),
-    alreadyLogged: false,
-    correctionRequested: false,
-    deleteRequested: false,
-  }
-}
-
-function buildPersistedWorkoutSession(session, action, workoutId) {
-  const base = session && typeof session === "object" ? session : createEmptyWorkoutSession()
-  const persistedExercise = String(action?.exercise_name || action?.workout_type || base?.exercise_name || base?.workout_type || "").trim()
-  const persistedWorkoutType = String(action?.workout_type || action?.exercise_name || base?.workout_type || base?.exercise_name || "").trim()
-  const persistedSummary = String(
-    action?.workout_type
-    || action?.exercise_name
-    || base?.summary
-    || ""
-  ).trim()
-  return {
-    ...createEmptyWorkoutSession(),
-    ...base,
-    active: false,
-    readyToLog: false,
-    shouldStopClarifying: false,
-    clarifyQuestion: "",
-    suppressed: false,
-    suppressionReply: "",
-    persisted: true,
-    exercise_name: persistedExercise,
-    workout_type: persistedWorkoutType,
-    persistedWorkoutId: workoutId,
-    persistedSummary: persistedSummary,
-    persistedAt: new Date().toISOString(),
-    alreadyLogged: false,
-    correctionRequested: false,
-    deleteRequested: false,
-  }
-}
-
-function hasMeaningfulMealSession(session) {
-  if (!session || typeof session !== "object") return false
-  return Boolean(
-    session.active
-    || session.readyToLog
-    || session.mealConversation
-    || session.alreadyLogged
-    || session.correctionRequested
-    || session.deleteRequested
-    || session.persisted
-    || session.persistedMealId
-    || session.persistedSummary
-    || session.summary
-    || (Array.isArray(session.items) && session.items.length)
-    || session.clarifyQuestion
-  )
-}
-
-function hasMeaningfulWorkoutSession(session) {
-  if (!session || typeof session !== "object") return false
-  return Boolean(
-    session.active
-    || session.readyToLog
-    || session.workoutConversation
-    || session.alreadyLogged
-    || session.correctionRequested
-    || session.deleteRequested
-    || session.persisted
-    || session.persistedWorkoutId
-    || session.persistedSummary
-    || session.summary
-    || session.clarifyQuestion
-    || session.exercise_name
-    || session.workout_type
-    || Number(session.sets) > 0
-    || Number(session.reps) > 0
-    || Number(session.weight_kg) > 0
-    || Number(session.duration_seconds) > 0
-    || Number(session.distance_km) > 0
-  )
 }
 
 function normalizeCoachComparableText(value) {
@@ -1524,51 +1352,47 @@ export default function Coach() {
     const suffix = warnings.length ? `\n\n${warnings.join(" ")}` : ""
     const mealSaveSucceeded = loggedMealIds.length > 0 || updatedMealIds.length > 0 || deletedMealIds.length > 0
     const workoutSaveSucceeded = loggedWorkoutIds.length > 0 || updatedWorkoutIds.length > 0 || deletedWorkoutIds.length > 0
-    if (deletedMealIds.length > 0) {
-      setMealSession(createEmptyMealSession())
-      finalMealSessionState = cloneAuditState(createEmptyMealSession())
-    } else if (mealSaveSucceeded) {
-      const totalMealChanges = loggedMeals.length + updatedMeals.length
-      if (totalMealChanges > 1) {
-        setMealSession(createEmptyMealSession())
-        finalMealSessionState = cloneAuditState(createEmptyMealSession())
-      } else {
-        const persistedSource = nextMealSession || mealSession
-        const persistedMeal = latestLoggedMeal || latestUpdatedMeal
-        const persistedMealId = loggedMealIds[0] || updatedMealIds[0] || ""
-        const persistedMealSession = buildPersistedMealSession(
-          persistedSource,
-          { food_name: persistedMeal?.food_name || nextMealSession?.summary || "", ...(persistedMeal || {}) },
-          persistedMealId
+    const totalMealChanges = loggedMeals.length + updatedMeals.length
+    const persistedMealSession = mealSaveSucceeded && !deletedMealIds.length
+      ? (
+          totalMealChanges > 1
+            ? createEmptyMealSession()
+            : buildPersistedMealSession(
+              nextMealSession || mealSession,
+              {
+                food_name: (latestLoggedMeal || latestUpdatedMeal)?.food_name || nextMealSession?.summary || "",
+                ...((latestLoggedMeal || latestUpdatedMeal) || {}),
+              },
+              loggedMealIds[0] || updatedMealIds[0] || "",
+            )
         )
-        setMealSession(persistedMealSession)
-        finalMealSessionState = cloneAuditState(persistedMealSession)
-      }
-    } else if (nextMealSession && (nextMealSession.active || nextMealSession.mealConversation || nextMealSession.summary)) {
-      setMealSession(nextMealSession)
-      finalMealSessionState = cloneAuditState(nextMealSession)
-    }
-    if (deletedWorkoutIds.length > 0) {
-      setWorkoutSession(createEmptyWorkoutSession())
-      finalWorkoutSessionState = cloneAuditState(createEmptyWorkoutSession())
-    } else if (workoutSaveSucceeded) {
-      const persistedSource = nextWorkoutSession || workoutSession
-      const persistedWorkout = latestLoggedWorkout || latestUpdatedWorkout
-      const persistedWorkoutId = loggedWorkoutIds[0] || updatedWorkoutIds[0] || ""
-      const persistedWorkoutSession = buildPersistedWorkoutSession(
-        persistedSource,
+      : null
+    const persistedWorkoutSession = workoutSaveSucceeded && !deletedWorkoutIds.length
+      ? buildPersistedWorkoutSession(
+        nextWorkoutSession || workoutSession,
         {
-          workout_type: persistedWorkout?.workout_type || nextWorkoutSession?.summary || "",
+          workout_type: (latestLoggedWorkout || latestUpdatedWorkout)?.workout_type || nextWorkoutSession?.summary || "",
           exercise_name: latestLoggedWorkoutAction?.exercise_name || latestUpdatedWorkoutAction?.exercise_name || "",
         },
-        persistedWorkoutId
+        loggedWorkoutIds[0] || updatedWorkoutIds[0] || "",
       )
-      setWorkoutSession(persistedWorkoutSession)
-      finalWorkoutSessionState = cloneAuditState(persistedWorkoutSession)
-    } else if (nextWorkoutSession && (nextWorkoutSession.active || nextWorkoutSession.workoutConversation || nextWorkoutSession.summary)) {
-      setWorkoutSession(nextWorkoutSession)
-      finalWorkoutSessionState = cloneAuditState(nextWorkoutSession)
-    }
+      : null
+    const resolvedSessions = resolveCoachSessionStates({
+      currentMealSession: mealSession,
+      currentWorkoutSession: workoutSession,
+      nextMealSession,
+      nextWorkoutSession,
+      mealDeleted: deletedMealIds.length > 0,
+      workoutDeleted: deletedWorkoutIds.length > 0,
+      mealSaveSucceeded,
+      workoutSaveSucceeded,
+      persistedMealSession,
+      persistedWorkoutSession,
+    })
+    setMealSession(resolvedSessions.mealSession)
+    setWorkoutSession(resolvedSessions.workoutSession)
+    finalMealSessionState = cloneAuditState(resolvedSessions.mealSession)
+    finalWorkoutSessionState = cloneAuditState(resolvedSessions.workoutSession)
 
     let replyText = coachResponse.reply
     if (duplicateMealSummary && !mealSaveSucceeded) {
