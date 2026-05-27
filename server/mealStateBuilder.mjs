@@ -149,6 +149,30 @@ function isSimpleFoodDrinkStart(currentMessage = "") {
   return drinkClauses.length === 1 && countFoodClauses.length === 1
 }
 
+function isGraphNativeFriendlyDrinkStart(currentMessage = "") {
+  const normalizedCurrent = cleanText(currentMessage)
+  if (!MEAL_START_PATTERN.test(normalizedCurrent)) return false
+  if (detectQuestionOnlyTurn(normalizedCurrent)) return false
+  if (TIME_REFERENCE_PATTERN.test(normalizedCurrent)) return false
+  if (new RegExp(`\\b(?:\\d+(?:\\.\\d+)?|${[...QUANTITY_WORDS.keys()].join("|")})\\b`, "i").test(normalizedCurrent)) return false
+  if (INLINE_CORRECTION_PATTERN.test(normalizedCurrent) || PACKAGED_UNIT_PATTERN.test(normalizedCurrent)) return false
+  if (isWorkoutish(normalizedCurrent)) return false
+  if (COMPLEX_PATTERN.test(normalizedCurrent)) return false
+  if (splitGraphClauses(currentMessage).length !== 1) return false
+  if (!mentionsDrink(currentMessage)) return false
+  if (/\b(?:with|without|cooked in|fried in|no sugar|no milk)\b/i.test(normalizedCurrent)) return false
+  return true
+}
+
+function isGraphNativeCorrectionFollowUp(currentMessage = "", existingSession = null) {
+  const normalizedCurrent = cleanText(currentMessage)
+  if (!existingSession?.active || !existingSession?.graphNative) return false
+  if (!CORRECTION_PREFIX.test(normalizedCurrent) && !INLINE_CORRECTION_PATTERN.test(normalizedCurrent)) return false
+  if (detectQuestionOnlyTurn(normalizedCurrent) || isWorkoutish(normalizedCurrent)) return false
+  if (!hasDigits(normalizedCurrent)) return false
+  return splitGraphClauses(currentMessage).length === 1
+}
+
 function isGraphNativeFriendlyFreshTurn(conversation = [], currentMessage = "", existingSession = null) {
   const normalizedCurrent = cleanText(currentMessage)
   if (existingSession?.active || existingSession?.persisted) return false
@@ -177,7 +201,9 @@ function shouldUseLegacy(conversation, currentMessage, existingSession) {
   const activeSession = Boolean(existingSession?.active)
   const activeGraphSession = Boolean(existingSession?.active && existingSession?.graphNative)
   const simpleFoodDrinkStart = isSimpleFoodDrinkStart(currentMessage)
+  const graphNativeFriendlyDrinkStart = isGraphNativeFriendlyDrinkStart(currentMessage)
   const graphNativeFriendlyFreshTurn = isGraphNativeFriendlyFreshTurn(conversation, currentMessage, existingSession)
+  const graphNativeCorrectionFollowUp = isGraphNativeCorrectionFollowUp(currentMessage, existingSession)
   return Boolean(
     (activeSession && !activeGraphSession)
     ||
@@ -197,9 +223,9 @@ function shouldUseLegacy(conversation, currentMessage, existingSession) {
     || PACKAGED_UNIT_PATTERN.test(cleanText(currentMessage))
     || quantitySignals > 1
     || measuredAmountSignals > 1
-    || (!activeGraphSession && mentionsDrink(currentMessage) && !simpleFoodDrinkStart && !graphNativeFriendlyFreshTurn)
+    || (!activeGraphSession && mentionsDrink(currentMessage) && !simpleFoodDrinkStart && !graphNativeFriendlyDrinkStart && !graphNativeFriendlyFreshTurn)
     || (!activeGraphSession && /\b(?:with|without|cooked in|fried in|no sugar|no milk)\b/i.test(cleanText(currentMessage)) && !graphNativeFriendlyFreshTurn)
-    || CORRECTION_PREFIX.test(cleanText(currentMessage))
+    || (!graphNativeCorrectionFollowUp && CORRECTION_PREFIX.test(cleanText(currentMessage)))
     || COMPLEX_PATTERN.test(joined)
     || (!activeGraphSession && assistantMealTurns > 1)
     || (!activeGraphSession && currentClauses.length > 1 && !simpleFoodDrinkStart && !graphNativeFriendlyFreshTurn)
@@ -479,6 +505,18 @@ function parseItemFragment(text = "", state) {
   const resolvedQuantity = quantity || embeddedQuantity
   const foodUnitFallback = !baseName && resolvedQuantity?.unit === "egg" ? resolvedQuantity.unit : null
   const resolvedBaseName = baseName || canonicalBaseName(foodUnitFallback || "")
+  if (!resolvedBaseName && resolvedQuantity && CORRECTION_PREFIX.test(cleanText(text))) {
+    const correctionTarget = findRootByReference(state, state.lastMainReference) || unresolvedRoots(state).slice(-1)[0] || null
+    if (correctionTarget) {
+      return {
+        kind: "bind_quantity",
+        targetReference: itemReference(correctionTarget),
+        quantity: resolvedQuantity,
+        preparations,
+        exclusions,
+      }
+    }
+  }
   if (!resolvedBaseName && resolvedQuantity && state.pendingClarification?.type === "quantity") {
     return { kind: "bind_quantity", quantity: resolvedQuantity, preparations, exclusions }
   }
@@ -868,7 +906,11 @@ function processGraphTurn(state, turn) {
       continue
     }
     if (parsed.kind === "bind_quantity") {
-      const target = state.pendingClarification?.targetReference ? findRootByReference(state, state.pendingClarification.targetReference) : unresolvedRoots(state)[0]
+      const target = parsed.targetReference
+        ? findRootByReference(state, parsed.targetReference)
+        : state.pendingClarification?.targetReference
+          ? findRootByReference(state, state.pendingClarification.targetReference)
+          : unresolvedRoots(state)[0]
       if (target) {
         target.quantity = { ...parsed.quantity }
         if (parsed.preparations.length) target.preparation = [...new Set([...target.preparation, ...parsed.preparations])]

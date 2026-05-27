@@ -235,6 +235,39 @@ test("graph-native meal session handles explicit drink modifiers on a fresh turn
   assert.equal(session.summary, "250ml Earl Grey tea with no milk and no sugar")
 })
 
+test("graph-native meal session keeps a simple tea clarification thread out of legacy fallback", () => {
+  const { snapshots, session } = replayMealConversation([
+    user("i had tea"),
+    assistant("How much tea did you have?"),
+    user("earl grey"),
+    assistant("How much earl grey tea did you have?"),
+    user("250ml no sugar no milk"),
+  ])
+
+  for (const snapshot of snapshots) assertGraphNativeSession(snapshot.session)
+  assert.equal(snapshots[0].session.clarifyQuestion, "How much tea did you have?")
+  assert.equal(snapshots[1].session.clarifyQuestion, "How much earl grey tea did you have?")
+  assert.equal(session.readyToLog, true)
+  assert.equal(session.summary, "250ml Earl Grey tea with no milk and no sugar")
+})
+
+test("graph-native meal session keeps a simple quantity correction out of legacy fallback", () => {
+  const { snapshots, session } = replayMealConversation([
+    user("i had chicken"),
+    assistant("How much chicken did you have?"),
+    user("200g"),
+    assistant("Logged."),
+    user("actually 250g"),
+  ])
+
+  assertGraphNativeSession(snapshots[0].session)
+  assertGraphNativeSession(snapshots[1].session)
+  assertGraphNativeSession(snapshots[2].session)
+  assert.equal(snapshots[1].session.summary, "200g chicken")
+  assert.equal(session.summary, "250g chicken")
+  assert.equal(session.readyToLog, true)
+})
+
 test("graph-native meal session keeps simple attachment turns out of legacy fallback", () => {
   const session = buildMealContext([], "i had chips with gravy", emptyMealSession())
 
