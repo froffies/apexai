@@ -386,6 +386,7 @@ const CORRECTION_LEAD_PATTERNS = [
   /^(?:i meant|i mean|it was|it is)\s+/i,
   /^(?:make that|change that(?: to)?|update that(?: to)?|instead)\s+/i,
 ]
+const INLINE_CORRECTION_SPLIT_PATTERN = /\b(?:no\s+wait|i\s+meant|make that|change that(?: to)?|update that(?: to)?|instead|sorry)\b/i
 
 function stripCorrectionLead(text) {
   let normalized = normalizeLabel(text)
@@ -401,6 +402,23 @@ function stripCorrectionLead(text) {
     }
   }
   return normalized
+}
+
+function normalizeInlineCorrectionSplit(text = "") {
+  const source = normalizeLabel(text)
+  if (!source) return ""
+  const match = INLINE_CORRECTION_SPLIT_PATTERN.exec(source)
+  if (!match || match.index === 0) return source
+
+  const before = source.slice(0, match.index).trim().replace(/[,\s]+$/g, "")
+  const after = source
+    .slice(match.index + match[0].length)
+    .trim()
+    .replace(/^(?:to\s+|like\s+)+/i, "")
+    .replace(/^[,\s]+/g, "")
+
+  if (!before || !after) return source
+  return `${before}, ${after}`
 }
 
 const RELATION_PATTERNS = [
@@ -1033,7 +1051,7 @@ function upsertItem(state, nextItem, { preferLast = true } = {}) {
 }
 
 function splitClauses(message) {
-  const baseSegments = normalizeLabel(message)
+  const baseSegments = normalizeInlineCorrectionSplit(message)
     .replace(/\b(?:also had|also ate|also drank)\b/g, ",")
     .replace(/\bplus\b/g, ",")
     .split(/,(?![^()]*\))/)

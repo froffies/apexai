@@ -309,6 +309,28 @@ test("meal session keeps decimal quantities when the pending clarification expec
   assert.match(session.summary.toLowerCase(), /0\.5 .*pizza/)
 })
 
+test("inline correction keeps only the final quantity in a legacy single-turn meal", () => {
+  const session = buildMealContext([], "i had 200g chicken no wait half a pound", emptyMealSession())
+
+  assert.ok(session)
+  assert.equal(session.readyToLog, true)
+  assert.equal(session.summary, "0.5 lb chicken")
+  assert.equal(session.items.some((item) => item.base_name === "chicken no"), false)
+  assert.equal(session.items[0]?.quantity?.amount, 0.5)
+  assert.equal(session.items[0]?.quantity?.unit, "lb")
+})
+
+test("inline correction keeps only the final quantity when phrased as like half a pound", () => {
+  const session = buildMealContext([], "i had 200g chicken no wait like half a pound", emptyMealSession())
+
+  assert.ok(session)
+  assert.equal(session.readyToLog, true)
+  assert.equal(session.summary, "0.5 lb chicken")
+  assert.equal(session.items.some((item) => item.base_name === "chicken no"), false)
+  assert.equal(session.items[0]?.quantity?.amount, 0.5)
+  assert.equal(session.items[0]?.quantity?.unit, "lb")
+})
+
 test("meal session keeps clarification binding stable and ignores complaint text in the pie egg milk conversation", () => {
   const { session, snapshots } = replayMealConversation([
     user("i had pie and egg and milk today"),
