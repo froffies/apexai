@@ -364,6 +364,38 @@ test("inline correction keeps only the final quantity when phrased as like half 
   assert.equal(session.items[0]?.quantity?.unit, "lb")
 })
 
+test("inline correction replaces a counted food quantity cleanly", () => {
+  const session = buildMealContext([], "i had 3 eggs actually make that 4", emptyMealSession())
+
+  assert.ok(session)
+  assert.equal(session.readyToLog, true)
+  assert.equal(session.summary, "4 eggs")
+  assert.equal(session.items.some((item) => item.base_name === "actually"), false)
+  assert.equal(session.items[0]?.quantity?.amount, 4)
+  assert.equal(session.items[0]?.quantity?.unit, "egg")
+})
+
+test("inline correction replaces a drink quantity cleanly", () => {
+  const session = buildMealContext([], "i had 500ml milk no wait 250ml", emptyMealSession())
+
+  assert.ok(session)
+  assert.equal(session.readyToLog, true)
+  assert.equal(session.summary, "250ml milk")
+  assert.equal(session.items[0]?.quantity?.amount, 250)
+  assert.equal(session.items[0]?.quantity?.unit, "ml")
+})
+
+test("inline correction replaces a measured food quantity cleanly", () => {
+  const session = buildMealContext([], "i had 100g rice actually 200g", emptyMealSession())
+
+  assert.ok(session)
+  assert.equal(session.readyToLog, true)
+  assert.equal(session.summary, "200g rice")
+  assert.equal(session.items.some((item) => /actually/i.test(item.base_name)), false)
+  assert.equal(session.items[0]?.quantity?.amount, 200)
+  assert.equal(session.items[0]?.quantity?.unit, "g")
+})
+
 test("meal session keeps clarification binding stable and ignores complaint text in the pie egg milk conversation", () => {
   const { session, snapshots } = replayMealConversation([
     user("i had pie and egg and milk today"),

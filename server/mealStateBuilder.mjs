@@ -96,6 +96,30 @@ const isIngredient = (name = "") => INGREDIENT_WORDS.some((word) => containsWord
 const isWorkoutish = (text = "") => WORKOUTISH_PATTERN.test(cleanText(text))
 const looksFoodish = (text = "") => FOOD_HINTS.some((word) => containsWord(text, word))
 
+function resolveInlineCorrection(text = "") {
+  const match = String(text || "").trim().match(
+    /^(.+?)\s+(?:no wait|no,?\s*actually|actually(?:,?\s*make that)?|wait no|sorry,?\s*actually|i meant|make that|change that(?: to)?|update that(?: to)?)\s+(.+)$/i
+  )
+  if (!match) return String(text || "")
+
+  const before = match[1].trim()
+  const corrected = match[2].trim()
+    .replace(/^like\s+/i, "")
+    .replace(/^about\s+/i, "")
+    .replace(/^roughly\s+/i, "")
+    .trim()
+
+  const correctedQtyOnly = /^(?:(?:a\s+)?(?:half|quarter|third)(?:\s+a?\s*(?:pound|kg|kilo|litre|liter|cup|bowl))?|\d+(?:\.\d+)?\s*(?:g|kg|ml|l|oz|lb|lbs|pound[s]?|cal|kcal|cup[s]?|serve[s]?|slice[s]?|egg[s]?)?)$/i
+  if (!correctedQtyOnly.test(corrected)) return corrected
+
+  const original = before.replace(MEAL_START_PATTERN, "").trim()
+  const originalQuantity = extractQuantity(original) || extractEmbeddedQuantity(original)
+  const originalFoodName = baseNameFromText(original)
+  const fallbackFoodName = originalFoodName
+    || (originalQuantity?.unit === "egg" ? "eggs" : "")
+  return fallbackFoodName ? `${corrected} ${fallbackFoodName}`.trim() : corrected
+}
+
 function isMixedMealWorkoutStart(currentMessage = "", existingSession = null) {
   const normalized = cleanText(currentMessage)
   if (existingSession?.active || existingSession?.persisted || !MEAL_START_PATTERN.test(normalized)) return false
@@ -934,12 +958,13 @@ export function emptyMealSession() {
 }
 
 export function buildMealStateFromConversation(recentMessages = [], currentMessage = "", existingSession = null) {
-  const conversation = normalizeConversation(recentMessages, currentMessage, existingSession)
-  if (isWorkoutOnlyFollowUpTurn(currentMessage, existingSession)) {
-    return preserveExistingSessionForIgnoredTurn(conversation, currentMessage, existingSession)
+  const resolvedMessage = resolveInlineCorrection(currentMessage)
+  const conversation = normalizeConversation(recentMessages, resolvedMessage, existingSession)
+  if (isWorkoutOnlyFollowUpTurn(resolvedMessage, existingSession)) {
+    return preserveExistingSessionForIgnoredTurn(conversation, resolvedMessage, existingSession)
   }
-  if (shouldUseLegacy(conversation, currentMessage, existingSession)) {
-    return buildLegacyMealStateFromConversation(recentMessages, currentMessage, existingSession)
+  if (shouldUseLegacy(conversation, resolvedMessage, existingSession)) {
+    return buildLegacyMealStateFromConversation(recentMessages, resolvedMessage, existingSession)
   }
 
   const state = baseSession()
@@ -952,11 +977,11 @@ export function buildMealStateFromConversation(recentMessages = [], currentMessa
   state.pendingClarification = existingSession?.pendingClarification ? { ...existingSession.pendingClarification } : null
   state.nextClarificationReference = String(existingSession?.nextClarificationReference || "")
   state.thread_messages = conversation.map((entry) => ({ role: entry.role, content: String(entry.content || "") }))
-  state.answerOnly = detectQuestionOnlyTurn(currentMessage)
-  state.wantsLogging = Boolean(existingSession?.wantsLogging) || MEAL_START_PATTERN.test(cleanText(currentMessage))
-  state.wantsNutrition = Boolean(existingSession?.wantsNutrition) || /\b(?:calories|protein|carbs|fat|macro|macros)\b/i.test(cleanText(currentMessage))
-  state.mealConversation = Boolean(existingSession?.mealConversation) || looksFoodish(currentMessage) || Boolean(existingSession?.active)
-  state.intentGraph = buildIntentGraph(conversation, currentMessage, existingSession)
+  state.answerOnly = detectQuestionOnlyTurn(resolvedMessage)
+  state.wantsLogging = Boolean(existingSession?.wantsLogging) || MEAL_START_PATTERN.test(cleanText(resolvedMessage))
+  state.wantsNutrition = Boolean(existingSession?.wantsNutrition) || /\b(?:calories|protein|carbs|fat|macro|macros)\b/i.test(cleanText(resolvedMessage))
+  state.mealConversation = Boolean(existingSession?.mealConversation) || looksFoodish(resolvedMessage) || Boolean(existingSession?.active)
+  state.intentGraph = buildIntentGraph(conversation, resolvedMessage, existingSession)
   state.candidateFragments = {
     meal: safeArray(state.intentGraph.mealFragments, 16),
     workout: [],
@@ -964,10 +989,10 @@ export function buildMealStateFromConversation(recentMessages = [], currentMessa
   }
 
   try {
-    const turns = existingSession?.active ? [{ role: "user", content: String(currentMessage || "") }] : conversation.filter((entry) => entry.role === "user")
+    const turns = existingSession?.active ? [{ role: "user", content: String(resolvedMessage || "") }] : conversation.filter((entry) => entry.role === "user")
     for (const turn of turns) processGraphTurn(state, turn)
   } catch {
-    return buildLegacyMealStateFromConversation(recentMessages, currentMessage, existingSession)
+    return buildLegacyMealStateFromConversation(recentMessages, resolvedMessage, existingSession)
   }
 
   if (state.suppressed) {
@@ -1029,14 +1054,15 @@ export function mealStateNeedsClarification(mealState) {
 }
 
 export function buildMealContext(recentMessages = [], currentMessage = "", existingSession = null) {
-  const conversation = normalizeConversation(recentMessages, currentMessage, existingSession)
-  if (isWorkoutOnlyFollowUpTurn(currentMessage, existingSession)) {
-    return preserveExistingSessionForIgnoredTurn(conversation, currentMessage, existingSession)
+  const resolvedMessage = resolveInlineCorrection(currentMessage)
+  const conversation = normalizeConversation(recentMessages, resolvedMessage, existingSession)
+  if (isWorkoutOnlyFollowUpTurn(resolvedMessage, existingSession)) {
+    return preserveExistingSessionForIgnoredTurn(conversation, resolvedMessage, existingSession)
   }
-  if (shouldUseLegacy(conversation, currentMessage, existingSession)) {
-    return buildLegacyMealContext(recentMessages, currentMessage, existingSession)
+  if (shouldUseLegacy(conversation, resolvedMessage, existingSession)) {
+    return buildLegacyMealContext(recentMessages, resolvedMessage, existingSession)
   }
-  const state = buildMealStateFromConversation(recentMessages, currentMessage, existingSession)
+  const state = buildMealStateFromConversation(recentMessages, resolvedMessage, existingSession)
   if (!state.mealConversation && !state.suppressed) return null
   return {
     ...state,
