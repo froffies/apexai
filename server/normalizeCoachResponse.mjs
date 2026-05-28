@@ -49,6 +49,29 @@ function replyAddressesMealQuantityClarification(reply = "", mealContext = null)
   ))
 }
 
+function replyAddressesMealClarification(reply = "", mealContext = null, clarifyHint = "") {
+  if (!mealContext?.pendingClarification && !mealContext?.clarifyQuestion) return false
+  if (replyAddressesMealQuantityClarification(reply, mealContext)) return true
+
+  const normalizedReply = cleanReplyText(reply)
+  if (!normalizedReply || !/\b(?:how|what|which|can you|could you)\b/.test(normalizedReply)) return false
+
+  const targetTokens = [
+    ...tokenVariants(mealContext?.pendingClarification?.targetLabel || ""),
+    ...tokenVariants(mealContext?.pendingClarification?.targetBaseName || ""),
+    ...tokenVariants(mealContext?.pendingClarification?.targetReference || ""),
+  ].filter(Boolean)
+  const mentionsTarget = targetTokens.some((token) => new RegExp(`\\b${escapeRegex(token)}\\b`, "i").test(normalizedReply))
+  if (!mentionsTarget) return false
+
+  if (String(mealContext?.pendingClarification?.type || "") === "ingredient") {
+    return /\bcooked in\b|\bwith\b/.test(normalizedReply)
+      || cleanReplyText(clarifyHint).includes("cooked in")
+  }
+
+  return true
+}
+
 function replyAddressesWorkoutClarification(reply = "", workoutContext = null) {
   if (!String(workoutContext?.clarifyQuestion || "").trim()) return false
   const normalizedReply = cleanReplyText(reply)
@@ -143,6 +166,17 @@ function extractImplicitActions(value) {
   return implicitTypes
     .filter((type) => value?.[type] && typeof value[type] === "object")
     .map((type) => ({ type, ...value[type] }))
+}
+
+function buildClarifyRecoveryAction(session, hint = "") {
+  const deterministicAction = deterministicClarifyActionFromSession(session)
+  if (deterministicAction) return deterministicAction
+  const message = String(hint || "").trim()
+  if (!message) return null
+  return {
+    type: "clarify",
+    message,
+  }
 }
 
 export function normalizeCoachResponse(value, context = {}) {
@@ -382,6 +416,48 @@ export function normalizeCoachResponse(value, context = {}) {
       .filter(shouldAllowAction)
       .slice(0, 8)
   }
+  const canRecoverMealClarifyAction = Boolean(
+    preferAIFirst
+    && strictAIFirst
+    && originalReply
+    && !actions.some(isMealPersistenceAction)
+    && !hasValidatedMealPersistence
+    && hintMealClarify
+    && replyAddressesMealClarification(originalReply, context.mealContext, hintMealClarify)
+  )
+  if (canRecoverMealClarifyAction) {
+    const recoveredMealClarifyAction = buildClarifyRecoveryAction(context.mealContext, hintMealClarify)
+    if (recoveredMealClarifyAction) {
+      actions = [
+        ...actions,
+        recoveredMealClarifyAction,
+      ]
+        .map(normalizeMealAction)
+        .filter(shouldAllowAction)
+        .slice(0, 8)
+    }
+  }
+  const canRecoverWorkoutClarifyAction = Boolean(
+    preferAIFirst
+    && strictAIFirst
+    && originalReply
+    && !actions.some(isWorkoutPersistenceAction)
+    && !hasValidatedWorkoutPersistence
+    && hintWorkoutClarify
+    && replyAddressesWorkoutClarification(originalReply, context.workoutContext)
+  )
+  if (canRecoverWorkoutClarifyAction) {
+    const recoveredWorkoutClarifyAction = buildClarifyRecoveryAction(context.workoutContext, hintWorkoutClarify)
+    if (recoveredWorkoutClarifyAction) {
+      actions = [
+        ...actions,
+        recoveredWorkoutClarifyAction,
+      ]
+        .map(normalizeMealAction)
+        .filter(shouldAllowAction)
+        .slice(0, 8)
+    }
+  }
   const hasPersistenceAction = actions.some(isPersistenceAction)
   const alreadyLoggedReply =
     Boolean(context.mealContext?.alreadyLogged)
@@ -453,6 +529,39 @@ export function normalizeCoachResponse(value, context = {}) {
       || summarizeCoachActions(actions)
       || summarizeCoachAction(actions[0])
       || reply
+  }
+
+  if (preferAIFirst && strictAIFirst) {
+    const recoveredClarifyActions = []
+    if (
+      !actions.some((action) => action?.type === "clarify")
+      && !actions.some(isMealPersistenceAction)
+      && !hasValidatedMealPersistence
+      && hintMealClarify
+      && replyAddressesMealClarification(reply, context.mealContext, hintMealClarify)
+    ) {
+      const recoveredMealClarifyAction = buildClarifyRecoveryAction(context.mealContext, hintMealClarify)
+      if (recoveredMealClarifyAction) recoveredClarifyActions.push(recoveredMealClarifyAction)
+    }
+    if (
+      !actions.some((action) => action?.type === "clarify")
+      && !actions.some(isWorkoutPersistenceAction)
+      && !hasValidatedWorkoutPersistence
+      && hintWorkoutClarify
+      && replyAddressesWorkoutClarification(reply, context.workoutContext)
+    ) {
+      const recoveredWorkoutClarifyAction = buildClarifyRecoveryAction(context.workoutContext, hintWorkoutClarify)
+      if (recoveredWorkoutClarifyAction) recoveredClarifyActions.push(recoveredWorkoutClarifyAction)
+    }
+    if (recoveredClarifyActions.length) {
+      actions = [
+        ...actions,
+        ...recoveredClarifyActions,
+      ]
+        .map(normalizeMealAction)
+        .filter(shouldAllowAction)
+        .slice(0, 8)
+    }
   }
 
   return {

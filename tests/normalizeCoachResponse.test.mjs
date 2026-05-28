@@ -870,7 +870,9 @@ test("normalizeCoachResponse strict AI-first keeps a good AI clarify reply inste
     },
   })
 
-  assert.equal(payload.actions.length, 0)
+  assert.equal(payload.actions.length, 1)
+  assert.equal(payload.actions[0].type, "clarify")
+  assert.equal(payload.actions[0].message, "How much light milk did you have?")
   assert.equal(payload.reply, "Got it. How much light milk did you have?")
 })
 
@@ -909,7 +911,9 @@ test("normalizeCoachResponse strict AI-first blocks invented meal persistence wh
     },
   })
 
-  assert.equal(payload.actions.length, 0)
+  assert.equal(payload.actions.length, 1)
+  assert.equal(payload.actions[0].type, "clarify")
+  assert.equal(payload.actions[0].message, "How much milk did you have?")
   assert.equal(payload.reply, "How much milk did you have?")
 })
 
@@ -940,6 +944,40 @@ test("normalizeCoachResponse strict AI-first keeps a clarification hint instead 
     },
   })
 
-  assert.equal(payload.actions.length, 0)
+  assert.equal(payload.actions.length, 1)
+  assert.equal(payload.actions[0].type, "clarify")
+  assert.equal(payload.actions[0].message, "What were the fried eggs cooked in?")
   assert.equal(payload.reply, "What were the fried eggs cooked in?")
+})
+
+test("normalizeCoachResponse strict AI-first recovers a meal clarify action from a good live AI clarify reply", () => {
+  const payload = normalizeCoachResponse({
+    reply: "You've mentioned having steak and tea. How much tea did you have?",
+    actions: [],
+    warnings: [],
+  }, {
+    preferAIFirst: true,
+    strictAIFirst: true,
+    mealContext: {
+      readyToLog: false,
+      alreadyLogged: false,
+      clarifyQuestion: "How much tea did you have?",
+      pendingClarification: {
+        type: "quantity",
+        targetReference: "tea",
+        targetBaseName: "tea",
+        targetLabel: "Tea",
+      },
+    },
+    responseHints: {
+      clarify_hints: {
+        meal: "How much tea did you have?",
+      },
+    },
+  })
+
+  assert.equal(payload.actions.length, 1)
+  assert.equal(payload.actions[0].type, "clarify")
+  assert.equal(payload.actions[0].message, "How much tea did you have?")
+  assert.equal(payload.reply, "You've mentioned having steak and tea. How much tea did you have?")
 })
