@@ -817,7 +817,7 @@ test("normalizeCoachResponse strict AI-first keeps explicit valid meal persisten
   assert.equal(payload.actions[0].food_name, "200g chicken")
 })
 
-test("normalizeCoachResponse strict AI-first does not recover a single save action from reply text alone", () => {
+test("normalizeCoachResponse strict AI-first recovers a single validated candidate save when the AI reply confirms it", () => {
   const payload = normalizeCoachResponse({
     reply: "Updated today's nutrition: 1 bowl chips with gravy.",
     actions: [],
@@ -840,8 +840,9 @@ test("normalizeCoachResponse strict AI-first does not recover a single save acti
     }],
   })
 
-  assert.equal(payload.actions.length, 0)
-  assert.equal(payload.reply, "I have the details, but I couldn't save it just now.")
+  assert.equal(payload.actions.length, 1)
+  assert.equal(payload.actions[0].type, "update_meal_log")
+  assert.equal(payload.actions[0].meal_id, "meal_chips")
 })
 
 test("normalizeCoachResponse strict AI-first keeps a good AI clarify reply instead of replacing it with parser clarify hints", () => {
@@ -871,4 +872,74 @@ test("normalizeCoachResponse strict AI-first keeps a good AI clarify reply inste
 
   assert.equal(payload.actions.length, 0)
   assert.equal(payload.reply, "Got it. How much light milk did you have?")
+})
+
+test("normalizeCoachResponse strict AI-first blocks invented meal persistence while a quantity clarification is still open", () => {
+  const payload = normalizeCoachResponse({
+    reply: "I'll log 18 eggs and 1 serve of milk as a meal, along with your 1 pushup.",
+    actions: [{
+      type: "log_meal",
+      food_name: "1 serve milk, plus 18 eggs",
+      quantity: "1 meal",
+      calories: 1392,
+      protein_g: 113.9,
+      carbs_g: 23.9,
+      fat_g: 92,
+    }],
+    warnings: [],
+  }, {
+    preferAIFirst: true,
+    strictAIFirst: true,
+    mealContext: {
+      readyToLog: false,
+      alreadyLogged: false,
+      clarifyQuestion: "How much milk did you have?",
+      pendingClarification: {
+        type: "quantity",
+        targetReference: "milk",
+        targetBaseName: "milk",
+        targetLabel: "Milk",
+      },
+    },
+    candidatePersistenceActions: [],
+    responseHints: {
+      clarify_hints: {
+        meal: "How much milk did you have?",
+      },
+    },
+  })
+
+  assert.equal(payload.actions.length, 0)
+  assert.equal(payload.reply, "How much milk did you have?")
+})
+
+test("normalizeCoachResponse strict AI-first keeps a clarification hint instead of generic save failure wording", () => {
+  const payload = normalizeCoachResponse({
+    reply: "I'll update your meal to reflect that 12 eggs were fried and 6 were hard-boiled.",
+    actions: [],
+    warnings: [],
+  }, {
+    preferAIFirst: true,
+    strictAIFirst: true,
+    mealContext: {
+      readyToLog: false,
+      alreadyLogged: false,
+      clarifyQuestion: "What were the fried eggs cooked in?",
+      pendingClarification: {
+        type: "ingredient",
+        targetReference: "egg",
+        targetBaseName: "egg",
+        targetLabel: "Eggs",
+      },
+    },
+    candidatePersistenceActions: [],
+    responseHints: {
+      clarify_hints: {
+        meal: "What were the fried eggs cooked in?",
+      },
+    },
+  })
+
+  assert.equal(payload.actions.length, 0)
+  assert.equal(payload.reply, "What were the fried eggs cooked in?")
 })

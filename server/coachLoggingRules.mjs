@@ -277,7 +277,9 @@ export function normalizeAction(action) {
 }
 
 export function replyClaimsPersistence(reply) {
-  return /\b(logged|saved|tracked|added|recorded|updated|deleted|removed)\b/i.test(String(reply || ""))
+  const text = String(reply || "")
+  return /\b(logged|saved|tracked|added|recorded|updated|deleted|removed)\b/i.test(text)
+    || /\b(?:i(?:'ll| will)|let'?s)\s+(?:log|save|track|add|record|update|delete|remove)\b/i.test(text)
 }
 
 export function isPersistenceAction(action) {

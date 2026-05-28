@@ -336,6 +336,7 @@ function stripLead(text = "") {
   return String(text || "")
     .replace(/,/g, " ")
     .replace(/^\s*but\s+/i, "")
+    .replace(/^\s*it\s+(?:was|is)\s+/i, "")
     .replace(MEAL_START_PATTERN, "")
     .replace(CORRECTION_PREFIX, "")
     .replace(TRAILING_LOG_DIRECTIVE_PATTERN, "")
@@ -665,22 +666,48 @@ function applyAlternatePendingReply(state, pending, parsed) {
   const pendingReference = cleanText(pending?.targetReference || "")
   if (!parsed || !pendingReference) return false
 
+  const pendingTarget = findRootByReference(state, pendingReference)
+
   if (parsed.kind === "item") {
     const alternateTarget = findRootByBaseName(state, parsed.item.base_name)
-    if (!alternateTarget || itemReference(alternateTarget) === pendingReference) return false
-    mergeRoot(state, parsed.item)
-    state.nextClarificationReference = pendingReference
-    return true
+    if (alternateTarget && itemReference(alternateTarget) !== pendingReference) {
+      mergeRoot(state, parsed.item)
+      state.nextClarificationReference = pendingReference
+      return true
+    }
+    if (
+      pendingTarget
+      && !baseNamesCompatible(parsed.item.base_name, pendingTarget.base_name)
+      && looksFoodish(parsed.item.base_name)
+    ) {
+      mergeRoot(state, parsed.item)
+      state.nextClarificationReference = pendingReference
+      return true
+    }
+    return false
   }
 
   if (parsed.kind === "item_with_attachment") {
     const alternateTarget = findRootByBaseName(state, parsed.item.base_name)
-    if (!alternateTarget || itemReference(alternateTarget) === pendingReference) return false
-    mergeRoot(state, parsed.item)
-    const mergedTarget = findRootByBaseName(state, parsed.item.base_name) || alternateTarget
-    attachIngredient(state, parseIngredientItem(parsed.ingredientText), parsed.relation || "with", mergedTarget)
-    state.nextClarificationReference = pendingReference
-    return true
+    if (alternateTarget && itemReference(alternateTarget) !== pendingReference) {
+      mergeRoot(state, parsed.item)
+      const mergedTarget = findRootByBaseName(state, parsed.item.base_name) || alternateTarget
+      attachIngredient(state, parseIngredientItem(parsed.ingredientText), parsed.relation || "with", mergedTarget)
+      state.nextClarificationReference = pendingReference
+      return true
+    }
+    if (
+      pendingTarget
+      && !baseNamesCompatible(parsed.item.base_name, pendingTarget.base_name)
+      && looksFoodish(parsed.item.base_name)
+    ) {
+      mergeRoot(state, parsed.item)
+      const mergedTarget = findRootByBaseName(state, parsed.item.base_name) || parsed.item
+      attachIngredient(state, parseIngredientItem(parsed.ingredientText), parsed.relation || "with", mergedTarget)
+      state.nextClarificationReference = pendingReference
+      return true
+    }
+    return false
   }
 
   if (parsed.kind === "bind_variant") {
@@ -743,12 +770,19 @@ function resolvePendingReply(state, text) {
     if (parsed.kind === "bind_variant") {
       const variantTarget = parsed.targetReference ? findRootByReference(state, parsed.targetReference) : null
       if (variantTarget) {
-        const suffix = cleanText(parsed.variantText).includes(cleanText(variantTarget.base_name))
-          ? parsed.variantText
-          : `${parsed.variantText} ${variantTarget.base_name}`
+        const variantText = stripLead(parsed.variantText).trim()
+        const suffix = cleanText(variantText).includes(cleanText(variantTarget.base_name))
+          ? variantText
+          : `${variantText} ${variantTarget.base_name}`
         variantTarget.base_name = cleanText(suffix)
         variantTarget.label = itemLabel(suffix)
-        state.pendingClarification = null
+        state.pendingClarification = {
+          ...pending,
+          targetReference: itemReference(variantTarget),
+          targetBaseName: variantTarget.base_name,
+          targetLabel: variantTarget.label,
+          invalidReply: false,
+        }
         state.lastDrinkKey = cleanText(suffix)
         state.nextClarificationReference = itemReference(variantTarget)
         return true
@@ -934,7 +968,16 @@ function summarizeItem(state, item, attachmentOnly = false) {
     (prep) => cleanText(quantityText).includes(cleanText(prep))
   )
   const effectivePrepText = prepAlreadyInQty ? "" : prepText
-  const nameText = COUNT_REQUIRED.has(singularize(item.base_name)) ? countDisplayName(item) : displayName(item)
+  const quantityImpliesPlural = Boolean(
+    quantity
+    && !quantity.unit
+    && Number.isFinite(Number(quantity.amount))
+    && Number(quantity.amount) > 1
+    && cleanText(item.label || "").endsWith("s")
+  )
+  const nameText = COUNT_REQUIRED.has(singularize(item.base_name)) || quantityImpliesPlural
+    ? countDisplayName(item)
+    : displayName(item)
   const nameAlreadyInQty = Boolean(
     nameText
     && quantityText
@@ -982,34 +1025,34 @@ function processGraphTurn(state, turn) {
     state.suppressionReply = "Okay, I won't save that."
     return
   }
-  if (resolvePendingReply(state, text)) return
-  for (const fragment of splitGraphClauses(text)) {
+  const applyParsedFragment = (fragment) => {
     const parsed = parseItemFragment(fragment, state)
     if (parsed.kind === "legacy") throw new Error("fallback")
-    if (parsed.kind === "ignore") continue
+    if (parsed.kind === "ignore") return
     if (parsed.kind === "reference") {
       const target = findRootByBaseName(state, parsed.reference)
       if (target) state.lastMainReference = itemReference(target)
-      continue
+      return
     }
     if (parsed.kind === "bind_ingredient") {
       attachIngredient(state, parseIngredientItem(parsed.ingredientText), parsed.relation || "cooked_in")
-      continue
+      return
     }
     if (parsed.kind === "bind_exclusions") {
       const target = parsed.targetReference ? findRootByReference(state, parsed.targetReference) : findDrinkTarget(state)
       if (target) target.exclusions = [...new Set([...target.exclusions, ...parsed.exclusions])]
-      continue
+      return
     }
     if (parsed.kind === "bind_variant") {
       const drinks = unresolvedRoots(state).filter((item) => item.category === "drink" && !item.quantity)
       if (drinks.length === 1) {
-        const label = cleanText(parsed.variantText).includes(drinks[0].base_name) ? parsed.variantText : `${parsed.variantText} ${drinks[0].base_name}`
+        const variantText = stripLead(parsed.variantText).trim()
+        const label = cleanText(variantText).includes(drinks[0].base_name) ? variantText : `${variantText} ${drinks[0].base_name}`
         drinks[0].base_name = cleanText(label)
         drinks[0].label = itemLabel(label)
         state.lastDrinkKey = cleanText(label)
       }
-      continue
+      return
     }
     if (parsed.kind === "bind_quantity") {
       const target = parsed.targetReference
@@ -1022,16 +1065,35 @@ function processGraphTurn(state, turn) {
         if (parsed.preparations.length) target.preparation = [...new Set([...target.preparation, ...parsed.preparations])]
         if (parsed.exclusions.length) target.exclusions = [...new Set([...target.exclusions, ...parsed.exclusions])]
       }
-      continue
+      return
     }
     if (parsed.kind === "item_with_attachment") {
       mergeRoot(state, parsed.item)
       attachIngredient(state, parseIngredientItem(parsed.ingredientText), parsed.relation || "with")
-      continue
+      return
     }
     if (parsed.kind === "item") {
       mergeRoot(state, parsed.item)
+      return
     }
+  }
+
+  const fragments = splitGraphClauses(text)
+  if (state.pendingClarification && fragments.length > 1) {
+    let handledPending = false
+    for (const fragment of fragments) {
+      if (resolvePendingReply(state, fragment)) {
+        handledPending = true
+        continue
+      }
+      applyParsedFragment(fragment)
+    }
+    if (handledPending) return
+  }
+
+  if (resolvePendingReply(state, text)) return
+  for (const fragment of fragments) {
+    applyParsedFragment(fragment)
   }
 }
 

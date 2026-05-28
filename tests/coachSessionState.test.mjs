@@ -989,6 +989,123 @@ test("mixed thread: meal quantity follow-up for yoghurt works without a workout 
   assert.notEqual(normalizeValueText(yoghurt.workoutSession?.exercise_name), "250g")
 })
 
+test("mixed thread keeps sibling meal items during a pending drink quantity clarification", () => {
+  const { snapshots } = replayCoachConversation([
+    user("i had milk and eggs and did a pushup"),
+    assistant("How many eggs did you have? Also, how many pushups did you do? Let’s log both when you provide the details."),
+    user("I had 18 eggs, i did one pushup, I also had milk"),
+    assistant("Let's log those 18 eggs, the milk, and the pushup. How much milk did you have?"),
+    user("2250ml"),
+  ])
+
+  assert.deepEqual(
+    snapshots[0].mealSession.items.map((item) => item.base_name),
+    ["milk", "egg"],
+  )
+  assert.equal(snapshots[0].mealSession.readyToLog, false)
+  assert.match(String(snapshots[1].mealSession.summary || ""), /18 eggs/i)
+  assert.equal(snapshots[1].mealSession.readyToLog, false)
+  assert.match(String(snapshots[1].mealSession.clarifyQuestion || ""), /how much milk/i)
+  assert.equal(snapshots[1].workoutSession.readyToLog, true)
+  assert.equal(snapshots[1].workoutSession.reps, 1)
+  assert.doesNotMatch(String(snapshots[1].workoutSession.clarifyQuestion || ""), /pushup/i)
+  assert.equal(snapshots[2].mealSession.readyToLog, true)
+  assert.equal(snapshots[2].mealSession.clarifyQuestion, "")
+  assert.match(String(snapshots[2].mealSession.summary || ""), /2250ml milk, plus 18 eggs/i)
+})
+
+test("mixed thread keeps drink variant and sibling egg quantity during a pending milk clarification", () => {
+  const { snapshots } = replayCoachConversation([
+    user("i had milk and did a pushup then had eggs"),
+    assistant("How much milk did you have? And how many pushups did you do?"),
+    user("it was light milk, and i had 14 scrambled eggs"),
+    assistant("Let's log your meals! You had 14 scrambled eggs and light milk. How much milk did you drink? Once I know that, I can save it all."),
+    user("450ml"),
+  ])
+
+  assert.match(String(snapshots[1].mealSession.summary || ""), /light milk/i)
+  assert.match(String(snapshots[1].mealSession.summary || ""), /14 scrambled eggs/i)
+  assert.match(String(snapshots[1].mealSession.clarifyQuestion || ""), /how much light milk/i)
+  assert.equal(snapshots[1].mealSession.readyToLog, false)
+  assert.equal(snapshots[2].mealSession.readyToLog, true)
+  assert.match(String(snapshots[2].mealSession.summary || ""), /450ml light milk, plus 14 scrambled eggs/i)
+})
+
+test("persisted pushup follow-ups treat pluralized same-exercise replies as workout updates", () => {
+  const persistedWorkout = makePersistedWorkoutSession({
+    active: false,
+    workoutConversation: true,
+    exercise_name: "Pushup",
+    workout_type: "Pushup",
+    muscle_group: "full_body",
+    sets: 1,
+    reps: 1,
+    summary: "Pushup for 1 set of 1",
+  }, "workout_pushup")
+
+  const next = buildCoachSessionState({
+    recentMessages: [
+      user("i had milk and did a pushup then had eggs"),
+      assistant("You've had milk and eggs, plus you did a pushup! How much milk did you have? I can log the workout for you immediately."),
+      user("450ml"),
+      assistant("I've logged 450ml light milk and 14 scrambled eggs for you."),
+    ],
+    currentMessage: "i did 14 pushups",
+    mealSession: makePersistedMealSession({
+      active: false,
+      mealConversation: true,
+      summary: "450ml light milk, plus 14 scrambled eggs cooked in 100g salted butter",
+      items: [],
+    }, "meal_1"),
+    workoutSession: persistedWorkout,
+  })
+
+  assert.ok(next.workoutSession)
+  assert.equal(next.workoutSession.readyToLog, true)
+  assert.equal(next.workoutSession.correctionRequested, true)
+  assert.equal(next.workoutSession.persistedWorkoutId, "workout_pushup")
+  assert.equal(next.workoutSession.reps, 14)
+})
+
+test("persisted meal refinement keeps resolved milk quantity while splitting egg preparations", () => {
+  const initial = replayCoachConversation([
+    user("i had milk and eggs and did a pushup"),
+    assistant("How many eggs did you have? Also, how many pushups did you do? Let’s log both when you provide the details."),
+    user("I had 18 eggs, i did one pushup, I also had milk"),
+    assistant("Let's log those 18 eggs, the milk, and the pushup. How much milk did you have?"),
+    user("2250ml"),
+  ])
+
+  const persistedMeal = makePersistedMealSession(initial.mealSession, "meal_milk_eggs")
+  const persistedWorkout = makePersistedWorkoutSession({
+    ...initial.workoutSession,
+    exercise_name: "Pushup",
+    workout_type: "Pushup",
+    reps: 1,
+    sets: 1,
+    summary: "Pushup for 1 set of 1",
+  }, "workout_pushup")
+
+  const next = buildCoachSessionState({
+    recentMessages: [
+      ...initial.history,
+      assistant("Saved to today's nutrition: 2250ml milk, plus 18 eggs."),
+    ],
+    currentMessage: "12 of the eggs were fried, the rest were hard boiled",
+    mealSession: persistedMeal,
+    workoutSession: persistedWorkout,
+  })
+
+  assert.ok(next.mealSession)
+  assert.equal(next.mealSession.correctionRequested, true)
+  assert.equal(next.mealSession.readyToLog, false)
+  assert.match(String(next.mealSession.summary || ""), /2250ml milk/i)
+  assert.match(String(next.mealSession.summary || ""), /12 fried eggs/i)
+  assert.match(String(next.mealSession.summary || ""), /6 hard boiled eggs/i)
+  assert.match(String(next.mealSession.clarifyQuestion || ""), /fried eggs cooked in/i)
+  assert.doesNotMatch(String(next.mealSession.clarifyQuestion || ""), /milk/i)
+})
+
 test("coach session state keeps a new explicit meal isolated from the previously saved meal", () => {
   const initial = replayCoachConversation([
     user("i had egg"),

@@ -237,6 +237,27 @@ export function normalizeCoachResponse(value, context = {}) {
   const filteredExplicitActions = explicitActions.filter((action) => {
     if ((deterministicMealActions.length || deterministicMealDeleteAction || hasValidatedMealDelete || hasValidatedMealPersistence) && isMealPersistenceAction(action)) return false
     if ((deterministicWorkoutActions.length || deterministicWorkoutDeleteAction || hasValidatedWorkoutDelete || hasValidatedWorkoutPersistence) && isWorkoutPersistenceAction(action)) return false
+    if (strictAIFirst && candidateMealPersistenceActions.length && isMealPersistenceAction(action)) return false
+    if (strictAIFirst && candidateWorkoutPersistenceActions.length && isWorkoutPersistenceAction(action)) return false
+    if (
+      strictAIFirst
+      && isMealPersistenceAction(action)
+      && !candidateMealPersistenceActions.length
+      && (
+        String(context.mealContext?.pendingClarification?.type || "") !== ""
+        || (context.mealContext?.clarifyQuestion && !context.mealContext?.readyToLog)
+        || (context.mealContext?.persistedMealId && !context.mealContext?.correctionRequested && !context.mealContext?.deleteRequested)
+      )
+    ) return false
+    if (
+      strictAIFirst
+      && isWorkoutPersistenceAction(action)
+      && !candidateWorkoutPersistenceActions.length
+      && (
+        (context.workoutContext?.clarifyQuestion && !context.workoutContext?.readyToLog)
+        || (context.workoutContext?.persistedWorkoutId && !context.workoutContext?.correctionRequested && !context.workoutContext?.deleteRequested)
+      )
+    ) return false
     if (!strictAIFirst && preferAIFirst && isMealPersistenceAction(action) && !hasValidatedMealPersistence && !candidateMealPersistenceActions.length) return false
     if (!strictAIFirst && preferAIFirst && isWorkoutPersistenceAction(action) && !hasValidatedWorkoutPersistence && !candidateWorkoutPersistenceActions.length) return false
     if (context.mealContext?.readyToLog && action?.type === "clarify") return false
@@ -327,7 +348,6 @@ export function normalizeCoachResponse(value, context = {}) {
     : null
   if (
     preferAIFirst
-    && !strictAIFirst
     && originalReply
     && replyClaimsPersistence(originalReply)
     && !actions.some(isPersistenceAction)
@@ -343,7 +363,6 @@ export function normalizeCoachResponse(value, context = {}) {
   }
   const shouldRecoverSingleWorkoutActionDuringMealClarification = Boolean(
     preferAIFirst
-    && !strictAIFirst
     && originalReply
     && !actions.some(isPersistenceAction)
     && !hasValidatedWorkoutPersistence
@@ -412,7 +431,13 @@ export function normalizeCoachResponse(value, context = {}) {
   }
 
   if (replyClaimsPersistence(reply) && !hasPersistenceAction && !alreadyLoggedReply) {
-    reply = context.nutritionStatusReply || "I have the details, but I couldn't save it just now."
+    const clarifyParts = [
+      hintMealClarify,
+      !hasWorkoutPersistenceAction && !hasValidatedWorkoutPersistence ? hintWorkoutClarify : "",
+    ].filter(Boolean)
+    reply = clarifyParts.join(" ").trim()
+      || context.nutritionStatusReply
+      || "I have the details, but I couldn't save it just now."
   }
 
   if (context.persistenceAttempted && context.persistenceSucceeded === false) {

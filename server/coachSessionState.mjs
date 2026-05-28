@@ -105,6 +105,29 @@ function safeArray(value, limit = 8) {
   return Array.isArray(value) ? value.slice(0, limit) : []
 }
 
+function parseCountWord(value = "") {
+  const normalized = cleanText(value)
+  const direct = Number(normalized)
+  if (Number.isFinite(direct) && direct > 0) return direct
+  const map = {
+    a: 1,
+    an: 1,
+    one: 1,
+    two: 2,
+    three: 3,
+    four: 4,
+    five: 5,
+    six: 6,
+    seven: 7,
+    eight: 8,
+    nine: 9,
+    ten: 10,
+    eleven: 11,
+    twelve: 12,
+  }
+  return map[normalized] || 0
+}
+
 function stripCorrectionLead(text) {
   let normalized = String(text || "").trim()
   let changed = true
@@ -816,7 +839,14 @@ function isRedundantPersistedMealFollowUp(message, session) {
   if (mealCorrectionRequested(normalized)) return false
   if (mealRejectionRequested(normalized)) return false
   if (mealDeleteRequested(normalized)) return false
-  if (MEAL_FINALISE_PATTERN.test(normalized) || MEAL_REFERENCE_PATTERN.test(normalized)) return true
+  const looksLikeStructuredRefinement = Boolean(
+    /\b(?:fried|grilled|baked|boiled|hard boiled|hardboiled|soft boiled|softboiled|poached|scrambled|raw|plain)\b/i.test(normalized)
+    || /\b(?:cooked in|with|without|mixed with|topped with|covered in|used to fry|used for)\b/i.test(normalized)
+    || /\b(?:rest|remainder|total|each)\b/i.test(normalized)
+    || /\d/.test(normalized)
+  )
+  if (MEAL_FINALISE_PATTERN.test(normalized)) return true
+  if (MEAL_REFERENCE_PATTERN.test(normalized) && !looksLikeStructuredRefinement) return true
 
   const summaryText = cleanText(session.persistedSummary || session.summary || "")
   if (!summaryText) return false
@@ -856,11 +886,35 @@ function persistedMealFollowUpLooksLikeUpdate(message, session, nextSummary = ""
   )
 }
 
-function seedLegacyMealSession(session) {
+function shouldKeepPersistedMealGraphNativeForRefinement(session, currentMessage = "") {
+  if (!session?.graphNative) return false
+  const normalized = cleanText(currentMessage)
+  if (!normalized) return false
+  return Boolean(
+    /\b(?:fried|grilled|baked|boiled|hard boiled|hardboiled|soft boiled|softboiled|poached|scrambled|raw|plain)\b/i.test(normalized)
+    && (
+      /\b(?:rest|remainder|total|each)\b/i.test(normalized)
+      || /\d/.test(normalized)
+      || MEAL_REFERENCE_PATTERN.test(normalized)
+    )
+  )
+}
+
+function seedLegacyMealSession(session, currentMessage = "") {
   if (!session?.items?.length) return null
+  const preserveGraphNative = shouldKeepPersistedMealGraphNativeForRefinement(session, currentMessage)
   return {
     ...emptyLegacyMealSession(),
     active: true,
+    graphNative: preserveGraphNative,
+    intentGraph: preserveGraphNative ? (session.intentGraph || null) : null,
+    candidateFragments: preserveGraphNative && session.candidateFragments
+      ? {
+          meal: Array.isArray(session.candidateFragments.meal) ? session.candidateFragments.meal.map((entry) => ({ ...entry })) : [],
+          workout: Array.isArray(session.candidateFragments.workout) ? session.candidateFragments.workout.map((entry) => ({ ...entry })) : [],
+          general: Array.isArray(session.candidateFragments.general) ? session.candidateFragments.general.map((entry) => ({ ...entry })) : [],
+        }
+      : { meal: [], workout: [], general: [] },
     items: session.items.map((item) => ({
       base_name: item.base_name || item.baseName || "",
       label: item.label || titleCase(item.base_name || item.baseName || ""),
@@ -1054,7 +1108,7 @@ function buildMealSessionState(recentMessages = [], currentMessage = "", existin
   const historyForNext = (fullCorrectionRestatement || startedNewMeal) ? [] : recentMessages
   const shouldSeedPersistedSession = !fullCorrectionRestatement && (prior.active || (prior.persisted && !startedNewMeal))
   const seededSession = shouldSeedPersistedSession
-    ? ((prior.active && prior.graphNative) ? prior : seedLegacyMealSession(prior))
+    ? ((prior.active && prior.graphNative) ? prior : seedLegacyMealSession(prior, currentMessage))
     : null
   const next = buildLegacyMealContext(historyForNext, normalizedMealMessage, seededSession)
   if (!next) return null
@@ -1389,15 +1443,16 @@ function parseWorkoutMessage(message) {
     }
   }
 
-  const countedBodyweightPattern = text.match(/^(?:i\s+did\s+)?(?<reps>\d+(?:\.\d+)?)\s*(?<exercise>pushups?|push ups?|pullups?|pull ups?|situps?|sit ups?|burpees?|dips?|lunges?|squats?)\b/)
+  const countedBodyweightPattern = text.match(/^(?:i\s+did\s+)?(?<reps>\d+(?:\.\d+)?|a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s*(?<exercise>pushups?|push ups?|pullups?|pull ups?|situps?|sit ups?|burpees?|dips?|lunges?|squats?)\b/)
   if (countedBodyweightPattern?.groups) {
     const exercise = normalizeExerciseName(countedBodyweightPattern.groups.exercise)
+    const reps = parseCountWord(countedBodyweightPattern.groups.reps || "")
     return {
       exercise_name: exercise,
       workout_type: exercise,
       muscle_group: "full_body",
       sets: 1,
-      reps: Number(countedBodyweightPattern.groups.reps || 0),
+      reps,
       weight_kg: 0,
       duration_seconds: 0,
       distance_km: 0,
@@ -1547,12 +1602,24 @@ function buildWorkoutSummary(state) {
   return parts.join(" ")
 }
 
+function equivalentWorkoutExerciseName(left = "", right = "") {
+  const normalize = (value) => {
+    const compact = cleanText(value).replace(/\s+/g, "")
+    if (!compact) return ""
+    if (compact.endsWith("ss")) return compact
+    return compact.endsWith("s") ? compact.slice(0, -1) : compact
+  }
+  const normalizedLeft = normalize(left)
+  const normalizedRight = normalize(right)
+  return Boolean(normalizedLeft && normalizedRight && normalizedLeft === normalizedRight)
+}
+
 function workoutMatchesPersistedSession(parsed = null, session = null) {
   if (!parsed || !session) return false
 
   const parsedExercise = cleanText(parsed.exercise_name || parsed.workout_type || "")
   const persistedExercise = cleanText(session.exercise_name || session.workout_type || "")
-  if (parsedExercise && persistedExercise && parsedExercise !== persistedExercise) return false
+  if (parsedExercise && persistedExercise && !equivalentWorkoutExerciseName(parsedExercise, persistedExercise)) return false
 
   const parsedDuration = Number(parsed.duration_seconds || 0)
   const persistedDuration = Number(session.duration_seconds || 0)
@@ -1575,7 +1642,7 @@ function workoutMatchesPersistedSession(parsed = null, session = null) {
   }
 
   return (
-    (!parsedExercise || !persistedExercise || parsedExercise === persistedExercise)
+    (!parsedExercise || !persistedExercise || equivalentWorkoutExerciseName(parsedExercise, persistedExercise))
     && parsedWeight === persistedWeight
     && parsedSets === persistedSets
     && parsedReps === persistedReps
@@ -1661,7 +1728,7 @@ function persistedWorkoutFollowUpLooksLikeUpdate(message, session, nextState = n
 
   const parsedExercise = cleanText(parsed.exercise_name || parsed.workout_type || "")
   const persistedExercise = cleanText(session.exercise_name || session.workout_type || "")
-  return !parsedExercise || !persistedExercise || parsedExercise === persistedExercise
+  return !parsedExercise || !persistedExercise || equivalentWorkoutExerciseName(parsedExercise, persistedExercise)
 }
 
 function buildGenericSuppressedMealSession(recentMessages = [], currentMessage = "") {
