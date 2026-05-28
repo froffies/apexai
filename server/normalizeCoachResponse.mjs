@@ -277,12 +277,18 @@ export function normalizeCoachResponse(value, context = {}) {
       || context.workoutContext.correctionRequested
     )
   )
+  const isAnswerOnlyMealTurn = Boolean(
+    context.mealContext
+    && (context.mealContext.answerOnly || context.mealContext.wantsNutrition)
+    && !context.mealContext.wantsLogging
+  )
 
   const filteredExplicitActions = explicitActions.filter((action) => {
     if ((deterministicMealActions.length || deterministicMealDeleteAction || hasValidatedMealDelete || hasValidatedMealPersistence) && isMealPersistenceAction(action)) return false
     if ((deterministicWorkoutActions.length || deterministicWorkoutDeleteAction || hasValidatedWorkoutDelete || hasValidatedWorkoutPersistence) && isWorkoutPersistenceAction(action)) return false
     if (strictAIFirst && candidateMealPersistenceActions.length && isMealPersistenceAction(action)) return false
     if (strictAIFirst && candidateWorkoutPersistenceActions.length && isWorkoutPersistenceAction(action)) return false
+    if (strictAIFirst && isAnswerOnlyMealTurn && isMealPersistenceAction(action)) return false
     if (
       strictAIFirst
       && isMealPersistenceAction(action)
@@ -366,6 +372,7 @@ export function normalizeCoachResponse(value, context = {}) {
     ...filteredExplicitActions,
   ]
     .map(normalizeMealAction)
+    .filter((action) => !(strictAIFirst && isAnswerOnlyMealTurn && isMealPersistenceAction(action)))
     .filter(shouldAllowAction)
     .slice(0, 8)
 
@@ -396,6 +403,7 @@ export function normalizeCoachResponse(value, context = {}) {
     && replyClaimsPersistence(originalReply)
     && !actions.some(isPersistenceAction)
     && singleCandidatePersistenceAction
+    && !(strictAIFirst && isAnswerOnlyMealTurn && isMealPersistenceAction(singleCandidatePersistenceAction))
   ) {
     actions = [
       ...actions,

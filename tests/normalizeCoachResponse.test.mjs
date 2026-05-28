@@ -1011,3 +1011,42 @@ test("normalizeCoachResponse strict AI-first recovers a workout clarify action f
   assert.equal(payload.actions[0].message, "How many reps did you do for Row?")
   assert.equal(payload.reply, "Great, you did 5 sets! How many reps did you complete for each set?")
 })
+
+test("normalizeCoachResponse strict AI-first drops invented meal persistence on answer-only nutrition turns", () => {
+  const payload = normalizeCoachResponse({
+    reply: "That meal has an estimated total of 294 calories, with 19g of protein, 1.7g of carbs, and 23.4g of fat.",
+    actions: [{
+      type: "log_meal",
+      food_name: "3 fried eggs cooked in 10g butter, plus 250ml Earl Grey tea with no milk and no sugar",
+      quantity: "1 meal",
+      calories: 294,
+      protein_g: 19,
+      carbs_g: 1.7,
+      fat_g: 23.4,
+    }],
+    warnings: [],
+  }, {
+    preferAIFirst: true,
+    strictAIFirst: true,
+    mealContext: {
+      readyToLog: true,
+      alreadyLogged: false,
+      wantsNutrition: true,
+      answerOnly: true,
+      wantsLogging: false,
+      summary: "3 fried eggs cooked in 10g butter, plus 250ml Earl Grey tea with no milk and no sugar",
+    },
+    candidatePersistenceActions: [{
+      type: "log_meal",
+      food_name: "3 fried eggs cooked in 10g butter, plus 250ml Earl Grey tea with no milk and no sugar",
+      quantity: "1 meal",
+      calories: 294,
+      protein_g: 19,
+      carbs_g: 1.7,
+      fat_g: 23.4,
+    }],
+  })
+
+  assert.equal(payload.actions.length, 0)
+  assert.equal(payload.reply, "That meal has an estimated total of 294 calories, with 19g of protein, 1.7g of carbs, and 23.4g of fat.")
+})
