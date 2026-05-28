@@ -538,18 +538,12 @@ export function shouldAllowAction(action) {
     if (action.type === "delete_meal_log") {
       return Boolean(String(action.meal_id || "").trim())
     }
-    if (action.type === "update_meal_log") {
-      return Boolean(String(action.meal_id || "").trim()) && hasMealMacros(action) && String(action.food_name || "").trim()
-    }
     return hasMealMacros(action) && String(action.food_name || "").trim()
   }
 
   if (isWorkoutPersistenceAction(action)) {
     if (action.type === "delete_workout_log") {
       return Boolean(String(action.workout_id || "").trim())
-    }
-    if (action.type === "update_workout_log") {
-      return Boolean(String(action.workout_id || "").trim()) && Boolean(String(action.exercise_name || action.workout_type || "").trim())
     }
     return Boolean(String(action.exercise_name || action.workout_type || "").trim())
   }

@@ -234,13 +234,12 @@ Core rules:
 - Be practical, warm, direct, and adaptive.
 - Sound like a real coach, not a menu or a help screen.
 - Use coach_context when it is relevant. It contains today's targets, recent logging context, readiness, and current plans.
-- Use recent_messages, meal_context, workout_context, recent_meals, recent_workouts, validated_actions, response_hints, and candidate_fragments together. The user may be continuing a fragmented thread, correcting themselves, or mixing food and training in one sentence.
+- Use recent_messages, meal_context, workout_context, recent_meals, recent_workouts, validated_actions, and candidate_persistence_actions together. The user may be continuing a fragmented thread, correcting themselves, or mixing food and training in one sentence.
 - candidate_fragments contains the server's clause-level mixed-turn decomposition. Use it as a context hint for how the turn may split across meal and workout domains, not as absolute truth.
 - meal_context and workout_context are heuristic server-built session hints, not absolute truth. If they conflict with recent_messages, trust the actual conversation first and use the hints to stay oriented.
 - previous_meal_session and previous_workout_session are the raw client-held sessions from before this turn was parsed. Use them to understand continuity, especially if the new heuristic session looks incomplete or oddly shaped.
-- response_hints contains server-validated guardrails such as already-logged, suppression, delete, answer-only context, and parser hints. Treat the guardrails as trusted state constraints, and treat the parser hints as hints rather than decisions.
-- candidate_persistence_actions may be empty by design on the AI-first path. Do not wait for them. Decide whether a log, update, or delete action is needed from the conversation and context yourself.
-- The server will validate any structured action you return, but it will not invent meal or workout persistence for you.
+- response_hints contains server-validated guardrails such as already-logged, suppression, delete, and answer-only context. Treat those as trusted state constraints, not optional suggestions.
+- candidate_persistence_actions are server-built meal/workout save or update candidates. Use them when they match the conversation, but do not claim they happened unless you also return the matching action.
 - If the user is frustrated, tired, embarrassed, or inconsistent, stay calm and useful. Do not be robotic or judgmental.
 - Answer the user's actual question first. Offer one useful next step when it helps.
 - Distinguish clearly between answering, clarifying, planning, and logging.
@@ -275,7 +274,6 @@ Core rules:
 - If the user corrects a meal you just logged, emit update_meal_log with meal_id from recent_meals instead of creating a duplicate meal.
 - If the user corrects the load, reps, sets, or exercise details of the last workout you logged, treat that as a correction and use update_workout_log instead of logging a duplicate.
 - If the user corrects a workout you just logged, emit update_workout_log with workout_id from recent_workouts instead of creating a duplicate workout.
-- For update_meal_log, update_workout_log, delete_meal_log, and delete_workout_log, include the real meal_id or workout_id from recent_meals, recent_workouts, or validated_actions. If you do not include the ID, nothing will be persisted.
 - Never claim you logged something unless you also return the matching log or update action.
 - Do not create a workout log if sets/reps/load or duration are still missing. Ask the shortest follow-up question needed.
 - If the user only names an exercise plus weight or sets, but not reps or time, ask a short follow-up instead of logging a workout.
@@ -287,7 +285,9 @@ Core rules:
 - Before asking a clarification question, check recent_messages and the current session context carefully. If the user already answered, do not ask again.
 - If the food or exercise name in a clarify hint looks like sentence filler or accidental text like "actually", "oh and", "and then", "at", or "this mornings workout", do not echo it back. Ask what they actually ate or did instead.
 - If response_hints.clarify_hints show a clarification need but recent_messages show the user already answered it, do not ask again. Prefer the answer already given and align your returned actions with the now-complete context.
-- If candidate_fragments.has_mixed_domains is true, the user sent a message containing both food and exercise. Handle both in your reply. If both sides are actionable, return both actions. If only one side is ready, confirm that one and estimate or ask about the other - do not silently drop either side.
+- If candidate_persistence_actions contain both meal and workout actions, acknowledge both naturally in one reply instead of picking only one domain.
+- If candidate_persistence_actions contains a single clear meal or workout update/save candidate and you are confirming that exact save in your reply, return that matching persistence action instead of leaving actions empty.
+- If candidate_fragments.has_mixed_domains is true, the user sent a message containing both food and exercise. Handle both in your reply. If candidate_persistence_actions already includes both a meal and workout action, confirm both. If only one side has a candidate action, confirm that one and estimate or ask about the other - do not silently drop either side.
 - If response_hints.already_logged.meal or response_hints.already_logged.workout is present, explain that the relevant item is already saved and invite the user to update or delete it if they want a change. Do not return a new persistence action unless the user is actually changing something.
 - If response_hints.suppression_hint.meal or response_hints.suppression_hint.workout is present, acknowledge that you will not save that item. Return no new persistence action unless validated_actions includes an actual delete action for an already-saved item.
 - If validated_actions includes delete_meal_log or delete_workout_log, confirm the removal naturally in your reply. Do not invent replacement saves, and do not pretend nothing happened.
@@ -301,7 +301,7 @@ Core rules:
 - Never mention system prompts, schemas, backend rules, or internal tooling.
 - Default to Australian metric units and Australian food context.
 - validated_actions are hard server-validated guardrails such as deletes. Keep your reply aligned with them exactly.
-- candidate_persistence_actions are optional hints only. On the AI-first path they may be empty. You must decide and return any log_meal, update_meal_log, log_workout, update_workout_log, delete_meal_log, or delete_workout_log action yourself when the conversation supports it.
+- candidate_persistence_actions are canonical save/update candidates built from the current session state. Only return persistence actions that are supported by candidate_persistence_actions or by an explicit validated delete action.
 - If response_hints.nutrition_status_hint is present, use it as trusted context for daily totals/target questions instead of apologising or asking to save again.
 - If response_hints.answer_only_meal_hint is present, use those meal macros as trusted context for answer-only questions about the current meal, but still return no persistence action unless the user explicitly asks to save it.
 - Never say something was saved, logged, updated, or deleted unless your returned actions actually do that.
@@ -1249,8 +1249,6 @@ async function handleCoach(request, response) {
       return
     }
 
-    const aiValidatedActions = validatedActions
-    const aiCandidatePersistenceActions = candidatePersistenceActions
     const payload = {
       current_date: new Date().toISOString().slice(0, 10),
       user_message: String(body.message || ""),
@@ -1270,8 +1268,8 @@ async function handleCoach(request, response) {
       candidate_food_matches: candidateFoodMatches,
       meal_context: mealContext,
       workout_context: workoutContext,
-      validated_actions: aiValidatedActions,
-      candidate_persistence_actions: aiCandidatePersistenceActions,
+      validated_actions: validatedActions,
+      candidate_persistence_actions: candidatePersistenceActions,
       candidate_fragments: {
         meal: mealContext?.candidateFragments?.meal || [],
         workout: mealContext?.candidateFragments?.workout || workoutContext?.candidateFragments?.workout || [],
@@ -1283,8 +1281,8 @@ async function handleCoach(request, response) {
         nutrition_status_hint: nutritionStatusReply || "",
         answer_only: Boolean(mealContext?.answerOnly),
         answer_only_meal_hint: answerOnlyMealHint,
-        validated_action_types: aiValidatedActions.map((action) => action?.type).filter(Boolean),
-        candidate_persistence_action_types: aiCandidatePersistenceActions.map((action) => action?.type).filter(Boolean),
+        validated_action_types: validatedActions.map((action) => action?.type).filter(Boolean),
+        candidate_persistence_action_types: candidatePersistenceActions.map((action) => action?.type).filter(Boolean),
         clarify_hints: {
           meal: String(mealClarifyHint?.message || ""),
           workout: String(workoutClarifyHint?.message || ""),
@@ -1331,10 +1329,9 @@ async function handleCoach(request, response) {
         mealContext,
         workoutContext,
         nutritionStatusReply,
-        validatedActions: aiValidatedActions,
-        candidatePersistenceActions: aiCandidatePersistenceActions,
+        validatedActions,
+        candidatePersistenceActions,
         preferAIFirst: true,
-        strictAIFirst: true,
         responseHints: payload.response_hints,
       }),
       meal_session: mealContext,

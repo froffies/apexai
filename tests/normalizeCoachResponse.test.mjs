@@ -752,3 +752,123 @@ test("normalizeCoachResponse blocks save wording after a failed persistence atte
 
   assert.equal(payload.reply, "I have the details, but I couldn't save it just now.")
 })
+
+test("normalizeCoachResponse strict AI-first does not auto-persist from parser candidates when the AI omits actions", () => {
+  const payload = normalizeCoachResponse({
+    reply: "That looks like 17 fried eggs cooked in butter, plus your Earl Grey tea.",
+    actions: [],
+    warnings: [],
+  }, {
+    preferAIFirst: true,
+    strictAIFirst: true,
+    mealContext: {
+      readyToLog: true,
+      alreadyLogged: false,
+      summary: "17 fried eggs cooked in 100g salted butter, plus 250ml Earl Grey tea with no milk and no sugar",
+      persistedMealId: "",
+      correctionRequested: false,
+    },
+    candidatePersistenceActions: [{
+      type: "log_meal",
+      meal_type: "snack",
+      food_name: "17 fried eggs cooked in 100g salted butter, plus 250ml Earl Grey tea with no milk and no sugar",
+      quantity: "1 meal",
+      calories: 2230,
+      protein_g: 164,
+      carbs_g: 47,
+      fat_g: 236,
+      estimated: true,
+      nutrition_source: "Coach estimate from accumulated meal details across chat",
+    }],
+  })
+
+  assert.equal(payload.actions.length, 0)
+})
+
+test("normalizeCoachResponse strict AI-first keeps explicit valid meal persistence without parser candidates", () => {
+  const payload = normalizeCoachResponse({
+    reply: "I've logged 200g chicken for you.",
+    actions: [{
+      type: "log_meal",
+      meal_type: "lunch",
+      food_name: "200g chicken",
+      quantity: "200g",
+      calories: 330,
+      protein_g: 62,
+      carbs_g: 0,
+      fat_g: 7,
+      nutrition_source: "Coach estimate from user-described ingredients and amounts",
+      estimated: true,
+    }],
+    warnings: [],
+  }, {
+    preferAIFirst: true,
+    strictAIFirst: true,
+    mealContext: {
+      readyToLog: false,
+      alreadyLogged: false,
+      clarifyQuestion: "",
+    },
+    candidatePersistenceActions: [],
+  })
+
+  assert.equal(payload.actions.length, 1)
+  assert.equal(payload.actions[0].type, "log_meal")
+  assert.equal(payload.actions[0].food_name, "200g chicken")
+})
+
+test("normalizeCoachResponse strict AI-first does not recover a single save action from reply text alone", () => {
+  const payload = normalizeCoachResponse({
+    reply: "Updated today's nutrition: 1 bowl chips with gravy.",
+    actions: [],
+    warnings: [],
+  }, {
+    preferAIFirst: true,
+    strictAIFirst: true,
+    candidatePersistenceActions: [{
+      type: "update_meal_log",
+      meal_id: "meal_chips",
+      meal_type: "snack",
+      food_name: "1 bowl chips with gravy",
+      quantity: "1 meal",
+      calories: 240,
+      protein_g: 13,
+      carbs_g: 20,
+      fat_g: 11,
+      estimated: true,
+      nutrition_source: "Coach estimate from accumulated meal details across chat",
+    }],
+  })
+
+  assert.equal(payload.actions.length, 0)
+  assert.equal(payload.reply, "I have the details, but I couldn't save it just now.")
+})
+
+test("normalizeCoachResponse strict AI-first keeps a good AI clarify reply instead of replacing it with parser clarify hints", () => {
+  const payload = normalizeCoachResponse({
+    reply: "Got it. How much light milk did you have?",
+    actions: [],
+    warnings: [],
+  }, {
+    preferAIFirst: true,
+    strictAIFirst: true,
+    mealContext: {
+      readyToLog: false,
+      alreadyLogged: false,
+      pendingClarification: {
+        type: "quantity",
+        targetReference: "milk::light::light",
+        targetBaseName: "milk",
+        targetLabel: "Light Milk",
+      },
+    },
+    responseHints: {
+      clarify_hints: {
+        meal: "How much light milk did you have?",
+      },
+    },
+  })
+
+  assert.equal(payload.actions.length, 0)
+  assert.equal(payload.reply, "Got it. How much light milk did you have?")
+})
