@@ -950,6 +950,40 @@ test("normalizeCoachResponse strict AI-first keeps a clarification hint instead 
   assert.equal(payload.reply, "What were the fried eggs cooked in?")
 })
 
+test("normalizeCoachResponse strict AI-first treats 'I can log' save wording as persistence when an ingredient clarification is still open", () => {
+  const payload = normalizeCoachResponse({
+    reply: "Great! I can log your 3 fried steaks and 350ml of tea with no sugar. Logging now...",
+    actions: [],
+    warnings: [],
+  }, {
+    preferAIFirst: true,
+    strictAIFirst: true,
+    mealContext: {
+      readyToLog: false,
+      alreadyLogged: false,
+      clarifyQuestion: "What were the fried steak cooked in?",
+      pendingClarification: {
+        type: "ingredient",
+        targetReference: "steak",
+        targetBaseName: "steak",
+        targetLabel: "Steak",
+        relation: "cooked_in",
+      },
+    },
+    candidatePersistenceActions: [],
+    responseHints: {
+      clarify_hints: {
+        meal: "What were the fried steak cooked in?",
+      },
+    },
+  })
+
+  assert.equal(payload.actions.length, 1)
+  assert.equal(payload.actions[0].type, "clarify")
+  assert.equal(payload.actions[0].message, "What were the fried steak cooked in?")
+  assert.equal(payload.reply, "What were the fried steak cooked in?")
+})
+
 test("normalizeCoachResponse strict AI-first recovers a meal clarify action from a good live AI clarify reply", () => {
   const payload = normalizeCoachResponse({
     reply: "You've mentioned having steak and tea. How much tea did you have?",
