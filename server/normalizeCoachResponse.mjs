@@ -75,7 +75,17 @@ function replyAddressesMealClarification(reply = "", mealContext = null, clarify
 function replyAddressesWorkoutClarification(reply = "", workoutContext = null) {
   if (!String(workoutContext?.clarifyQuestion || "").trim()) return false
   const normalizedReply = cleanReplyText(reply)
-  if (!/\b(?:how\s+many|what|which)\b/.test(normalizedReply)) return false
+  if (!/\b(?:how\s+many|what|which|can you|could you)\b/.test(normalizedReply)) return false
+  const normalizedHint = cleanReplyText(workoutContext?.clarifyQuestion || "")
+  if (normalizedHint.includes("rep") && (/\breps?\b/.test(normalizedReply) || /\beach set\b/.test(normalizedReply))) {
+    return true
+  }
+  if (normalizedHint.includes("set") && /\bsets?\b/.test(normalizedReply)) {
+    return true
+  }
+  if ((normalizedHint.includes("kg") || normalizedHint.includes("weight")) && (/\bkg\b/.test(normalizedReply) || /\bweight\b/.test(normalizedReply))) {
+    return true
+  }
   const targetTokens = [
     ...tokenVariants(workoutContext?.exercise_name || ""),
     ...tokenVariants(workoutContext?.workout_type || ""),

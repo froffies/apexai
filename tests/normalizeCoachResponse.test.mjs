@@ -981,3 +981,33 @@ test("normalizeCoachResponse strict AI-first recovers a meal clarify action from
   assert.equal(payload.actions[0].message, "How much tea did you have?")
   assert.equal(payload.reply, "You've mentioned having steak and tea. How much tea did you have?")
 })
+
+test("normalizeCoachResponse strict AI-first recovers a workout clarify action from a paraphrased reps question", () => {
+  const payload = normalizeCoachResponse({
+    reply: "Great, you did 5 sets! How many reps did you complete for each set?",
+    actions: [],
+    warnings: [],
+  }, {
+    preferAIFirst: true,
+    strictAIFirst: true,
+    workoutContext: {
+      readyToLog: false,
+      alreadyLogged: false,
+      clarifyQuestion: "How many reps did you do for Row?",
+      exercise_name: "Row",
+      workout_type: "Row",
+      sets: 5,
+      reps: 0,
+    },
+    responseHints: {
+      clarify_hints: {
+        workout: "How many reps did you do for Row?",
+      },
+    },
+  })
+
+  assert.equal(payload.actions.length, 1)
+  assert.equal(payload.actions[0].type, "clarify")
+  assert.equal(payload.actions[0].message, "How many reps did you do for Row?")
+  assert.equal(payload.reply, "Great, you did 5 sets! How many reps did you complete for each set?")
+})
