@@ -637,6 +637,18 @@ test("classic workout x-pattern messages do not open a fake meal session", () =>
   assert.equal(next.workoutSession.sets, 5)
 })
 
+test("workout advice questions do not open a fake workout clarification flow", () => {
+  const next = buildCoachSessionState({
+    recentMessages: [],
+    currentMessage: "i'm tired and sore, what should i train?",
+    mealSession: emptyMealSessionState(),
+    workoutSession: emptyWorkoutSessionState(),
+  })
+
+  assert.equal(next.mealSession, null)
+  assert.equal(next.workoutSession, null)
+})
+
 test("coach session state replaces persisted meal quantities when a correction restates the full meal", () => {
   const initial = replayCoachConversation([
     user("i had egg and tea"),

@@ -10,7 +10,7 @@ const SUPPRESS_SESSION_PATTERN = /\b(?:don't|dont|do not|stop|no)\s+(?:log|save|
 const REPEAT_RECENT_MEAL_PATTERN = /\b(?:same as yesterday|same as last time|same as before|repeat that(?: meal)?|same thing as yesterday)\b/i
 const MEAL_LOG_QUERY_PATTERN = /^(?:what(?:'s|s| is)?|show|list|see|view|display)\b.*\b(?:today'?s?|todays?|my)\b.*\b(?:nutrition|food|meal|meals|log)\b/i
 const NUTRITION_QUESTION_PATTERN = /^(?:is|are|does|do|can|should|will|would|what(?:'s|s| is)?|how(?:'s|s| is| much| many)?|which|why)\b.{0,80}?\b(?:better|best|worse|good|bad|healthy|unhealthy|high|low|more|less|enough|too much|work|help|cause|prevent|affect)\b/i
-const WORKOUT_QUESTION_PATTERN = /^(?:is|are|does|do|can|should|will|would|what(?:'s|s| is)?|how(?:'s|s| is| much| many)?|which|why)\b.{0,120}?\b(?:workout[s]?|exercises?|training|run(?:ning)?|ran|cardio|gym|lift(?:ing)?|muscle[s]?|fitness|calories?|burn(?:ing)?|strength|endurance|recover(?:y)?|rest)\b/i
+const WORKOUT_QUESTION_PATTERN = /^(?:is|are|does|do|can|should|will|would|what(?:'s|s| is)?|how(?:'s|s| is| much| many)?|which|why)\b.{0,120}?\b(?:workout[s]?|exercises?|train(?:ing)?|run(?:ning)?|ran|cardio|gym|lift(?:ing)?|muscle[s]?|fitness|calories?|burn(?:ing)?|strength|endurance|recover(?:y)?|rest)\b/i
 const POST_SAVE_NUTRITION_QUERY_PATTERN = /^(?:how\s+(?:much|many)|am\s+i\s+(?:over|under|hitting|at)|what(?:'s|s|\s+is)?\s+(?:my|are\s+my)|what(?:'s|s|\s+is)\s+(?:my\s+)?(?:total|remaining)|did\s+i\s+(?:hit|reach|exceed)|how\s+(?:close|far))\b.{0,80}?\b(?:protein|fat|carbs?|calories?|kcal|macros?|target|goal|limit|intake)\b/i
 const VAGUE_TIME_REF_PATTERN = /\b(?:yesterday|last night|last week|earlier today|before|already|just ate|just had)\b/i
 const VAGUE_REFERENCE_PATTERN = /^(?:(?:i\s+)?(?:had|ate|drank|eaten))\s+(?:that|the same|same thing|it|the usual|the same as|lunch already|dinner already|breakfast already|that already)\b/i
@@ -1412,6 +1412,17 @@ function parseWorkoutMessage(message) {
   if (!text) return null
   if (VAGUE_WORKOUT_REFERENCE_PATTERN.test(text)) return null
   if (isMealQuantityFragment(message)) return null
+  if (
+    !/\d/.test(text)
+    && (
+      WORKOUT_QUESTION_PATTERN.test(text)
+      || /\bwhat\s+should\s+i\s+train\b/i.test(text)
+      || /\bwhat\s+should\s+i\s+do\s+(?:for|at)\s+the\s+gym\b/i.test(text)
+      || /\bwhat\s+workout\s+should\s+i\s+do\b/i.test(text)
+    )
+  ) {
+    return null
+  }
 
   const cardioMatch = text.match(/(?:(?<minutes>\d+(?:\.\d+)?)\s*(?:min|mins|minutes)\s*(?<exercise>incline treadmill|treadmill|bike|rower|run|running|walk|walking|elliptical|stairmaster))|(?<exercise2>incline treadmill|treadmill|bike|rower|run|running|walk|walking|elliptical|stairmaster)\s*(?:for)?\s*(?<minutes2>\d+(?:\.\d+)?)\s*(?:min|mins|minutes)/)
   if (cardioMatch?.groups) {
@@ -1759,12 +1770,27 @@ function looksWorkoutSpecificMessage(message = "") {
 function buildWorkoutSessionState(recentMessages = [], currentMessage = "", existingSession = null) {
   const prior = normalizeWorkoutSession(existingSession)
   const normalizedCurrent = cleanText(currentMessage)
+  const currentParsedWorkout = parseWorkoutMessage(currentMessage)
   const correctionRequested = Boolean(prior.persistedWorkoutId && workoutCorrectionRequested(currentMessage))
   const deleteRequested = Boolean(
     prior.persistedWorkoutId
     && (workoutDeleteRequested(currentMessage) || suppressionRequested(currentMessage))
   )
   const suppressed = suppressionRequested(currentMessage)
+  const workoutPlanningQuestion = Boolean(
+    !prior.active
+    && !prior.persisted
+    && (
+      WORKOUT_QUESTION_PATTERN.test(normalizedCurrent)
+      || /\bwhat\s+should\s+i\s+train\b/i.test(normalizedCurrent)
+      || /\bwhat\s+workout\s+should\s+i\s+do\b/i.test(normalizedCurrent)
+    )
+    && !hasWorkoutMetricDetail(currentParsedWorkout)
+    && !Number(currentParsedWorkout?.duration_seconds || 0)
+    && !Number(currentParsedWorkout?.distance_km || 0)
+  )
+
+  if (workoutPlanningQuestion) return null
 
   if (prior.persisted && deleteRequested) {
     return {
@@ -1816,7 +1842,6 @@ function buildWorkoutSessionState(recentMessages = [], currentMessage = "", exis
   const preservedCandidateActivities = safeArray(prior.candidateActivities, 8)
     .map((activity) => normalizeWorkoutCandidateActivity(activity))
     .filter(Boolean)
-  const currentParsedWorkout = parseWorkoutMessage(currentMessage)
   const reusesCandidateActivities = shouldReuseWorkoutCandidateActivities(prior, currentMessage, currentParsedWorkout)
 
   if ((prior.active || prior.persisted) && !isExplicitMealStart(normalizedCurrent)) {
