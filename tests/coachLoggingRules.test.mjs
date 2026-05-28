@@ -248,6 +248,43 @@ test("coach logging rules do not loose-estimate a single unresolved measured mea
   assert.equal(action, null)
 })
 
+test("coach logging rules can loose-estimate a single compound-food meal in an explicit mixed turn", () => {
+  const action = buildDeterministicMealAction({
+    mealSession: {
+      readyToLog: false,
+      alreadyLogged: false,
+      wantsLogging: true,
+      summary: "eggs bacon toast",
+      items: [
+        {
+          baseName: "eggs bacon toast",
+          label: "Eggs Bacon Toast",
+          category: "food",
+          quantity: null,
+          exclusions: [],
+        },
+      ],
+      pendingClarification: {
+        type: "quantity",
+        targetReference: "eggs bacon toast",
+        targetBaseName: "eggs bacon toast",
+        targetLabel: "Eggs Bacon Toast",
+      },
+      intentGraph: {
+        hasMixedDomains: true,
+      },
+    },
+    explicitActions: [],
+    allowLooseEstimate: true,
+    prompt: "i had eggs bacon toast and did bench 80kg 5x5 then ran 2km",
+  })
+
+  assert.ok(action)
+  assert.equal(action.type, "log_meal")
+  assert.match(action.food_name.toLowerCase(), /eggs bacon toast/)
+  assert.ok(action.calories > 0)
+})
+
 test("coach logging rules do not loose-estimate an ambiguous drink-plus-food mixed turn without an explicit log-all-that request", () => {
   const action = buildDeterministicMealAction({
     mealSession: {

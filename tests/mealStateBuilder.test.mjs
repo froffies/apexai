@@ -251,6 +251,18 @@ test("graph-native meal session keeps a simple tea clarification thread out of l
   assert.equal(session.summary, "250ml Earl Grey tea with no milk and no sugar")
 })
 
+test("graph-native meal session keeps a simple steak and tea start out of legacy fallback", () => {
+  const session = buildMealContext([], "i had steak and tea", emptyMealSession())
+
+  assert.ok(session)
+  assertGraphNativeSession(session)
+  assert.deepEqual(
+    session.items.filter((item) => !item.attached_to).map((item) => item.base_name).sort(),
+    ["steak", "tea"],
+  )
+  assert.equal(session.clarifyQuestion, "How much tea did you have?")
+})
+
 test("graph-native meal session keeps a simple quantity correction out of legacy fallback", () => {
   const { snapshots, session } = replayMealConversation([
     user("i had chicken"),
@@ -436,6 +448,60 @@ test("meal session does not coerce another unresolved drink detail into a cookin
   )
   assert.equal(session.readyToLog, true)
   assert.equal(session.summary, "4 fried tofu cooked in 15g olive oil, plus 437ml milk with no sugar")
+})
+
+test("meal session keeps a user-only fragmented drink reply from hijacking a pending cooked-in clarification", () => {
+  const { session, snapshots } = replayMealConversation([
+    user("i had eggs and coffee"),
+    user("1 fried eggs"),
+    user("472ml coffee no sugar"),
+    user("cooked in 15g gravy"),
+  ])
+
+  assert.ok(session)
+  assertGraphNativeSession(session)
+  assert.equal(snapshots[2].session.clarifyQuestion, "What were the fried eggs cooked in?")
+  assert.equal(snapshots[2].session.summary, "1 fried eggs, plus 472ml coffee with no sugar")
+  assert.equal(
+    snapshots[2].session.items.some((item) => item.attached_to?.includes("egg") && /coffee/i.test(`${item.base_name} ${item.label}`)),
+    false,
+  )
+  assert.equal(session.readyToLog, true)
+  assert.equal(session.summary, "1 fried eggs cooked in 15g gravy, plus 472ml coffee with no sugar")
+})
+
+test("meal session keeps a user-only fragmented ingredient reply from clearing a pending drink quantity", () => {
+  const { session, snapshots } = replayMealConversation([
+    user("i had eggs and coffee"),
+    user("1 fried eggs"),
+    user("cooked in 15g gravy"),
+    user("472ml coffee no sugar"),
+  ])
+
+  assert.ok(session)
+  assertGraphNativeSession(session)
+  assert.equal(snapshots[2].session.clarifyQuestion, "How much coffee did you have?")
+  assert.equal(snapshots[2].session.summary, "1 fried eggs cooked in 15g gravy, plus coffee")
+  assert.equal(session.readyToLog, true)
+  assert.equal(session.summary, "1 fried eggs cooked in 15g gravy, plus 472ml coffee with no sugar")
+})
+
+test("meal session keeps a simple user-only steak and tea fragmentation out of legacy collapse", () => {
+  const { session, snapshots } = replayMealConversation([
+    user("i had steak and tea"),
+    user("1 roasted steak"),
+    user("399ml tea no sugar"),
+    user("cooked in 15g butter"),
+  ])
+
+  assert.ok(session)
+  assertGraphNativeSession(session)
+  assert.equal(snapshots[0].session.summary, "1 serve steak, plus tea")
+  assert.equal(snapshots[0].session.clarifyQuestion, "How much tea did you have?")
+  assert.equal(snapshots[1].session.summary, "1 roasted steak, plus tea")
+  assert.equal(snapshots[1].session.clarifyQuestion, "How much tea did you have?")
+  assert.equal(session.readyToLog, true)
+  assert.equal(session.summary, "1 roasted steak cooked in 15g butter, plus 399ml tea with no sugar")
 })
 
 test("meal session keeps frustration text out of saved summaries across varied meal combinations", () => {

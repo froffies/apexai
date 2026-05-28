@@ -23,9 +23,9 @@ const PREPARATIONS = ["fried", "grilled", "baked", "boiled", "hard boiled", "har
 const COOKING_PREPARATIONS = new Set(["fried", "grilled", "baked", "boiled", "hard boiled", "hardboiled", "soft boiled", "softboiled", "poached", "scrambled", "roasted", "steamed"])
 const DRINK_WORDS = ["tea", "coffee", "juice", "water", "milk", "smoothie", "shake", "latte", "espresso", "flat white", "long black", "cappuccino", "beer", "wine", "soda", "cola"]
 const INGREDIENT_WORDS = ["butter", "oil", "cheese", "sugar", "milk", "cream", "sauce", "gravy", "dressing", "vegemite", "jam", "honey", "salt", "pesto", "mayo"]
-const FOOD_HINTS = ["egg", "eggs", "chicken", "rice", "beef", "pork", "lamb", "fish", "salmon", "tuna", "toast", "bread", "tea", "coffee", "juice", "milk", "beans", "oats", "yoghurt", "yogurt", "butter", "oil", "cheese", "potato", "salad", "apple", "banana", "celery", "chocolate", "pasta", "chips", "fries", "burger", "taco", "tacos", "vegemite", "berry", "berries", "whey", "almond milk"]
+const FOOD_HINTS = ["egg", "eggs", "chicken", "rice", "beef", "steak", "pork", "lamb", "fish", "salmon", "tuna", "toast", "bread", "tea", "coffee", "juice", "milk", "beans", "oats", "yoghurt", "yogurt", "butter", "oil", "cheese", "potato", "salad", "apple", "banana", "celery", "chocolate", "pasta", "chips", "fries", "burger", "taco", "tacos", "vegemite", "berry", "berries", "whey", "almond milk"]
 const COUNT_REQUIRED = new Set(["egg"])
-const STOPWORDS = new Set(["i", "had", "have", "ate", "drank", "also", "just", "then", "the", "a", "an", "my", "for", "to", "at", "with", "and", "plus", "of", "it", "that", "this", "was", "were", "is", "are", "did", "do", "done", "log", "track", "save", "add", "include", "today"])
+const STOPWORDS = new Set(["i", "had", "have", "ate", "drank", "also", "just", "then", "but", "the", "a", "an", "my", "for", "to", "at", "with", "and", "plus", "of", "it", "that", "this", "was", "were", "is", "are", "did", "do", "done", "log", "track", "save", "add", "include", "today"])
 
 const MEAL_START_PATTERN = /^(?:please\s+)?(?:(?:i\s+)?(?:had|ate|drank)|log|track|save|add|include)\b/i
 const CORRECTION_PREFIX = /^(?:actually|sorry|correction|no\s+wait|wait|i meant|make that|change that(?: to)?|update that(?: to)?|instead)\b/i
@@ -167,10 +167,11 @@ function isSimpleFoodDrinkStart(currentMessage = "") {
   const normalizedClauses = currentClauses.map((fragment) => cleanText(fragment))
   if (normalizedClauses.some((fragment) => !fragment || isWorkoutish(fragment) || detectQuestionOnlyTurn(fragment) || hasDigits(fragment))) return false
   const drinkClauses = normalizedClauses.filter((fragment) => mentionsDrink(fragment))
-  const countFoodClauses = normalizedClauses.filter((fragment) => (
-    [...COUNT_REQUIRED].some((food) => containsWord(fragment, food) || containsWord(fragment, `${food}s`))
+  const foodClauses = normalizedClauses.filter((fragment) => (
+    !mentionsDrink(fragment)
+    && Boolean(canonicalBaseName(baseNameFromText(fragment)))
   ))
-  return drinkClauses.length === 1 && countFoodClauses.length === 1
+  return drinkClauses.length === 1 && foodClauses.length === 1
 }
 
 function isGraphNativeFriendlyDrinkStart(currentMessage = "") {
@@ -334,6 +335,7 @@ function extractExclusions(text = "") {
 function stripLead(text = "") {
   return String(text || "")
     .replace(/,/g, " ")
+    .replace(/^\s*but\s+/i, "")
     .replace(MEAL_START_PATTERN, "")
     .replace(CORRECTION_PREFIX, "")
     .replace(TRAILING_LOG_DIRECTIVE_PATTERN, "")
@@ -626,8 +628,24 @@ function mergeRoot(state, nextItem) {
   if (target.category === "drink") state.lastDrinkKey = cleanText(target.base_name)
 }
 
+function defaultIngredientTarget(state, relation = "with") {
+  const currentTarget = findRootByReference(state, state.lastMainReference)
+  if (relation !== "cooked_in") {
+    return currentTarget || unresolvedRoots(state).slice(-1)[0] || null
+  }
+  if (currentTarget?.category === "food") return currentTarget
+  const preparedFood = unresolvedRoots(state)
+    .filter((item) => item.category === "food" && item.preparation.length)
+    .slice(-1)[0] || null
+  if (preparedFood) return preparedFood
+  const latestFood = unresolvedRoots(state)
+    .filter((item) => item.category === "food")
+    .slice(-1)[0] || null
+  return latestFood || currentTarget || unresolvedRoots(state).slice(-1)[0] || null
+}
+
 function attachIngredient(state, ingredient, relation = "with", explicitTarget = null) {
-  const target = explicitTarget || findRootByReference(state, state.lastMainReference) || unresolvedRoots(state).slice(-1)[0] || null
+  const target = explicitTarget || defaultIngredientTarget(state, relation)
   if (!target) return
   const existing = state.items.find((item) => item.attached_to === itemReference(target) && item.relation === relation && singularize(item.base_name) === singularize(ingredient.base_name))
   if (existing) {
@@ -643,6 +661,67 @@ function attachIngredient(state, ingredient, relation = "with", explicitTarget =
   })
 }
 
+function applyAlternatePendingReply(state, pending, parsed) {
+  const pendingReference = cleanText(pending?.targetReference || "")
+  if (!parsed || !pendingReference) return false
+
+  if (parsed.kind === "item") {
+    const alternateTarget = findRootByBaseName(state, parsed.item.base_name)
+    if (!alternateTarget || itemReference(alternateTarget) === pendingReference) return false
+    mergeRoot(state, parsed.item)
+    state.nextClarificationReference = pendingReference
+    return true
+  }
+
+  if (parsed.kind === "item_with_attachment") {
+    const alternateTarget = findRootByBaseName(state, parsed.item.base_name)
+    if (!alternateTarget || itemReference(alternateTarget) === pendingReference) return false
+    mergeRoot(state, parsed.item)
+    const mergedTarget = findRootByBaseName(state, parsed.item.base_name) || alternateTarget
+    attachIngredient(state, parseIngredientItem(parsed.ingredientText), parsed.relation || "with", mergedTarget)
+    state.nextClarificationReference = pendingReference
+    return true
+  }
+
+  if (parsed.kind === "bind_variant") {
+    const variantTarget = parsed.targetReference ? findRootByReference(state, parsed.targetReference) : null
+    if (!variantTarget || itemReference(variantTarget) === pendingReference) return false
+    const suffix = cleanText(parsed.variantText).includes(cleanText(variantTarget.base_name))
+      ? parsed.variantText
+      : `${parsed.variantText} ${variantTarget.base_name}`
+    variantTarget.base_name = cleanText(suffix)
+    variantTarget.label = itemLabel(suffix)
+    state.lastDrinkKey = cleanText(suffix)
+    state.nextClarificationReference = itemReference(variantTarget)
+    return true
+  }
+
+  if (parsed.kind === "bind_exclusions") {
+    const exclusionTarget = parsed.targetReference ? findRootByReference(state, parsed.targetReference) : null
+    if (!exclusionTarget || itemReference(exclusionTarget) === pendingReference) return false
+    exclusionTarget.exclusions = [...new Set([...exclusionTarget.exclusions, ...parsed.exclusions])]
+    state.nextClarificationReference = itemReference(exclusionTarget)
+    return true
+  }
+
+  if (parsed.kind === "bind_ingredient") {
+    const alternateMissing = missingDetails(state).find((entry) => (
+      entry.type === "ingredient" && itemReference(entry.item) !== pendingReference
+    ))
+    if (!alternateMissing) return false
+    attachIngredient(
+      state,
+      parseIngredientItem(parsed.ingredientText),
+      parsed.relation || alternateMissing.relation || "with",
+      alternateMissing.item,
+    )
+    state.nextClarificationReference = pendingReference
+    return true
+  }
+
+  return false
+}
+
 function resolvePendingReply(state, text) {
   const pending = state.pendingClarification
   if (!pending) return false
@@ -654,6 +733,7 @@ function resolvePendingReply(state, text) {
   }
   if (pending.type === "quantity") {
     const parsed = parseItemFragment(text, state)
+    if (applyAlternatePendingReply(state, pending, parsed)) return true
     const target = findRootByReference(state, pending.targetReference) || findRootByBaseName(state, pending.targetBaseName)
     const targetMatchesParsedItem = Boolean(
       parsed.kind === "item"
@@ -726,6 +806,8 @@ function resolvePendingReply(state, text) {
     return false
   }
   if (pending.type === "ingredient") {
+    const parsed = parseItemFragment(text, state)
+    if (applyAlternatePendingReply(state, pending, parsed)) return true
     const target = findRootByReference(state, pending.targetReference) || findRootByBaseName(state, pending.targetBaseName)
     if (!target) return false
     const ingredientText = String(text || "").replace(/^(?:cooked|fried)\s+in\s+|^with\s+/i, "").trim()

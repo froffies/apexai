@@ -616,6 +616,14 @@ function blocksLooseEstimateForPendingQuantityItem(mealSession) {
   if (String(mealSession?.pendingClarification?.type || "") !== "quantity") return false
   const roots = rootSessionItems(mealSession)
   if (!roots.length) return false
+  if (
+    mealSession?.intentGraph?.hasMixedDomains
+    && roots.length === 1
+    && String(roots[0]?.category || "").trim().toLowerCase() === "food"
+    && normalizeSessionBaseName(roots[0]).split(/\s+/).filter(Boolean).length >= 2
+  ) {
+    return false
+  }
   const targetBaseName = String(mealSession?.pendingClarification?.targetBaseName || "").trim().toLowerCase()
   const targetReference = String(mealSession?.pendingClarification?.targetReference || "").trim().toLowerCase()
   const root = roots.find((item) => normalizeSessionBaseName(item) === targetBaseName)

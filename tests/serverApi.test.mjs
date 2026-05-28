@@ -1243,28 +1243,28 @@ test("deterministic coach keeps a new explicit meal isolated, finishes missing q
   assert.doesNotMatch(fourth.coach.meal_session?.summary || "", /fried eggs|hard boiled eggs|butter/i)
 
   const fifth = await send("970ml", { mealSession: fourth.coach.meal_session })
-  assert.equal(fifth.coach.actions?.[0]?.type, "clarify")
-  assert.match(fifth.coach.reply, /how much steak/i)
+  assert.equal(fifth.coach.actions?.[0]?.type, "log_meal")
+  assert.equal(fifth.coach.actions?.[0]?.food_name, "970ml milk, plus 1 serve steak")
   assert.equal(fifth.coach.meal_session?.summary, "970ml milk, plus 1 serve steak")
 
-  const sixth = await send("but i had 3 steaks", { mealSession: fifth.coach.meal_session })
-  assert.equal(sixth.coach.actions?.[0]?.type, "log_meal")
-  assert.equal(sixth.coach.actions?.[0]?.food_name, "970ml milk, plus 3 steaks")
-
   const persistedSecondMeal = {
-    ...sixth.coach.meal_session,
+    ...fifth.coach.meal_session,
     active: false,
     readyToLog: false,
     persisted: true,
     persistedMealId: "meal_second_live",
-    persistedSummary: sixth.coach.actions?.[0]?.food_name,
+    persistedSummary: fifth.coach.actions?.[0]?.food_name,
     persistedAt: "2026-05-13T00:05:00.000Z",
     deleteRequested: false,
     alreadyLogged: false,
   }
 
+  const sixth = await send("but i had 3 steaks", { mealSession: persistedSecondMeal })
+  assert.equal(sixth.coach.actions?.[0]?.type, "update_meal_log")
+  assert.equal(sixth.coach.actions?.[0]?.food_name, "970ml milk, plus 3 steaks")
+
   const persistedUpdatedMeal = {
-    ...persistedSecondMeal,
+    ...sixth.coach.meal_session,
     active: false,
     readyToLog: false,
     persisted: true,
