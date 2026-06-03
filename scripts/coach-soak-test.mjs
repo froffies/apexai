@@ -522,24 +522,38 @@ async function findSupabaseUserByEmail(adminClient, email) {
 }
 
 async function ensureLiveTestUser(live) {
-  const explicitEmail = String(process.env.E2E_SUPABASE_EMAIL || "").trim()
-  const explicitPassword = String(process.env.E2E_SUPABASE_PASSWORD || "").trim()
   const customEmail = String(process.env.COACH_SOAK_LIVE_EMAIL || "").trim()
   const customPassword = String(process.env.COACH_SOAK_LIVE_PASSWORD || "").trim()
-  const usingExplicitCreds = Boolean(explicitEmail && explicitPassword)
-  const email = usingExplicitCreds
-    ? explicitEmail
-    : customEmail || "coach-soak-live@apexai.app"
-  const password = usingExplicitCreds
-    ? explicitPassword
-    : customPassword || `CoachSoak!${Date.now()}Aa1`
+  const email = customEmail || "coach-soak-live@apexai.app"
+  const password = customPassword || `CoachSoak!${Date.now()}Aa1`
+  const usingManagedSoakUser = !customPassword
 
-  if (!usingExplicitCreds && !customPassword) {
-    const existingUser = await findSupabaseUserByEmail(live.adminClient, email)
+  const existingUser = await findSupabaseUserByEmail(live.adminClient, email)
+  if (usingManagedSoakUser) {
     if (existingUser?.id) {
       const { error } = await live.adminClient.auth.admin.deleteUser(existingUser.id)
       if (error) throw error
     }
+    const { data, error } = await live.adminClient.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+      user_metadata: { full_name: "Coach Soak" },
+    })
+    if (error) throw error
+    live.userId = data?.user?.id || ""
+  } else if (existingUser?.id) {
+    const { error } = await live.adminClient.auth.admin.updateUserById(existingUser.id, {
+      password,
+      email_confirm: true,
+      user_metadata: {
+        ...(existingUser.user_metadata || {}),
+        full_name: existingUser.user_metadata?.full_name || "Coach Soak",
+      },
+    })
+    if (error) throw error
+    live.userId = existingUser.id
+  } else {
     const { data, error } = await live.adminClient.auth.admin.createUser({
       email,
       password,
@@ -555,19 +569,63 @@ async function ensureLiveTestUser(live) {
   return live
 }
 
-async function refreshLiveAuthToken(live) {
-  const { data, error } = await live.authClient.auth.signInWithPassword({
-    email: live.email,
-    password: live.password,
+async function repairLiveAuthCredentials(live) {
+  const email = String(live?.email || "").trim()
+  const password = String(live?.password || "").trim()
+  if (!email || !password) return false
+
+  const existingUser = await findSupabaseUserByEmail(live.adminClient, email)
+  if (existingUser?.id) {
+    const { error } = await live.adminClient.auth.admin.updateUserById(existingUser.id, {
+      password,
+      email_confirm: true,
+      user_metadata: {
+        ...(existingUser.user_metadata || {}),
+        full_name: existingUser.user_metadata?.full_name || "Coach Soak",
+      },
+    })
+    if (error) throw error
+    live.userId = existingUser.id
+    return true
+  }
+
+  const { data, error } = await live.adminClient.auth.admin.createUser({
+    email,
+    password,
+    email_confirm: true,
+    user_metadata: { full_name: "Coach Soak" },
   })
   if (error) throw error
-  live.accessToken = String(data?.session?.access_token || "")
-  live.refreshToken = String(data?.session?.refresh_token || "")
-  live.userId = String(data?.user?.id || live.userId || "")
-  if (!live.accessToken || !live.userId) {
-    throw new Error("Live soak sign-in did not return a usable access token.")
+  live.userId = data?.user?.id || ""
+  return true
+}
+
+async function refreshLiveAuthToken(live) {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const { data, error } = await live.authClient.auth.signInWithPassword({
+      email: live.email,
+      password: live.password,
+    })
+
+    if (!error) {
+      live.accessToken = String(data?.session?.access_token || "")
+      live.refreshToken = String(data?.session?.refresh_token || "")
+      live.userId = String(data?.user?.id || live.userId || "")
+      if (!live.accessToken || !live.userId) {
+        throw new Error("Live soak sign-in did not return a usable access token.")
+      }
+      return live.accessToken
+    }
+
+    const normalizedMessage = cleanText(error?.message || "")
+    const canRepair = attempt === 0 && /invalid login credentials/.test(normalizedMessage)
+    if (!canRepair) throw error
+
+    const repaired = await repairLiveAuthCredentials(live)
+    if (!repaired) throw error
   }
-  return live.accessToken
+
+  throw new Error("Live soak sign-in did not return a usable access token.")
 }
 
 async function getLiveAuthToken(live) {

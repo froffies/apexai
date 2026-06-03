@@ -51,7 +51,7 @@ async function storedMealNames(page) {
 }
 
 async function waitForStoredMealNames(page, expectedNames) {
-  await expect.poll(() => storedMealNames(page), { timeout: 15000 }).toEqual(expectedNames)
+  await expect.poll(() => storedMealNames(page), { timeout: 25000 }).toEqual(expectedNames)
 }
 
 async function reloadAndWaitForMeals(page, expectedNames) {

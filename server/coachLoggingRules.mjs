@@ -278,6 +278,8 @@ export function normalizeAction(action) {
 
 export function replyClaimsPersistence(reply) {
   const text = String(reply || "")
+    .replace(/â€™/g, "'")
+    .replace(/[’]/g, "'")
   return /\b(logged|saved|tracked|added|recorded|updated|deleted|removed)\b/i.test(text)
     || /\b(?:i(?:'ll| will)|i can|let'?s)\s+(?:log|save|track|add|record|update|delete|remove)\b/i.test(text)
 }

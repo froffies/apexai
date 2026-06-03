@@ -984,6 +984,40 @@ test("normalizeCoachResponse strict AI-first treats 'I can log' save wording as 
   assert.equal(payload.reply, "What were the fried steak cooked in?")
 })
 
+test("normalizeCoachResponse strict AI-first treats mojibake 'Letâ€™s log' save wording as persistence when an ingredient clarification is still open", () => {
+  const payload = normalizeCoachResponse({
+    reply: "You've had 5 fried tofu and 406ml of tea with no sugar. Letâ€™s log that meal!",
+    actions: [],
+    warnings: [],
+  }, {
+    preferAIFirst: true,
+    strictAIFirst: true,
+    mealContext: {
+      readyToLog: false,
+      alreadyLogged: false,
+      clarifyQuestion: "What were the fried tofu cooked in?",
+      pendingClarification: {
+        type: "ingredient",
+        targetReference: "tofu",
+        targetBaseName: "tofu",
+        targetLabel: "Tofu",
+        relation: "cooked_in",
+      },
+    },
+    candidatePersistenceActions: [],
+    responseHints: {
+      clarify_hints: {
+        meal: "What were the fried tofu cooked in?",
+      },
+    },
+  })
+
+  assert.equal(payload.actions.length, 1)
+  assert.equal(payload.actions[0].type, "clarify")
+  assert.equal(payload.actions[0].message, "What were the fried tofu cooked in?")
+  assert.equal(payload.reply, "What were the fried tofu cooked in?")
+})
+
 test("normalizeCoachResponse strict AI-first recovers a meal clarify action from a good live AI clarify reply", () => {
   const payload = normalizeCoachResponse({
     reply: "You've mentioned having steak and tea. How much tea did you have?",
