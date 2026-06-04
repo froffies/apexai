@@ -37,7 +37,9 @@ function tokenVariants(value = "") {
 function replyAddressesMealQuantityClarification(reply = "", mealContext = null) {
   if (String(mealContext?.pendingClarification?.type || "") !== "quantity") return false
   const normalizedReply = cleanReplyText(reply)
-  if (!/\bhow\s+(?:much|many)\b/.test(normalizedReply)) return false
+  if (!/\b(?:how\s+(?:much|many)|(?:i(?:'m| am)\s+asking|tell me|i still need to know)\s+how\s+(?:much|many))\b/.test(normalizedReply)) {
+    return false
+  }
   const targetTokens = [
     ...tokenVariants(mealContext?.pendingClarification?.targetLabel || ""),
     ...tokenVariants(mealContext?.pendingClarification?.targetBaseName || ""),
