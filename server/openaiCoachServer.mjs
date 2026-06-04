@@ -470,6 +470,24 @@ function buildDeterministicFallbackPayload({
     }
   }
 
+  const fallbackPersistenceActions = offlineDeterministicActions.filter(isPersistenceAction)
+  if (fallbackPersistenceActions.length && (mealClarifyHint || workoutClarifyHint)) {
+    const combinedActions = [
+      ...fallbackPersistenceActions,
+      ...[mealClarifyHint, workoutClarifyHint].filter(Boolean),
+    ]
+    return {
+      routeType: "deterministic-fallback",
+      payload: {
+        reply: combinedActions.map((action) => summarizeCoachAction(action)).filter(Boolean).join(" "),
+        actions: combinedActions,
+        warnings: [],
+        meal_session: mealContext,
+        workout_session: workoutContext,
+      },
+    }
+  }
+
   if (mealAlreadyLoggedGuard) {
     return {
       routeType: "deterministic-fallback",

@@ -348,6 +348,79 @@ test("coach falls back to deterministic candidate persistence when the upstream 
   assert.match(secondCoach.actions?.[0]?.food_name || "", /1 bowl chips/i)
 })
 
+test("coach upstream AI failure keeps a ready workout save alongside a meal clarification in mixed threads", async (t) => {
+  const port = randomPort()
+  const serverProcess = spawn(process.execPath, [serverEntry], {
+    cwd,
+    env: {
+      ...process.env,
+      OPENAI_COACH_PORT: String(port),
+      OPENAI_COACH_REQUIRE_AUTH: "false",
+      OPENAI_COACH_CORS_ORIGIN: "http://127.0.0.1:5173",
+      OPENFOODFACTS_ENABLED: "false",
+      OPENAI_API_KEY: "test-key",
+      OPENAI_BASE_URL: "http://127.0.0.1:9/v1",
+      NODE_ENV: "production",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  })
+
+  t.after(async () => {
+    serverProcess.kill()
+  })
+
+  await waitForHealth(port)
+
+  const firstResponse = await fetch(`http://127.0.0.1:${port}/api/coach`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Origin: "http://127.0.0.1:5173",
+    },
+    body: JSON.stringify({
+      message: "i had milk and eggs and did a pushup",
+      recentMessages: [],
+      meals: [],
+      workouts: [],
+      workoutSets: [],
+      mealSession: {},
+      workoutSession: {},
+    }),
+  })
+  const firstCoach = await firstResponse.json()
+  assert.equal(firstResponse.status, 200)
+  assert.equal(firstCoach.actions?.some((action) => action.type === "log_workout"), true)
+  assert.equal(firstCoach.actions?.some((action) => action.type === "clarify"), true)
+  assert.match(firstCoach.reply || "", /saved to workouts/i)
+  assert.match(firstCoach.reply || "", /how much milk/i)
+
+  const secondResponse = await fetch(`http://127.0.0.1:${port}/api/coach`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Origin: "http://127.0.0.1:5173",
+    },
+    body: JSON.stringify({
+      message: "18 eggs one pushup also milk",
+      recentMessages: [
+        { role: "user", content: "i had milk and eggs and did a pushup" },
+        { role: "assistant", content: firstCoach.reply || "" },
+      ],
+      meals: [],
+      workouts: [],
+      workoutSets: [],
+      mealSession: firstCoach.meal_session || {},
+      workoutSession: firstCoach.workout_session || {},
+    }),
+  })
+  const secondCoach = await secondResponse.json()
+  assert.equal(secondResponse.status, 200)
+  assert.equal(secondCoach.actions?.some((action) => action.type === "log_workout"), true)
+  assert.equal(secondCoach.actions?.some((action) => action.type === "clarify"), true)
+  assert.match(secondCoach.reply || "", /saved to workouts/i)
+  assert.match(secondCoach.reply || "", /how much milk/i)
+})
+
 test("coach falls back to an already-logged reply when the upstream AI call fails on a repeated meal", async (t) => {
   const port = randomPort()
   const serverProcess = spawn(process.execPath, [serverEntry], {
