@@ -413,6 +413,7 @@ export function normalizeCoachResponse(value, context = {}) {
       .filter(shouldAllowAction)
       .slice(0, 8)
   }
+  const workoutCompletionReplyAcknowledged = replyAcknowledgesWorkoutCompletion(originalReply, context.workoutContext)
   const shouldRecoverSingleWorkoutActionDuringMealClarification = Boolean(
     preferAIFirst
     && originalReply
@@ -423,8 +424,12 @@ export function normalizeCoachResponse(value, context = {}) {
     && context.workoutContext?.readyToLog
     && String(context.mealContext?.pendingClarification?.type || "") === "quantity"
     && replyAddressesMealQuantityClarification(originalReply, context.mealContext)
-    && replyAcknowledgesWorkoutCompletion(originalReply, context.workoutContext)
+    && (
+      workoutCompletionReplyAcknowledged
+      || (strictAIFirst && !replyClaimsPersistence(originalReply))
+    )
   )
+  let prependRecoveredWorkoutSummary = false
   if (shouldRecoverSingleWorkoutActionDuringMealClarification) {
     actions = [
       ...actions,
@@ -433,6 +438,7 @@ export function normalizeCoachResponse(value, context = {}) {
       .map(normalizeMealAction)
       .filter(shouldAllowAction)
       .slice(0, 8)
+    prependRecoveredWorkoutSummary = strictAIFirst && !workoutCompletionReplyAcknowledged
   }
   const canRecoverMealClarifyAction = Boolean(
     preferAIFirst
@@ -497,6 +503,13 @@ export function normalizeCoachResponse(value, context = {}) {
     summarizeCoachActions(actions) ||
     summarizeCoachAction(actions[0]) ||
     "Tell me what happened or what you want to change, and I'll help you sort the next move."
+
+  if (prependRecoveredWorkoutSummary) {
+    const workoutSummaryPrefix = summarizeCoachAction(singleCandidatePersistenceAction)
+    if (workoutSummaryPrefix && !cleanReplyText(reply).includes(cleanReplyText(workoutSummaryPrefix))) {
+      reply = `${workoutSummaryPrefix} ${reply}`.trim()
+    }
+  }
 
   const hasMealPersistenceAction = actions.some(isMealPersistenceAction)
   const hasWorkoutPersistenceAction = actions.some(isWorkoutPersistenceAction)

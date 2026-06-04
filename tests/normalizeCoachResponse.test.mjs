@@ -595,6 +595,61 @@ test("normalizeCoachResponse recovers a single ready workout save when the AI ke
   assert.match(payload.reply, /light milk/i)
 })
 
+test("normalizeCoachResponse strict AI-first recovers a single ready workout save when the AI only asks the meal clarification", () => {
+  const payload = normalizeCoachResponse({
+    reply: "How much milk did you have?",
+    actions: [],
+    warnings: [],
+  }, {
+    preferAIFirst: true,
+    strictAIFirst: true,
+    mealContext: {
+      readyToLog: false,
+      alreadyLogged: false,
+      pendingClarification: {
+        type: "quantity",
+        targetReference: "milk",
+        targetBaseName: "milk",
+        targetLabel: "Milk",
+      },
+    },
+    workoutContext: {
+      readyToLog: true,
+      alreadyLogged: false,
+      exercise_name: "Pushup",
+      workout_type: "Pushup",
+      muscle_group: "full_body",
+      sets: 1,
+      reps: 1,
+      weight_kg: 0,
+      duration_seconds: 0,
+      distance_km: 0,
+    },
+    candidatePersistenceActions: [{
+      type: "log_workout",
+      exercise_name: "Pushup",
+      workout_type: "Pushup",
+      muscle_group: "full_body",
+      sets: 1,
+      reps: 1,
+      weight_kg: 0,
+      duration_seconds: 0,
+      distance_km: 0,
+    }],
+    responseHints: {
+      clarify_hints: {
+        meal: "How much milk did you have?",
+      },
+    },
+  })
+
+  assert.equal(payload.actions.some((action) => action.type === "log_workout"), true)
+  assert.equal(payload.actions.some((action) => action.type === "clarify"), true)
+  assert.equal(payload.actions.find((action) => action.type === "log_workout")?.exercise_name, "Pushup")
+  assert.match(payload.reply, /saved to workouts/i)
+  assert.match(payload.reply, /how much milk/i)
+})
+
 test("normalizeCoachResponse does not rebuild duplicate deterministic meal or workout actions when validated actions already include them", () => {
   const payload = normalizeCoachResponse({
     reply: "I've logged 18 eggs and 1 set of 4 pushups for you.",
