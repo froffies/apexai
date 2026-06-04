@@ -51,7 +51,12 @@ const nodeEnv = process.env.NODE_ENV || "development"
 const isProduction = nodeEnv === "production"
 const configuredCorsOrigins = (process.env.OPENAI_COACH_CORS_ORIGIN || (nodeEnv === "production" ? "" : "http://127.0.0.1:5173,http://localhost:5173,http://127.0.0.1:4173,http://localhost:4173")).split(",").map((origin) => origin.trim()).filter(Boolean)
 const fallbackCorsOrigin = configuredCorsOrigins[0] || "null"
-const client = process.env.OPENAI_API_KEY ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null
+const client = process.env.OPENAI_API_KEY
+  ? new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+      ...(process.env.OPENAI_BASE_URL ? { baseURL: process.env.OPENAI_BASE_URL } : {}),
+    })
+  : null
 const requireAuth = process.env.OPENAI_COACH_REQUIRE_AUTH ? process.env.OPENAI_COACH_REQUIRE_AUTH === "true" : isProduction
 const supabaseUrl = process.env.SUPABASE_URL || ""
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || ""
@@ -437,6 +442,79 @@ function buildCoachConversationWindow(recentMessages = [], currentMessage = "", 
     ...(currentMessage ? [{ role: "user", content: String(currentMessage || "") }] : []),
     ...(assistantReply ? [{ role: "assistant", content: String(assistantReply || "") }] : []),
   ]
+}
+
+function buildDeterministicFallbackPayload({
+  offlineDeterministicActions = [],
+  nutritionStatusReply = "",
+  mealClarifyHint = null,
+  workoutClarifyHint = null,
+  mealContext = null,
+  workoutContext = null,
+  body = {},
+}) {
+  if (!mealClarifyHint && !workoutClarifyHint && offlineDeterministicActions.length) {
+    return {
+      routeType: "deterministic-fallback",
+      payload: {
+        reply: offlineDeterministicActions.map((action) => summarizeCoachAction(action)).filter(Boolean).join(" "),
+        actions: offlineDeterministicActions,
+        warnings: [],
+        meal_session: mealContext,
+        workout_session: workoutContext,
+      },
+    }
+  }
+
+  if (nutritionStatusReply) {
+    return {
+      routeType: "deterministic-fallback",
+      payload: {
+        reply: nutritionStatusReply,
+        actions: [],
+        warnings: [],
+        meal_session: mealContext,
+        workout_session: workoutContext,
+      },
+    }
+  }
+
+  if (mealClarifyHint) {
+    return {
+      routeType: "deterministic-fallback",
+      payload: {
+        reply: mealClarifyHint.message || "I need a bit more detail before I can log that meal.",
+        actions: [mealClarifyHint],
+        warnings: [],
+        meal_session: mealContext,
+        workout_session: workoutContext,
+      },
+    }
+  }
+
+  if (workoutClarifyHint) {
+    return {
+      routeType: "deterministic-fallback",
+      payload: {
+        reply: workoutClarifyHint.message,
+        actions: [workoutClarifyHint],
+        warnings: [],
+        meal_session: mealContext,
+        workout_session: workoutContext,
+      },
+    }
+  }
+
+  return {
+    routeType: "fallback",
+    payload: {
+      reply: buildOfflineCoachFallbackReply(body.message),
+      actions: [],
+      warnings: [],
+      meal_session: mealContext,
+      workout_session: workoutContext,
+    },
+  }
 }
 
 function isPersistenceAction(action) {
@@ -1314,35 +1392,49 @@ async function handleCoach(request, response) {
       },
     }
 
-    const completion = await client.chat.completions.create({
-      model,
-      max_completion_tokens: 500,
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: coachInstructions },
-        { role: "user", content: JSON.stringify(payload) },
-      ],
-    })
+    try {
+      const completion = await client.chat.completions.create({
+        model,
+        max_completion_tokens: 500,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: coachInstructions },
+          { role: "user", content: JSON.stringify(payload) },
+        ],
+      })
 
-    const parsed = JSON.parse(completion.choices[0]?.message?.content || "{}")
-    sendCoachPayload({
-      ...normalizeCoachResponse(parsed, {
-        prompt: body.message,
-        recentMessages: contextualRecentMessages,
-        recentMeals: safeArray(body.meals, 12),
-        recentWorkouts: safeArray(body.workouts, 12),
+      const parsed = JSON.parse(completion.choices[0]?.message?.content || "{}")
+      sendCoachPayload({
+        ...normalizeCoachResponse(parsed, {
+          prompt: body.message,
+          recentMessages: contextualRecentMessages,
+          recentMeals: safeArray(body.meals, 12),
+          recentWorkouts: safeArray(body.workouts, 12),
+          mealContext,
+          workoutContext,
+          nutritionStatusReply,
+          validatedActions: aiValidatedActions,
+          candidatePersistenceActions: aiCandidatePersistenceActions,
+          preferAIFirst: true,
+          strictAIFirst: true,
+          responseHints: payload.response_hints,
+        }),
+        meal_session: mealContext,
+        workout_session: workoutContext,
+      }, "ai-assisted")
+    } catch (aiError) {
+      const fallback = buildDeterministicFallbackPayload({
+        offlineDeterministicActions,
+        nutritionStatusReply,
+        mealClarifyHint,
+        workoutClarifyHint,
         mealContext,
         workoutContext,
-        nutritionStatusReply,
-        validatedActions: aiValidatedActions,
-        candidatePersistenceActions: aiCandidatePersistenceActions,
-        preferAIFirst: true,
-        strictAIFirst: true,
-        responseHints: payload.response_hints,
-      }),
-      meal_session: mealContext,
-      workout_session: workoutContext,
-    }, "ai-assisted")
+        body,
+      })
+      sendCoachPayload(fallback.payload, fallback.routeType)
+    }
+    return
   } catch (error) {
     if (auditCapabilities.writable && user?.id) {
       const failureRecord = {

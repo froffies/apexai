@@ -44,7 +44,7 @@ const workoutCaseCount = Math.max(1, Number(process.env.COACH_SOAK_WORKOUT_CASES
 const mixedCaseCount = Math.max(1, Number(process.env.COACH_SOAK_MIXED_CASES || 10))
 const liveBaseUrl = String(process.env.COACH_SOAK_LIVE_BASE_URL || "https://apexai-bay.vercel.app").trim()
 const liveCoachUrl = String(process.env.COACH_SOAK_LIVE_COACH_URL || "https://apexai-coach.onrender.com/api/coach").trim()
-const liveRequestMinIntervalMs = Math.max(900, Number(process.env.COACH_SOAK_LIVE_MIN_INTERVAL_MS || 1100))
+const liveRequestMinIntervalMs = Math.max(900, Number(process.env.COACH_SOAK_LIVE_MIN_INTERVAL_MS || 1500))
 const liveSupabaseUrl = String(process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "").trim()
 const liveSupabaseAnonKey = String(process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || "").trim()
 const liveSupabaseServiceRoleKey = String(process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim()
@@ -664,7 +664,7 @@ async function requestLiveCoach(conversationState, store, message, live) {
   const startedAt = Date.now()
   let lastResponse = null
   let lastPayload = {}
-  for (let attempt = 0; attempt < 3; attempt += 1) {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
     await throttleLiveRequest(live)
     const token = await getLiveAuthToken(live)
     const response = await fetch(live.coachUrl, {
@@ -679,15 +679,19 @@ async function requestLiveCoach(conversationState, store, message, live) {
     lastResponse = response
     lastPayload = payload
     if (response.ok) break
-    if (response.status === 401 && attempt < 2) {
+    if (response.status === 401 && attempt < 4) {
       live.accessToken = ""
       live.refreshToken = ""
       await refreshLiveAuthToken(live)
       continue
     }
-    if ((response.status === 429 || response.status === 503) && attempt < 2) {
+    if ((response.status === 429 || response.status === 502 || response.status === 503) && attempt < 4) {
       const retryAfterSeconds = Number(response.headers.get("retry-after") || 0)
-      const retryDelayMs = retryAfterSeconds > 0 ? retryAfterSeconds * 1000 : response.status === 429 ? 65_000 : 1_000
+      const retryDelayMs = retryAfterSeconds > 0
+        ? retryAfterSeconds * 1000
+        : response.status === 429
+          ? 45_000 + (attempt * 15_000)
+          : 5_000 + (attempt * 5_000)
       await sleep(retryDelayMs)
       continue
     }
