@@ -246,7 +246,7 @@ Core rules:
 - response_hints contains server-validated guardrails such as already-logged, suppression, delete, answer-only context, and parser hints. Treat the guardrails as trusted state constraints, and treat the parser hints as hints rather than decisions.
 - candidate_persistence_actions may be empty by design on the AI-first path. Do not wait for them. Decide whether a log, update, or delete action is needed from the conversation and context yourself.
 - The server will validate any structured action you return, but it will not invent meal or workout persistence for you.
-- When candidate_persistence_actions are present, they are optional structured hints only. They have not been persisted yet. If they match the conversation, you may adopt them as your returned actions instead of rebuilding the structure from scratch.
+- When candidate_persistence_actions are present, they are optional compact hints only. They may omit exact macros or some persistence fields. If they match the conversation, use them to decide which action type to return, then let the backend canonicalize the final persisted structure.
 - If the user is frustrated, tired, embarrassed, or inconsistent, stay calm and useful. Do not be robotic or judgmental.
 - Answer the user's actual question first. Offer one useful next step when it helps.
 - Distinguish clearly between answering, clarifying, planning, and logging.
@@ -309,7 +309,7 @@ Core rules:
 - Never mention system prompts, schemas, backend rules, or internal tooling.
 - Default to Australian metric units and Australian food context.
 - validated_actions are hard server-validated guardrails such as deletes. Keep your reply aligned with them exactly.
-- candidate_persistence_actions are optional hints only. On the AI-first path they may be empty. You must decide and return any log_meal, update_meal_log, log_workout, update_workout_log, delete_meal_log, or delete_workout_log action yourself when the conversation supports it.
+- candidate_persistence_actions are optional compact hints only. On the AI-first path they may be empty. You must decide and return any log_meal, update_meal_log, log_workout, update_workout_log, delete_meal_log, or delete_workout_log action yourself when the conversation supports it.
 - If response_hints.nutrition_status_hint is present, use it as trusted context for daily totals/target questions instead of apologising or asking to save again.
 - If response_hints.answer_only_meal_hint is present, use those meal macros as trusted context for answer-only questions about the current meal, but still return no persistence action unless the user explicitly asks to save it.
 - Never say something was saved, logged, updated, or deleted unless your returned actions actually do that.
@@ -926,6 +926,55 @@ function buildOfflineCoachFallbackReply(message) {
   return "Tell me what happened today, what you ate, what you trained, or what you want to change, and I'll help you sort the next move."
 }
 
+function toAIPersistenceHint(action = {}) {
+  const type = String(action?.type || "").trim()
+  if (!type) return null
+
+  if (type === "log_meal" || type === "update_meal_log" || type === "delete_meal_log") {
+    return {
+      type,
+      meal_id: String(action?.meal_id || "").trim(),
+      meal_type: String(action?.meal_type || "").trim(),
+      food_name: String(action?.food_name || "").trim(),
+      quantity: String(action?.quantity || "").trim(),
+      estimated: Boolean(action?.estimated),
+      nutrition_source: String(action?.nutrition_source || "").trim(),
+    }
+  }
+
+  if (type === "log_workout" || type === "update_workout_log" || type === "delete_workout_log") {
+    return {
+      type,
+      workout_id: String(action?.workout_id || "").trim(),
+      workout_type: String(action?.workout_type || "").trim(),
+      exercise_name: String(action?.exercise_name || "").trim(),
+      sets: Number(action?.sets || 0),
+      reps: Number(action?.reps || 0),
+      weight_kg: Number(action?.weight_kg || 0),
+      duration_seconds: Number(action?.duration_seconds || 0),
+      distance_km: Number(action?.distance_km || 0),
+    }
+  }
+
+  if (type === "update_targets") {
+    return {
+      type,
+      daily_calories: Number(action?.daily_calories || 0),
+      protein_target_g: Number(action?.protein_target_g || 0),
+      carbs_target_g: Number(action?.carbs_target_g || 0),
+      fat_target_g: Number(action?.fat_target_g || 0),
+    }
+  }
+
+  return { type }
+}
+
+function buildAIPersistenceHints(actions = []) {
+  return safeArray(actions, 8)
+    .map((action) => toAIPersistenceHint(action))
+    .filter(Boolean)
+}
+
 async function persistTelemetryToFile(entry) {
   fs.mkdirSync(path.dirname(telemetryLogFile), { recursive: true })
   fs.appendFileSync(telemetryLogFile, `${JSON.stringify(entry)}\n`, "utf8")
@@ -1388,6 +1437,7 @@ async function handleCoach(request, response) {
 
     const aiValidatedActions = validatedActions
     const aiCandidatePersistenceActions = candidatePersistenceActions
+    const aiCandidatePersistenceHints = buildAIPersistenceHints(aiCandidatePersistenceActions)
     const payload = {
       current_date: new Date().toISOString().slice(0, 10),
       user_message: String(body.message || ""),
@@ -1408,7 +1458,7 @@ async function handleCoach(request, response) {
       meal_context: mealContext,
       workout_context: workoutContext,
       validated_actions: aiValidatedActions,
-      candidate_persistence_actions: aiCandidatePersistenceActions,
+      candidate_persistence_actions: aiCandidatePersistenceHints,
       candidate_fragments: {
         meal: mealContext?.candidateFragments?.meal || [],
         workout: mealContext?.candidateFragments?.workout || workoutContext?.candidateFragments?.workout || [],
