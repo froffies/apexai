@@ -1127,6 +1127,30 @@ test("mixed thread keeps drink variant and sibling egg quantity during a pending
   assert.match(String(snapshots[2].mealSession.summary || ""), /450ml light milk, plus 14 scrambled eggs/i)
 })
 
+test("mixed thread meal suppression preserves pending cardio context for a later distance follow-up", () => {
+  const { snapshots } = replayCoachConversation([
+    user("i had burger and did a run"),
+    assistant("How much burger did you have?"),
+    user("actually dont log that burger"),
+    user("the run was 2km"),
+  ])
+
+  assert.ok(snapshots[1].mealSession)
+  assert.equal(snapshots[1].mealSession.suppressed, true)
+  assert.ok(snapshots[1].workoutSession)
+  assert.equal(normalizeValueText(snapshots[1].workoutSession.exercise_name), "run")
+  assert.equal(snapshots[1].workoutSession.readyToLog, false)
+  assert.equal(normalizeValueText(snapshots[1].workoutSession.summary), "run")
+
+  assert.ok(snapshots[2].workoutSession)
+  assert.equal(normalizeValueText(snapshots[2].workoutSession.exercise_name), "run")
+  assert.equal(snapshots[2].workoutSession.distance_km, 2)
+  assert.equal(snapshots[2].workoutSession.readyToLog, true)
+  assert.equal(normalizeValueText(snapshots[2].workoutSession.summary), "run")
+  assert.equal(snapshots[2].workoutSession.clarifyQuestion, "")
+  assert.ok(!snapshots[2].mealSession?.readyToLog)
+})
+
 test("persisted pushup follow-ups treat pluralized same-exercise replies as workout updates", () => {
   const persistedWorkout = makePersistedWorkoutSession({
     active: false,

@@ -820,7 +820,7 @@ function reduceWorkoutFragments(graph, recentMessages, existingSession) {
     || parsedFragments[0]
 
   const fallbackThread = parsedFragments.map((fragment) => ({ role: "user", content: fragment.text }))
-  let nextSession = buildWorkoutSessionState(recentMessages, primary.text, existingSession)
+  let nextSession = buildWorkoutSessionState(recentMessages, primary.text, existingSession, null)
   if (!nextSession) {
     const parsed = primary.parsedWorkout || parseWorkoutMessage(primary.text)
     if (!parsed) return null
@@ -1598,7 +1598,7 @@ function parseWorkoutMessage(message) {
     }
   }
 
-  const distanceOnly = text.match(/(?:(?<exercise>ran|run|running|walked|walk|cycled|cycle|biked|bike|swam|swim)\s+(?<distance>\d+(?:\.\d+)?)\s*(?<unit>km|mi|miles?)\b)|(?:(?<distance2>\d+(?:\.\d+)?)\s*(?<unit2>km|mi|miles?)\s+(?<exercise2>run|running|walk|walking|bike|cycling|cycle|swim|swimming))\b/)
+  const distanceOnly = text.match(/(?:(?:the\s+)?(?<exercise>ran|run|running|walked|walk|cycled|cycle|biked|bike|swam|swim)\s+(?:was\s+)?(?<distance>\d+(?:\.\d+)?)\s*(?<unit>km|mi|miles?)\b)|(?:(?<distance2>\d+(?:\.\d+)?)\s*(?<unit2>km|mi|miles?)\s+(?<exercise2>run|running|walk|walking|bike|cycling|cycle|swim|swimming))\b/)
   if (distanceOnly?.groups) {
     const rawExercise = distanceOnly.groups.exercise || distanceOnly.groups.exercise2 || ""
     const rawUnit = cleanText(distanceOnly.groups.unit || distanceOnly.groups.unit2 || "km")
@@ -1859,16 +1859,43 @@ function looksWorkoutSpecificMessage(message = "") {
   )
 }
 
-function buildWorkoutSessionState(recentMessages = [], currentMessage = "", existingSession = null) {
+function suppressionTargetsWorkout(message = "", existingSession = null, mealSession = null) {
+  if (!suppressionRequested(message)) return false
+  if (workoutDeleteRequested(message)) return true
+  if (looksWorkoutSpecificMessage(message)) return true
+  if (!existingSession?.active && !existingSession?.persisted) return false
+
+  const normalized = cleanText(message)
+  const mealItemNames = normalizedItemNames(mealSession)
+  const mealItemQuantities = normalizedItemQuantities(mealSession)
+  const referencesMealContext = meaningfulTokens(normalized).some((token) => (
+    [...mealItemNames].some((name) => name.includes(token) || token.includes(name))
+    || [...mealItemQuantities].some((quantity) => quantity.includes(token) || token.includes(quantity))
+  ))
+  const explicitlyMealTargeted = Boolean(
+    isExplicitMealStart(message)
+    || looksLikeStandaloneMealMessage(message)
+    || mealDeleteRequested(message)
+    || genericMealDeleteRequested(message)
+    || mealRejectionRequested(message)
+    || MEAL_REFERENCE_PATTERN.test(normalized)
+    || referencesMealContext
+  )
+  if (explicitlyMealTargeted) return false
+  return true
+}
+
+function buildWorkoutSessionState(recentMessages = [], currentMessage = "", existingSession = null, mealSession = null) {
   const prior = normalizeWorkoutSession(existingSession)
   const normalizedCurrent = cleanText(currentMessage)
   const currentParsedWorkout = parseWorkoutMessage(currentMessage)
   const correctionRequested = Boolean(prior.persistedWorkoutId && workoutCorrectionRequested(currentMessage))
+  const suppressWorkout = suppressionTargetsWorkout(currentMessage, prior, mealSession)
   const deleteRequested = Boolean(
     prior.persistedWorkoutId
-    && (workoutDeleteRequested(currentMessage) || suppressionRequested(currentMessage))
+    && (workoutDeleteRequested(currentMessage) || suppressWorkout)
   )
-  const suppressed = suppressionRequested(currentMessage)
+  const suppressed = suppressWorkout
   const workoutPlanningQuestion = Boolean(
     !prior.active
     && !prior.persisted
@@ -1883,6 +1910,18 @@ function buildWorkoutSessionState(recentMessages = [], currentMessage = "", exis
   )
 
   if (workoutPlanningQuestion) return null
+
+  if (!suppressed && suppressionRequested(currentMessage) && (prior.active || prior.persisted)) {
+    return {
+      ...prior,
+      thread_messages: buildThreadMessages(recentMessages, currentMessage),
+      alreadyLogged: false,
+      correctionRequested: false,
+      deleteRequested: false,
+      suppressed: false,
+      suppressionReply: "",
+    }
+  }
 
   if (prior.persisted && deleteRequested) {
     return {
@@ -2098,7 +2137,7 @@ export function buildCoachSessionState({
   if (!nextMealSession && !nextWorkoutSession) {
     const splitTurn = splitMixedCoachTurn(currentMessage)
     nextMealSession = buildMealSessionState(recentMessages, splitTurn.mealMessage, mealSession, recentMeals)
-    nextWorkoutSession = buildWorkoutSessionState(recentMessages, splitTurn.workoutMessage, workoutSession)
+    nextWorkoutSession = buildWorkoutSessionState(recentMessages, splitTurn.workoutMessage, workoutSession, mealSession)
   }
 
   if (
