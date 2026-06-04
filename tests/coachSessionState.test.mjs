@@ -220,6 +220,45 @@ test("coach session state keeps strong workout clauses out of meal fragments in 
   )
 })
 
+test("coach session state keeps meal details from mixed clarification replies that also include a bodyweight workout", () => {
+  const { snapshots } = replayCoachConversation([
+    user("i had milk and eggs and did a pushup"),
+    assistant("How much milk did you have?"),
+    user("18 eggs one pushup also milk"),
+  ])
+
+  const latest = snapshots.at(-1)
+  assert.ok(latest?.mealSession)
+  assert.ok(latest?.workoutSession)
+  assert.match(latest.mealSession.summary, /18 eggs/i)
+  assert.match(latest.mealSession.summary, /milk/i)
+  assert.equal(latest.workoutSession.exercise_name, "Pushup")
+  assert.equal(latest.workoutSession.reps, 1)
+  assert.deepEqual(
+    (latest.mealSession.candidateFragments?.meal || []).map((fragment) => fragment.text),
+    ["18 eggs", "milk"]
+  )
+  assert.deepEqual(
+    (latest.workoutSession.candidateFragments?.workout || []).map((fragment) => fragment.text),
+    ["one pushup"]
+  )
+})
+
+test("coach session state parses broken-english counted bodyweight workouts without reopening a fake exercise clarification", () => {
+  const { workoutSession } = replayCoachConversation([
+    user("i had 2 egg and do 14 pushup"),
+    assistant("anything else?"),
+    user("one set"),
+  ])
+
+  assert.ok(workoutSession)
+  assert.equal(workoutSession.exercise_name, "Pushup")
+  assert.equal(workoutSession.reps, 14)
+  assert.equal(workoutSession.sets, 1)
+  assert.equal(workoutSession.readyToLog, true)
+  assert.doesNotMatch(normalizeValueText(workoutSession.clarifyQuestion), /how many reps did you do for one/)
+})
+
 test("coach session state turns post-save delete intent into a deterministic meal deletion request", () => {
   const initial = replayCoachConversation([
     user("i had pie and eggs and milk"),

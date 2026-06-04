@@ -468,6 +468,29 @@ function splitTurnIntoClauses(message = "") {
   }))
 }
 
+const INLINE_BODYWEIGHT_FRAGMENT_PATTERN = /\b(?:(?:i\s+)?(?:did|do)\s+)?(?<count>\d+(?:\.\d+)?|a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s*(?<exercise>pushups?|push ups?|pullups?|pull ups?|situps?|sit ups?|burpees?|dips?|lunges?|squats?)\b/i
+
+function extractInlineMixedClauseFragments(text = "") {
+  const raw = String(text || "").trim()
+  if (!raw) return null
+  const match = raw.match(INLINE_BODYWEIGHT_FRAGMENT_PATTERN)
+  if (!match?.[0]) return null
+
+  const workoutText = cleanText(match[0]).startsWith("do ") ? `i ${cleanText(match[0])}` : match[0].trim()
+  const mealText = raw
+    .replace(match[0], " ")
+    .replace(/\s+/g, " ")
+    .replace(/\b(?:and|also|plus)\b\s*$/i, "")
+    .replace(/^(?:and|also|plus)\b\s*/i, "")
+    .trim()
+
+  if (!mealText || !looksLikeStandaloneMealMessage(mealText)) return null
+  return {
+    mealText,
+    workoutText,
+  }
+}
+
 function buildMealPreview(message = "") {
   const normalizedMessage = normalizeTrailingMealQuantityMessage(normalizeInlineMealCorrectionMessage(message))
   const preview = buildLegacyMealContext([], normalizedMessage, emptyLegacyMealSession())
@@ -667,6 +690,29 @@ function buildTurnIntentGraph({
       continue
     }
     if (analysis.domain === "workout") {
+      const inlineMixedFragments = analysis.mealLike && analysis.workoutLike
+        ? extractInlineMixedClauseFragments(clause.text)
+        : null
+      if (inlineMixedFragments) {
+        const mealFragmentText = buildMealPreview(inlineMixedFragments.mealText)?.normalizedMessage || inlineMixedFragments.mealText
+        graph.mealFragments.push({
+          id: `${clause.id}_meal`,
+          index: clause.index,
+          text: mealFragmentText,
+          rawText: clause.text,
+        })
+        seenDomains.add("meal")
+        graph.workoutFragments.push({
+          id: `${clause.id}_workout`,
+          index: clause.index,
+          text: normalizeWorkoutFragment(stripMixedTurnLead(inlineMixedFragments.workoutText)),
+          rawText: clause.text,
+          parsedWorkout: parseWorkoutMessage(inlineMixedFragments.workoutText) || analysis.parsedWorkout || null,
+        })
+        seenDomains.add("workout")
+        previousDomain = "workout"
+        continue
+      }
       const fragmentText = normalizeWorkoutFragment(stripMixedTurnLead(clause.text))
       graph.workoutFragments.push({
         id: clause.id,
@@ -1454,7 +1500,7 @@ function parseWorkoutMessage(message) {
     }
   }
 
-  const countedBodyweightPattern = text.match(/^(?:i\s+did\s+)?(?<reps>\d+(?:\.\d+)?|a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s*(?<exercise>pushups?|push ups?|pullups?|pull ups?|situps?|sit ups?|burpees?|dips?|lunges?|squats?)\b/)
+  const countedBodyweightPattern = text.match(/^(?:(?:i\s+)?(?:did|do)\s+)?(?<reps>\d+(?:\.\d+)?|a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s*(?<exercise>pushups?|push ups?|pullups?|pull ups?|situps?|sit ups?|burpees?|dips?|lunges?|squats?)\b/)
   if (countedBodyweightPattern?.groups) {
     const exercise = normalizeExerciseName(countedBodyweightPattern.groups.exercise)
     const reps = parseCountWord(countedBodyweightPattern.groups.reps || "")
@@ -1578,12 +1624,16 @@ function parseWorkoutMessage(message) {
   const weightOnly = text.match(/(?<weight>\d+(?:\.\d+)?)\s*kg\b/)
   const setsOnly = text.match(/(?<sets>\d+)\s*sets?\b/)
   const repsOnly = text.match(/(?<reps>\d+)\s*reps?\b|\bof\s*(?<reps2>\d+)\b/)
+  const countWordOnlySetPattern = /^(?:a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s*sets?\b/.test(text)
   const exerciseOnly = normalizeExerciseName(text)
   const knownExerciseOnly = WORKOUT_EXERCISES.some((exercise) => text.includes(exercise))
   const genericExerciseOnly = Boolean(
     exerciseOnly
     && text.split(/\s+/).filter(Boolean).length <= 4
     && !looksLikeStandaloneMealMessage(text)
+    && !countWordOnlySetPattern
+    && !/^(?:\d+|a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s*sets?\b/i.test(text)
+    && !/^(?:\d+|a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s*reps?\b/i.test(text)
   )
   if (weightOnly || setsOnly || repsOnly || knownExerciseOnly || genericExerciseOnly) {
     return {

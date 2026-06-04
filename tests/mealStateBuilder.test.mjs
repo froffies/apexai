@@ -759,6 +759,26 @@ test("meal session keeps grouped totals, split preparations, and targeted cookin
   assert.doesNotMatch(session.summary, /\b1l\b/i)
 })
 
+test("meal session routes exact rest-split egg follow-ups safely and preserves the correct cooking-medium clarification", () => {
+  const { session } = replayMealConversation([
+    user("i had milk and eggs"),
+    assistant("How much milk did you have?"),
+    user("18 eggs also milk"),
+    assistant("How much milk did you have?"),
+    user("2250ml"),
+    assistant("Anything else?"),
+    user("12 of the eggs were fried, the rest were hard boiled"),
+  ])
+
+  assert.ok(session)
+  assert.equal(session.readyToLog, false)
+  assert.equal(session.clarifyQuestion, "What were the fried eggs cooked in?")
+  assert.match(session.summary, /2250ml milk/i)
+  assert.match(session.summary, /12 fried eggs/i)
+  assert.match(session.summary, /6 hard boiled eggs/i)
+  assert.doesNotMatch(session.summary, /hard boiled fried rest/i)
+})
+
 test("meal session supports grouped quantity splits for another food with preparation-specific oil", () => {
   const { session } = replayMealConversation([
     user("I had 500g chicken total, 300g grilled, 200g fried in 20g olive oil"),

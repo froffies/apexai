@@ -256,6 +256,8 @@ function shouldUseLegacy(conversation, currentMessage, existingSession) {
     || (!activeGraphSession && currentClauses.length > 1 && !simpleFoodDrinkStart && !graphNativeFriendlyFreshTurn)
     || (!activeGraphSession && currentClauses.length > 3)
     || (activeGraphSession && /\bthat were\b|\bwere just\b/.test(normalizedCurrent))
+    || (activeGraphSession && /\b\d+\s+of the\b.*\bwere\b/i.test(normalizedCurrent))
+    || (activeGraphSession && /\b(?:the\s+)?rest\b.*\b(?:were|was)\b/i.test(normalizedCurrent))
     || (activeGraphSession && /^\s*the\s+\w+.*\bhad\b/i.test(normalizedCurrent))
   )
 }
