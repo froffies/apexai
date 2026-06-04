@@ -925,6 +925,7 @@ function persistedMealFollowUpLooksLikeUpdate(message, session, nextSummary = ""
 
   return Boolean(
     /\b(?:with|without|extra|hold|remove|swap|instead|plus|mixed with|topped with|covered in)\b/i.test(normalized)
+    || /\b(?:cooked in|fried in|grilled|baked|boiled|poached|scrambled|roasted|steamed)\b/i.test(normalized)
     || /^the\s+/i.test(normalized)
     || /^(?:used to fry|used for|for)\s+the\s+/i.test(normalized)
     || MEAL_REFERENCE_PATTERN.test(normalized)
@@ -1065,10 +1066,25 @@ function looksLikeFullMealCorrectionRestatement(message) {
   return /\b(?:and|with)\b/.test(normalized) && /\d/.test(normalized)
 }
 
+const SPLIT_PREP_VARIANT_PATTERN = /\b(?<count>\d+(?:\.\d+)?)\s+(?:(?:of\s+the\s+)?(?<food>[a-z]+)\s+)?were\s+(?<prepA>fried|grilled|baked|boiled|poached|scrambled|roasted|steamed|raw|plain|hard boiled|hardboiled|soft boiled|softboiled)\s+rest\s+(?:were\s+)?(?<prepB>fried|grilled|baked|boiled|poached|scrambled|roasted|steamed|raw|plain|hard boiled|hardboiled|soft boiled|softboiled)\b/i
+
+function normalizeSplitPreparationFollowUp(message = "") {
+  const raw = String(message || "").trim()
+  if (!raw) return raw
+  return raw.replace(SPLIT_PREP_VARIANT_PATTERN, (_, count, food, prepA, prepB) => {
+    const normalizedFood = String(food || "").trim()
+    return normalizedFood
+      ? `${count} of the ${normalizedFood} were ${prepA}, the rest were ${prepB}`
+      : `${count} were ${prepA}, the rest were ${prepB}`
+  })
+}
+
 function buildMealSessionState(recentMessages = [], currentMessage = "", existingSession = null, recentMeals = []) {
   const prior = normalizeMealSession(existingSession)
   const normalizedCurrent = cleanText(currentMessage)
-  const normalizedMealMessage = normalizeTrailingMealQuantityMessage(normalizeInlineMealCorrectionMessage(currentMessage))
+  const normalizedMealMessage = normalizeSplitPreparationFollowUp(
+    normalizeTrailingMealQuantityMessage(normalizeInlineMealCorrectionMessage(currentMessage))
+  )
   const deleteRequested = Boolean(
     prior.persistedMealId
     && (explicitWholeMealDeleteRequested(currentMessage) || suppressionRequested(currentMessage))
@@ -1624,7 +1640,33 @@ function parseWorkoutMessage(message) {
   const weightOnly = text.match(/(?<weight>\d+(?:\.\d+)?)\s*kg\b/)
   const setsOnly = text.match(/(?<sets>\d+)\s*sets?\b/)
   const repsOnly = text.match(/(?<reps>\d+)\s*reps?\b|\bof\s*(?<reps2>\d+)\b/)
+  const countWordSetsOnly = text.match(/^(?<sets>a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s*sets?\b$/)
+  const countWordRepsOnly = text.match(/^(?<reps>a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s*reps?\b$/)
   const countWordOnlySetPattern = /^(?:a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s*sets?\b/.test(text)
+  if (countWordSetsOnly?.groups?.sets) {
+    return {
+      exercise_name: "",
+      workout_type: "",
+      muscle_group: "full_body",
+      sets: parseCountWord(countWordSetsOnly.groups.sets),
+      reps: 0,
+      weight_kg: 0,
+      duration_seconds: 0,
+      distance_km: 0,
+    }
+  }
+  if (countWordRepsOnly?.groups?.reps) {
+    return {
+      exercise_name: "",
+      workout_type: "",
+      muscle_group: "full_body",
+      sets: 0,
+      reps: parseCountWord(countWordRepsOnly.groups.reps),
+      weight_kg: 0,
+      duration_seconds: 0,
+      distance_km: 0,
+    }
+  }
   const exerciseOnly = normalizeExerciseName(text)
   const knownExerciseOnly = WORKOUT_EXERCISES.some((exercise) => text.includes(exercise))
   const genericExerciseOnly = Boolean(
@@ -1925,6 +1967,8 @@ function buildWorkoutSessionState(recentMessages = [], currentMessage = "", exis
   state.readyToLog = isCardio
     ? Boolean(state.exercise_name && (state.duration_seconds > 0 || state.distance_km > 0))
     : Boolean(state.exercise_name && state.reps > 0)
+  const parsedWorkoutExercise = cleanText(currentParsedWorkout?.exercise_name || currentParsedWorkout?.workout_type || "")
+  const startsFreshWorkout = Boolean(WORKOUT_START_PATTERN.test(normalizedCurrent) && parsedWorkoutExercise)
 
   if (preservedCandidateActivities.length) {
     const primaryCandidate = primaryWorkoutCandidateActivity(preservedCandidateActivities)
@@ -1960,7 +2004,7 @@ function buildWorkoutSessionState(recentMessages = [], currentMessage = "", exis
   if (
     prior.persisted
     && !state.correctionRequested
-    && !WORKOUT_START_PATTERN.test(normalizedCurrent)
+    && !startsFreshWorkout
     && cleanText(state.summary)
     && cleanText(state.summary) === cleanText(prior.persistedSummary || prior.summary || "")
   ) {

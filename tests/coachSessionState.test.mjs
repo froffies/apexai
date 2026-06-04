@@ -200,6 +200,28 @@ test("coach session state treats additive follow-ups on a persisted meal as upda
   assert.match(next.mealSession.summary, /chips with gravy/i)
 })
 
+test("coach session state treats preparation refinements on a persisted meal as updates", () => {
+  const initial = replayCoachConversation([
+    user("i had 2 egg"),
+  ])
+
+  const persistedMeal = makePersistedMealSession(initial.mealSession, "meal_eggs")
+  const next = buildCoachSessionState({
+    recentMessages: [
+      ...initial.history,
+      assistant("Saved to today's nutrition: 2 egg."),
+    ],
+    currentMessage: "eggs were fried in butter",
+    mealSession: persistedMeal,
+    workoutSession: emptyWorkoutSessionState(),
+  })
+
+  assert.ok(next.mealSession)
+  assert.equal(next.mealSession.correctionRequested, true)
+  assert.equal(next.mealSession.readyToLog, true)
+  assert.match(next.mealSession.summary, /2 eggs cooked in butter/i)
+})
+
 test("coach session state keeps strong workout clauses out of meal fragments in mixed turns", () => {
   const next = buildCoachSessionState({
     recentMessages: [],
@@ -257,6 +279,29 @@ test("coach session state parses broken-english counted bodyweight workouts with
   assert.equal(workoutSession.sets, 1)
   assert.equal(workoutSession.readyToLog, true)
   assert.doesNotMatch(normalizeValueText(workoutSession.clarifyQuestion), /how many reps did you do for one/)
+})
+
+test("persisted bodyweight workouts treat count-word set follow-ups as redundant instead of inventing a new log", () => {
+  const initial = replayCoachConversation([
+    user("i did 14 pushups"),
+  ])
+
+  const persistedWorkout = makePersistedWorkoutSession(initial.workoutSession, "workout_pushup_repeat")
+  const next = buildCoachSessionState({
+    recentMessages: [
+      ...initial.history,
+      assistant("Saved to Workouts: Pushup."),
+    ],
+    currentMessage: "one set",
+    mealSession: emptyMealSessionState(),
+    workoutSession: persistedWorkout,
+  })
+
+  assert.ok(next.workoutSession)
+  assert.match(String(next.workoutSession.exercise_name || ""), /pushup/i)
+  assert.equal(next.workoutSession.alreadyLogged, true)
+  assert.equal(next.workoutSession.correctionRequested, false)
+  assert.doesNotMatch(normalizeValueText(next.workoutSession.clarifyQuestion), /one/)
 })
 
 test("coach session state turns post-save delete intent into a deterministic meal deletion request", () => {
@@ -1155,6 +1200,66 @@ test("persisted meal refinement keeps resolved milk quantity while splitting egg
   assert.match(String(next.mealSession.summary || ""), /6 hard boiled eggs/i)
   assert.match(String(next.mealSession.clarifyQuestion || ""), /fried eggs cooked in/i)
   assert.doesNotMatch(String(next.mealSession.clarifyQuestion || ""), /milk/i)
+})
+
+test("persisted meal refinement handles no-comma rest splits without garbling preparation labels", () => {
+  const persistedMeal = makePersistedMealSession({
+    ...emptyMealSessionState(),
+    active: false,
+    mealConversation: true,
+    summary: "2250ml milk, plus 18 eggs",
+    items: [
+      {
+        base_name: "milk",
+        label: "Milk",
+        category: "drink",
+        quantity: { amount: 2250, unit: "ml", text: "2250ml", modifier: "" },
+        preparation: [],
+        modifiers: [],
+        exclusions: [],
+        attached_to: null,
+        relation: null,
+        variant_key: "",
+        meal_type: "",
+      },
+      {
+        base_name: "egg",
+        label: "Eggs",
+        category: "food",
+        quantity: { amount: 18, unit: "egg", text: "18 eggs", modifier: "" },
+        preparation: [],
+        modifiers: [],
+        exclusions: [],
+        attached_to: null,
+        relation: null,
+        variant_key: "",
+        meal_type: "",
+      },
+    ],
+    graphNative: true,
+  }, "meal_split_no_comma")
+
+  const next = buildCoachSessionState({
+    recentMessages: [
+      user("i had milk and eggs"),
+      assistant("How much milk did you have?"),
+      user("18 eggs also milk"),
+      assistant("How much milk did you have?"),
+      user("2250ml"),
+      assistant("Saved to today's nutrition: 2250ml milk, plus 18 eggs."),
+    ],
+    currentMessage: "12 eggs were fried rest hard boiled",
+    mealSession: persistedMeal,
+    workoutSession: emptyWorkoutSessionState(),
+  })
+
+  assert.ok(next.mealSession)
+  assert.equal(next.mealSession.correctionRequested, true)
+  assert.equal(next.mealSession.readyToLog, false)
+  assert.match(String(next.mealSession.summary || ""), /12 fried eggs/i)
+  assert.match(String(next.mealSession.summary || ""), /6 hard boiled eggs/i)
+  assert.match(String(next.mealSession.clarifyQuestion || ""), /fried eggs cooked in/i)
+  assert.doesNotMatch(String(next.mealSession.summary || ""), /hard boiled fried rest/i)
 })
 
 test("coach session state keeps a new explicit meal isolated from the previously saved meal", () => {
