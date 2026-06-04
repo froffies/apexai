@@ -51,11 +51,20 @@ async function completeOnboardingIfNeeded(page) {
   if (!/\/onboarding$/.test(page.url())) return
 
   await expect(page.getByRole("heading", { name: /personal details/i })).toBeVisible()
-  await fillStable(page, "Name", "Cloud Casey")
-  await fillStable(page, "Age", "31")
-  await fillStable(page, "Weight kg", "84")
-  await fillStable(page, "Height cm", "179")
-  await page.getByRole("button", { name: /continue/i }).click()
+  const continueButton = page.getByRole("button", { name: /continue/i })
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    await fillStable(page, "Name", "Cloud Casey")
+    await fillStable(page, "Age", "31")
+    await fillStable(page, "Weight kg", "84")
+    await fillStable(page, "Height cm", "179")
+    try {
+      await expect(continueButton).toBeEnabled({ timeout: 4000 })
+      break
+    } catch (error) {
+      if (attempt === 3) throw error
+    }
+  }
+  await continueButton.click()
 
   await expect(page.getByRole("heading", { name: /goal and training setup/i })).toBeVisible()
   await fillStable(page, "Training days", "4")

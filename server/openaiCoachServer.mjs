@@ -451,6 +451,10 @@ function buildDeterministicFallbackPayload({
   workoutClarifyHint = null,
   mealContext = null,
   workoutContext = null,
+  mealAlreadyLoggedGuard = false,
+  workoutAlreadyLoggedGuard = false,
+  mealSuppressedGuard = false,
+  workoutSuppressedGuard = false,
   body = {},
 }) {
   if (!mealClarifyHint && !workoutClarifyHint && offlineDeterministicActions.length) {
@@ -459,6 +463,58 @@ function buildDeterministicFallbackPayload({
       payload: {
         reply: offlineDeterministicActions.map((action) => summarizeCoachAction(action)).filter(Boolean).join(" "),
         actions: offlineDeterministicActions,
+        warnings: [],
+        meal_session: mealContext,
+        workout_session: workoutContext,
+      },
+    }
+  }
+
+  if (mealAlreadyLoggedGuard) {
+    return {
+      routeType: "deterministic-fallback",
+      payload: {
+        reply: deterministicAlreadyLoggedReply(mealContext, "meal"),
+        actions: [],
+        warnings: [],
+        meal_session: mealContext,
+        workout_session: workoutContext,
+      },
+    }
+  }
+
+  if (mealSuppressedGuard) {
+    return {
+      routeType: "deterministic-fallback",
+      payload: {
+        reply: mealContext?.suppressionReply || "Okay, I won't save that.",
+        actions: [],
+        warnings: [],
+        meal_session: mealContext,
+        workout_session: workoutContext,
+      },
+    }
+  }
+
+  if (workoutAlreadyLoggedGuard) {
+    return {
+      routeType: "deterministic-fallback",
+      payload: {
+        reply: deterministicAlreadyLoggedReply(workoutContext, "workout"),
+        actions: [],
+        warnings: [],
+        meal_session: mealContext,
+        workout_session: workoutContext,
+      },
+    }
+  }
+
+  if (workoutSuppressedGuard) {
+    return {
+      routeType: "deterministic-fallback",
+      payload: {
+        reply: workoutContext?.suppressionReply || "Okay, I won't save that.",
+        actions: [],
         warnings: [],
         meal_session: mealContext,
         workout_session: workoutContext,
@@ -1424,14 +1480,18 @@ async function handleCoach(request, response) {
       }, "ai-assisted")
     } catch (aiError) {
       const fallback = buildDeterministicFallbackPayload({
-        offlineDeterministicActions,
-        nutritionStatusReply,
-        mealClarifyHint,
-        workoutClarifyHint,
-        mealContext,
-        workoutContext,
-        body,
-      })
+      offlineDeterministicActions,
+      nutritionStatusReply,
+      mealClarifyHint,
+      workoutClarifyHint,
+      mealContext,
+      workoutContext,
+      mealAlreadyLoggedGuard,
+      workoutAlreadyLoggedGuard,
+      mealSuppressedGuard,
+      workoutSuppressedGuard,
+      body,
+    })
       sendCoachPayload(fallback.payload, fallback.routeType)
     }
     return

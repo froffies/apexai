@@ -348,6 +348,94 @@ test("coach falls back to deterministic candidate persistence when the upstream 
   assert.match(secondCoach.actions?.[0]?.food_name || "", /1 bowl chips/i)
 })
 
+test("coach falls back to an already-logged reply when the upstream AI call fails on a repeated meal", async (t) => {
+  const port = randomPort()
+  const serverProcess = spawn(process.execPath, [serverEntry], {
+    cwd,
+    env: {
+      ...process.env,
+      OPENAI_COACH_PORT: String(port),
+      OPENAI_COACH_REQUIRE_AUTH: "false",
+      OPENAI_COACH_CORS_ORIGIN: "http://127.0.0.1:5173",
+      OPENFOODFACTS_ENABLED: "false",
+      OPENAI_API_KEY: "test-key",
+      OPENAI_BASE_URL: "http://127.0.0.1:9/v1",
+      NODE_ENV: "production",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  })
+
+  t.after(async () => {
+    serverProcess.kill()
+  })
+
+  await waitForHealth(port)
+
+  const firstResponse = await fetch(`http://127.0.0.1:${port}/api/coach`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Origin: "http://127.0.0.1:5173",
+    },
+    body: JSON.stringify({
+      message: "i had 2 tofu",
+      recentMessages: [],
+      meals: [],
+      workouts: [],
+      workoutSets: [],
+      mealSession: {},
+      workoutSession: {},
+    }),
+  })
+  const firstCoach = await firstResponse.json()
+  assert.equal(firstResponse.status, 200)
+  assert.equal(firstCoach.actions?.[0]?.type, "log_meal")
+  assert.match(firstCoach.reply || "", /saved to today'?s nutrition|logged/i)
+
+  const secondResponse = await fetch(`http://127.0.0.1:${port}/api/coach`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Origin: "http://127.0.0.1:5173",
+    },
+    body: JSON.stringify({
+      message: "i had 2 tofu",
+      recentMessages: [
+        { role: "user", content: "i had 2 tofu" },
+        { role: "assistant", content: firstCoach.reply || "" },
+      ],
+      meals: [
+        {
+          id: "meal_18",
+          food_name: "2 tofu",
+          calories: 240,
+          protein: 20,
+          carbs: 6,
+          fat: 14,
+          logged_at: new Date().toISOString(),
+        },
+      ],
+      workouts: [],
+      workoutSets: [],
+      mealSession: {
+        ...(firstCoach.meal_session || {}),
+        active: false,
+        readyToLog: false,
+        persisted: true,
+        persistedMealId: "meal_18",
+        persistedSummary: "2 tofu",
+        summary: "2 tofu",
+      },
+      workoutSession: firstCoach.workout_session || {},
+    }),
+  })
+  const secondCoach = await secondResponse.json()
+  assert.equal(secondResponse.status, 200)
+  assert.equal(secondCoach.actions?.length || 0, 0)
+  assert.match(secondCoach.reply || "", /already saved|already logged|already saved .*today'?s nutrition/i)
+  assert.doesNotMatch(secondCoach.reply || "", /tell me what happened today/i)
+})
+
 test("deterministic coach route will not persist orphan numeric entities when a quantity clarification is still unresolved", async (t) => {
   const port = randomPort()
   const serverProcess = spawn(process.execPath, [serverEntry], {
