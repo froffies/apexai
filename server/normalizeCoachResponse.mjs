@@ -397,6 +397,9 @@ export function normalizeCoachResponse(value, context = {}) {
   const singleCandidatePersistenceAction = candidatePersistenceActions.length === 1
     ? normalizeMealAction(candidatePersistenceActions[0])
     : null
+  const singleWorkoutCandidatePersistenceAction = candidateWorkoutPersistenceActions.length === 1
+    ? normalizeMealAction(candidateWorkoutPersistenceActions[0])
+    : null
   if (
     preferAIFirst
     && originalReply
@@ -414,13 +417,17 @@ export function normalizeCoachResponse(value, context = {}) {
       .slice(0, 8)
   }
   const workoutCompletionReplyAcknowledged = replyAcknowledgesWorkoutCompletion(originalReply, context.workoutContext)
+  const recoverableWorkoutPersistenceAction = (
+    singleCandidatePersistenceAction && isWorkoutPersistenceAction(singleCandidatePersistenceAction)
+      ? singleCandidatePersistenceAction
+      : singleWorkoutCandidatePersistenceAction
+  )
   const shouldRecoverSingleWorkoutActionDuringMealClarification = Boolean(
     preferAIFirst
     && originalReply
     && !actions.some(isPersistenceAction)
     && !hasValidatedWorkoutPersistence
-    && singleCandidatePersistenceAction
-    && isWorkoutPersistenceAction(singleCandidatePersistenceAction)
+    && recoverableWorkoutPersistenceAction
     && context.workoutContext?.readyToLog
     && String(context.mealContext?.pendingClarification?.type || "") === "quantity"
     && replyAddressesMealQuantityClarification(originalReply, context.mealContext)
@@ -433,7 +440,7 @@ export function normalizeCoachResponse(value, context = {}) {
   if (shouldRecoverSingleWorkoutActionDuringMealClarification) {
     actions = [
       ...actions,
-      singleCandidatePersistenceAction,
+      recoverableWorkoutPersistenceAction,
     ]
       .map(normalizeMealAction)
       .filter(shouldAllowAction)
@@ -505,7 +512,7 @@ export function normalizeCoachResponse(value, context = {}) {
     "Tell me what happened or what you want to change, and I'll help you sort the next move."
 
   if (prependRecoveredWorkoutSummary) {
-    const workoutSummaryPrefix = summarizeCoachAction(singleCandidatePersistenceAction)
+    const workoutSummaryPrefix = summarizeCoachAction(recoverableWorkoutPersistenceAction)
     if (workoutSummaryPrefix && !cleanReplyText(reply).includes(cleanReplyText(workoutSummaryPrefix))) {
       reply = `${workoutSummaryPrefix} ${reply}`.trim()
     }
