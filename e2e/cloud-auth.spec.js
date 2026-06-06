@@ -47,10 +47,16 @@ async function fillStable(page, label, value) {
 }
 
 async function completeOnboardingIfNeeded(page) {
-  await page.waitForURL(/(\/|\/onboarding)$/)
-  if (!/\/onboarding$/.test(page.url())) return
+  await page.waitForLoadState("domcontentloaded")
+  const personalDetailsHeading = page.getByRole("heading", { name: /personal details/i })
+  const dashboardHeading = page.getByRole("heading", { name: /today's overview/i })
+  if (!await personalDetailsHeading.isVisible().catch(() => false)) {
+    if (await dashboardHeading.isVisible().catch(() => false)) return
+    await expect(personalDetailsHeading.or(dashboardHeading)).toBeVisible({ timeout: 15000 })
+    if (await dashboardHeading.isVisible().catch(() => false)) return
+  }
 
-  await expect(page.getByRole("heading", { name: /personal details/i })).toBeVisible()
+  await expect(personalDetailsHeading).toBeVisible()
   const continueButton = page.getByRole("button", { name: /continue/i })
   for (let attempt = 0; attempt < 4; attempt += 1) {
     await fillStable(page, "Name", "Cloud Casey")
@@ -73,7 +79,7 @@ async function completeOnboardingIfNeeded(page) {
 
   await expect(page.getByRole("heading", { name: /your starting plan/i })).toBeVisible()
   await page.getByRole("button", { name: /save profile and enter dashboard|enter dashboard/i }).first().click()
-  await expect(page).toHaveURL(/\/$/)
+  await expect(dashboardHeading).toBeVisible({ timeout: 15000 })
 }
 
 test("cloud auth sign-in flow works when Supabase credentials are configured", async ({ page }) => {

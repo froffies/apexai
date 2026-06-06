@@ -1,0 +1,26 @@
+{
+  "target": "live",
+  "finalCleanStreakCount": 10,
+  "totalRunsAttempted": 10,
+  "totalConversationsTested": 550,
+  "finalSeeds": [
+    992162247,
+    506401261,
+    367360734,
+    852494211,
+    581446297,
+    861275412,
+    367560872,
+    2595699,
+    382763853,
+    419869245
+  ],
+  "failuresFoundBeforeCleanStreak": 0,
+  "liveBaseUrl": "https://apexai-bay.vercel.app",
+  "liveCoachUrl": "https://apexai-coach.onrender.com/api/coach",
+  "elapsedMs": 1991727,
+  "requiredStreak": 10,
+  "mealCaseCount": 30,
+  "workoutCaseCount": 15,
+  "mixedCaseCount": 10
+}
