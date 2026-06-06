@@ -25,7 +25,7 @@ const DRINK_WORDS = ["tea", "coffee", "juice", "water", "milk", "smoothie", "sha
 const INGREDIENT_WORDS = ["butter", "oil", "cheese", "sugar", "milk", "cream", "sauce", "gravy", "dressing", "vegemite", "jam", "honey", "salt", "pesto", "mayo"]
 const FOOD_HINTS = ["egg", "eggs", "chicken", "rice", "beef", "steak", "pork", "lamb", "fish", "salmon", "tuna", "toast", "bread", "tea", "coffee", "juice", "milk", "beans", "oats", "yoghurt", "yogurt", "butter", "oil", "cheese", "potato", "salad", "apple", "banana", "celery", "chocolate", "pasta", "chips", "fries", "burger", "taco", "tacos", "vegemite", "berry", "berries", "whey", "almond milk"]
 const COUNT_REQUIRED = new Set(["egg"])
-const STOPWORDS = new Set(["i", "had", "have", "ate", "drank", "also", "just", "then", "but", "the", "a", "an", "my", "for", "to", "at", "with", "and", "plus", "of", "it", "that", "this", "was", "were", "is", "are", "did", "do", "done", "log", "track", "save", "add", "include", "today"])
+const STOPWORDS = new Set(["i", "had", "have", "ate", "drank", "also", "just", "then", "but", "the", "a", "an", "my", "for", "to", "at", "with", "and", "plus", "of", "it", "that", "this", "was", "were", "is", "are", "did", "do", "done", "log", "track", "save", "add", "include", "today", "later", "tomorrow", "tonight"])
 
 const MEAL_START_PATTERN = /^(?:please\s+)?(?:(?:i\s+)?(?:had|ate|drank)|log|track|save|add|include)\b/i
 const CORRECTION_PREFIX = /^(?:actually|sorry|correction|no\s+wait|wait|i meant|make that|change that(?: to)?|update that(?: to)?|instead)\b/i
@@ -41,6 +41,7 @@ const INLINE_CORRECTION_PATTERN = /\b(?:no wait|i meant|make that|change that|up
 const TRAILING_LOG_DIRECTIVE_PATTERN = /\b(?:(?:can|could)\s+you|please|just)?\s*(?:log|save|track|add)\s+(?:all\s+that|that|it)\b.*$/i
 const PACKAGED_UNIT_PATTERN = /\b(?:tin|tins|can|cans|block|blocks|bunch|bunches)\b/i
 const WORKOUT_ONLY_FOLLOW_UP_PATTERN = /^(?:i\s+did\s+\d+(?:\.\d+)?(?:\s+total)?|\d+(?:\.\d+)?\s*(?:reps?|sets?|kg|km|mi|miles?|min|mins|minutes)(?:\s*,\s*\d+(?:\.\d+)?\s*(?:reps?|sets?|kg|km|mi|miles?|min|mins|minutes))*)$/i
+const FUTURE_MEAL_INTENT_PATTERN = /\b(?:(?:i\s*(?:am|['’]m)?\s*)?(?:going\s+to|gonna)\s+(?:have|eat|drink)|(?:i(?:['’]ll)?|i\s+will|will)\s+(?:have|eat|drink))\b/i
 const RELATION_PATTERNS = [
   { relation: "cooked_in", pattern: /\b(?:cooked|fried|grilled|baked|roasted|boiled|poached|scrambled|steamed)\s+in\b/i },
   { relation: "mixed_with", pattern: /\bmixed with\b/i },
@@ -118,6 +119,17 @@ function resolveInlineCorrection(text = "") {
   const fallbackFoodName = originalFoodName
     || (originalQuantity?.unit === "egg" ? "eggs" : "")
   return fallbackFoodName ? `${corrected} ${fallbackFoodName}`.trim() : corrected
+}
+
+function isFutureMealIntent(text = "") {
+  const normalized = cleanText(text)
+  if (!normalized) return false
+  if (FUTURE_MEAL_INTENT_PATTERN.test(normalized)) return true
+  return Boolean(
+    /\blater\b/.test(normalized)
+    && /\b(?:have|eat|drink)\b/.test(normalized)
+    && !MEAL_START_PATTERN.test(normalized)
+  )
 }
 
 function isMixedMealWorkoutStart(currentMessage = "", existingSession = null) {
@@ -1106,6 +1118,9 @@ export function emptyMealSession() {
 export function buildMealStateFromConversation(recentMessages = [], currentMessage = "", existingSession = null) {
   const resolvedMessage = resolveInlineCorrection(currentMessage)
   const conversation = normalizeConversation(recentMessages, resolvedMessage, existingSession)
+  if (!existingSession?.active && !existingSession?.persisted && isFutureMealIntent(resolvedMessage)) {
+    return baseSession()
+  }
   if (isWorkoutOnlyFollowUpTurn(resolvedMessage, existingSession)) {
     return preserveExistingSessionForIgnoredTurn(conversation, resolvedMessage, existingSession)
   }
@@ -1202,6 +1217,9 @@ export function mealStateNeedsClarification(mealState) {
 export function buildMealContext(recentMessages = [], currentMessage = "", existingSession = null) {
   const resolvedMessage = resolveInlineCorrection(currentMessage)
   const conversation = normalizeConversation(recentMessages, resolvedMessage, existingSession)
+  if (!existingSession?.active && !existingSession?.persisted && isFutureMealIntent(resolvedMessage)) {
+    return null
+  }
   if (isWorkoutOnlyFollowUpTurn(resolvedMessage, existingSession)) {
     return preserveExistingSessionForIgnoredTurn(conversation, resolvedMessage, existingSession)
   }

@@ -136,6 +136,12 @@ test("graph-native meal session preserves logging intent across a quantity clari
   assert.equal(session.summary, "300g steak")
 })
 
+test("future meal intent does not open a meal logging session", () => {
+  const session = buildMealContext([], "i am going to have 2 eggs later", emptyMealSession())
+
+  assert.equal(session, null)
+})
+
 test("mixed meal and workout starts stay graph-native and do not create pushup nutrition junk", () => {
   const { session } = replayMealConversation([
     user("i had milk and did a pushup and then i had eggs"),

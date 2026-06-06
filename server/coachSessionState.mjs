@@ -92,6 +92,9 @@ const TURN_DIRECTIVE_ONLY_PATTERN = /^(?:can\s+you|could\s+you|please|just)\s+(?
 const MEAL_CONTINUATION_PATTERN = /^(?:and\s+)?(?:about|around|bout|roughly|approx(?:imately)?|with|without|no\b|the\b|rest\b|more\b|another\b|half\b|a\s+couple\b|a\s+few\b|a\s+small\b|a\s+big\b|heaps?\b|cooked\s+in\b|fried\b|scrambled\b|boiled\b|grilled\b|poached\b|baked\b|\d+(?:\.\d+)?\s*(?:g|kg|lb|lbs|pound|pounds|ml|l|litre|litres|liter|liters|cup|cups|tbsp|tablespoon|tablespoons|tsp|teaspoon|teaspoons|slice|slices|serve|serves|serving|servings|bowl|bowls|plate|plates|mug|mugs)\b)/i
 const WORKOUT_CONTINUATION_PATTERN = /^(?:and\s+then\s+)?(?:\d+(?:\.\d+)?\s*(?:kg|reps?|sets?|x|min|mins|minutes|km|mi|miles?)\b|at\s+\d+(?:\.\d+)?\s*kg\b|for\s+\d+(?:\.\d+)?\s*(?:min|mins|minutes|km|mi|miles?)\b|\d+\s*more\s+sets?\b|same\s+(?:weight|exercise|thing)\b)/i
 const DIRECT_LOG_ALL_PATTERN = /\b(?:log|save|track|add)\s+(?:all\s+that|that|it)\b/i
+const FUTURE_MEAL_INTENT_PATTERN = /\b(?:(?:i\s*(?:am|['’]m)?\s*)?(?:going\s+to|gonna)\s+(?:have|eat|drink)|(?:i(?:['’]ll)?|i\s+will|will)\s+(?:have|eat|drink))\b/i
+const FUTURE_WORKOUT_INTENT_PATTERN = /\b(?:(?:i\s*(?:am|['’]m)?\s*)?(?:going\s+to|gonna)\s+(?:do|train|work\s*out|run|walk|cycle|bike|swim|bench|squat|deadlift|lift)|(?:i(?:['’]ll)?|i\s+will|will)\s+(?:do|train|work\s*out|run|walk|cycle|bike|swim|bench|squat|deadlift|lift))\b/i
+const PURE_DELETE_OR_SUPPRESS_PATTERN = /^(?:actually\s+|sorry\s+|please\s+|just\s+)*(?:(?:don't|dont|do not|stop)\s+(?:log|save|track|record|add)|(?:delete|remove|undo|erase))(?:\s+(?:it|that|this|log|session|workout))?$/i
 
 function cleanText(value) {
   return String(value || "")
@@ -524,6 +527,40 @@ function isNumericLikeFragment(text = "") {
   return /^(?:about|around|bout|roughly)?\s*\d+(?:\.\d+)?(?:\s*(?:g|kg|lb|lbs|pound|pounds|ml|l|litre|litres|liter|liters|cup|cups|tbsp|tablespoon|tablespoons|tsp|teaspoon|teaspoons|min|mins|minutes|km|mi|miles?|sets?|reps?))?(?:\s+each)?$/i.test(String(text || "").trim())
 }
 
+function isFutureMealIntentMessage(text = "") {
+  const normalized = cleanText(text)
+  if (!normalized) return false
+  if (FUTURE_MEAL_INTENT_PATTERN.test(normalized)) return true
+  return Boolean(
+    /\blater\b/.test(normalized)
+    && /\b(?:have|eat|drink)\b/.test(normalized)
+    && !MEAL_EXPLICIT_START_PATTERN.test(normalized)
+  )
+}
+
+function isFutureWorkoutIntentMessage(text = "") {
+  const normalized = cleanText(text)
+  if (!normalized) return false
+  if (FUTURE_WORKOUT_INTENT_PATTERN.test(normalized)) return true
+  return Boolean(
+    /\blater\b/.test(normalized)
+    && /\b(?:do|train|work\s*out|run|walk|cycle|bike|swim|bench|squat|deadlift|lift)\b/.test(normalized)
+    && !/\b(?:did|trained|worked\s*out|ran|walked|cycled|biked|swam|benched|squatted|deadlifted|lifted)\b/.test(normalized)
+  )
+}
+
+function deleteOrSuppressMentionsWorkoutTarget(text = "") {
+  const normalized = cleanText(text)
+  if (!normalized || (!suppressionRequested(text) && !workoutDeleteRequested(text))) return false
+  const stripped = normalized
+    .replace(/^(?:actually\s+|sorry\s+|please\s+|just\s+)*/i, "")
+    .replace(/^(?:(?:don't|dont|do not|stop)\s+(?:log|save|track|record|add)|(?:delete|remove|undo|erase))\s*/i, "")
+    .replace(/^(?:it|that|this|log|session|workout)\s*/i, "")
+    .trim()
+  if (!stripped || PURE_DELETE_OR_SUPPRESS_PATTERN.test(normalized)) return false
+  return WORKOUT_START_PATTERN.test(stripped) || workoutReferenceMessage(stripped)
+}
+
 function looksLikeDirectiveOnlyClause(text = "") {
   const normalized = cleanText(text)
   if (!normalized) return false
@@ -581,6 +618,9 @@ function classifyCoachClauseDomain({
   const deleteOrSuppress = suppressionRequested(raw) || mealDeleteRequested(raw) || workoutDeleteRequested(raw)
   const correction = mealCorrectionRequested(raw) || workoutCorrectionRequested(raw) || mealRejectionRequested(raw)
 
+  if (!mealSessionActive && !workoutSessionActive && (isFutureMealIntentMessage(raw) || isFutureWorkoutIntentMessage(raw))) {
+    return { domain: "general", mealPreview, parsedWorkout, mealLike: false, workoutLike: false, directiveOnly, nutritionQuestion, workoutQuestion, deleteOrSuppress, correction }
+  }
   if (hasMealClarificationContext(mealSession) && !hasWorkoutClarificationContext(workoutSession) && (isNumericLikeFragment(raw) || MEAL_CONTINUATION_PATTERN.test(normalized) || MEAL_REFERENCE_PATTERN.test(normalized))) {
     return { domain: "meal", mealPreview, parsedWorkout, mealLike, workoutLike, directiveOnly, nutritionQuestion, workoutQuestion, deleteOrSuppress, correction }
   }
@@ -1109,6 +1149,7 @@ function buildMealSessionState(recentMessages = [], currentMessage = "", existin
 
   if (mealLogQueryRequested(currentMessage)) return null
   if (looksLikeWorkoutOnlyTurn(currentMessage)) return null
+  if (!prior.active && !prior.persisted && isFutureMealIntentMessage(currentMessage)) return null
   if (!prior.active && !prior.persisted && NUTRITION_QUESTION_PATTERN.test(cleanText(currentMessage))) return null
   if (!prior.active && !prior.persisted && VAGUE_REFERENCE_PATTERN.test(cleanText(currentMessage))) return null
   if (!prior.active && !prior.persisted && VAGUE_TIME_REF_PATTERN.test(cleanText(currentMessage)) && !isExplicitMealStart(currentMessage)) return null
@@ -1300,6 +1341,7 @@ function looksLikeStandaloneMealMessage(message) {
 function extractWorkoutThread(recentMessages = [], currentMessage = "", existingSession = null) {
   const normalizedCurrent = cleanText(currentMessage)
   const history = safeRecentMessages(recentMessages, 18)
+  if (!existingSession?.active && !existingSession?.persisted && isFutureWorkoutIntentMessage(currentMessage)) return []
   const currentParsedWorkout = parseWorkoutMessage(currentMessage)
   const currentLooksMealLike = looksLikeStandaloneMealMessage(currentMessage)
   const hasExistingWorkoutContext = Boolean(existingSession?.active || existingSession?.persisted)
@@ -1474,6 +1516,8 @@ function parseWorkoutMessage(message) {
   if (!text) return null
   if (VAGUE_WORKOUT_REFERENCE_PATTERN.test(text)) return null
   if (isMealQuantityFragment(message)) return null
+  if (isFutureWorkoutIntentMessage(text)) return null
+  if ((suppressionRequested(message) || workoutDeleteRequested(message)) && !deleteOrSuppressMentionsWorkoutTarget(message)) return null
   if (
     !/\d/.test(text)
     && (

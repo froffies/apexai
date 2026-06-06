@@ -242,6 +242,51 @@ test("coach session state keeps strong workout clauses out of meal fragments in 
   )
 })
 
+test("future workout intent does not open a workout logging flow", () => {
+  const next = buildCoachSessionState({
+    recentMessages: [],
+    currentMessage: "i am going to do a run later",
+    mealSession: emptyMealSessionState(),
+    workoutSession: emptyWorkoutSessionState(),
+  })
+
+  assert.equal(next.mealSession, null)
+  assert.equal(next.workoutSession, null)
+})
+
+test("future meal intent does not open a meal logging flow", () => {
+  const next = buildCoachSessionState({
+    recentMessages: [],
+    currentMessage: "i am going to have 2 eggs later",
+    mealSession: emptyMealSessionState(),
+    workoutSession: emptyWorkoutSessionState(),
+  })
+
+  assert.equal(next.mealSession, null)
+  assert.equal(next.workoutSession, null)
+})
+
+test("meal delete follow-up does not fabricate a workout clarification", () => {
+  const initial = replayCoachConversation([
+    user("i had 2 eggs"),
+  ])
+
+  const persistedMeal = makePersistedMealSession(initial.mealSession, "meal_delete_only")
+  const next = buildCoachSessionState({
+    recentMessages: [
+      ...initial.history,
+      assistant("Saved to today's nutrition: 2 eggs."),
+    ],
+    currentMessage: "actually dont log that",
+    mealSession: persistedMeal,
+    workoutSession: emptyWorkoutSessionState(),
+  })
+
+  assert.ok(next.mealSession)
+  assert.equal(next.mealSession.deleteRequested, true)
+  assert.equal(next.workoutSession, null)
+})
+
 test("coach session state keeps meal details from mixed clarification replies that also include a bodyweight workout", () => {
   const { snapshots } = replayCoachConversation([
     user("i had milk and eggs and did a pushup"),
