@@ -2,8 +2,22 @@ export function roundMacro(value) {
   return Math.round((Number(value) || 0) * 10) / 10
 }
 
+const VERIFIED_SOURCE_TYPES = new Set(["curated_au_catalogue", "open_food_facts_label", "barcode_label"])
+const LOW_CONFIDENCE_SOURCE_TYPES = new Set(["estimated_internal_profile", "photo_ai_estimate", "manual_user_entry", "mixed_reference_and_estimate"])
+
 export function foodLookupKey(food) {
   return String(food?.id || food?.name || "").trim().toLowerCase()
+}
+
+export function normalizeMacroConfidence(value, fallback = "low") {
+  const normalized = String(value || "").trim().toLowerCase()
+  return ["high", "medium", "low"].includes(normalized) ? normalized : fallback
+}
+
+export function normalizeNutritionSourceType(value, estimated = false) {
+  const normalized = String(value || "").trim().toLowerCase()
+  if (normalized) return normalized
+  return estimated ? "estimated_internal_profile" : "reference"
 }
 
 export function normalizeFoodSnapshot(food) {
@@ -18,7 +32,8 @@ export function normalizeFoodSnapshot(food) {
     fat_g: roundMacro(food?.fat_g),
     category: food?.category || "food",
     source: food?.source || "",
-    source_type: food?.source_type || (food?.source ? "reference" : "estimated"),
+    source_type: normalizeNutritionSourceType(food?.source_type, !food?.source),
+    macro_confidence: normalizeMacroConfidence(food?.macro_confidence, food?.source ? "high" : "low"),
   }
 }
 
@@ -29,7 +44,28 @@ export function upsertFoodSnapshot(list, food, limit = 16) {
 }
 
 export function isVerifiedFoodResult(food) {
-  return ["curated_au_catalogue", "open_food_facts_label", "barcode_label"].includes(food?.source_type)
+  return VERIFIED_SOURCE_TYPES.has(normalizeNutritionSourceType(food?.source_type))
+}
+
+export function nutritionSourceLabel(mealOrFood = {}) {
+  const sourceType = normalizeNutritionSourceType(mealOrFood?.nutrition_source_type || mealOrFood?.source_type, Boolean(mealOrFood?.estimated))
+  if (sourceType === "barcode_label") return "Barcode label"
+  if (sourceType === "open_food_facts_label") return "Product label"
+  if (sourceType === "curated_au_catalogue") return "Curated AU/NZ reference"
+  if (sourceType === "photo_ai_estimate") return "AI photo estimate"
+  if (sourceType === "manual_user_entry") return "Manual entry"
+  if (sourceType === "mixed_verified_sources") return "Verified references"
+  if (sourceType === "mixed_reference_and_estimate") return "Mixed reference + estimate"
+  return mealOrFood?.estimated ? "Estimated" : "Reference"
+}
+
+export function nutritionSourceTone(mealOrFood = {}) {
+  const sourceType = normalizeNutritionSourceType(mealOrFood?.nutrition_source_type || mealOrFood?.source_type, Boolean(mealOrFood?.estimated))
+  const confidence = normalizeMacroConfidence(mealOrFood?.macro_confidence, mealOrFood?.estimated ? "low" : "high")
+  if (VERIFIED_SOURCE_TYPES.has(sourceType) && confidence === "high") return "text-emerald-700"
+  if (confidence === "medium" || sourceType === "mixed_verified_sources") return "text-sky-700"
+  if (LOW_CONFIDENCE_SOURCE_TYPES.has(sourceType) || confidence === "low") return "text-amber-700"
+  return mealOrFood?.estimated ? "text-amber-700" : "text-emerald-700"
 }
 
 export function createIngredientItemFromFood(food, overrides = {}) {
@@ -41,6 +77,7 @@ export function createIngredientItemFromFood(food, overrides = {}) {
     estimated: overrides.estimated ?? false,
     source: overrides.source || snapshot.source,
     source_type: overrides.source_type || snapshot.source_type,
+    macro_confidence: overrides.macro_confidence || snapshot.macro_confidence,
     calories: Math.round(Number(overrides.calories ?? snapshot.calories) || 0),
     protein_g: roundMacro(overrides.protein_g ?? snapshot.protein_g),
     carbs_g: roundMacro(overrides.carbs_g ?? snapshot.carbs_g),

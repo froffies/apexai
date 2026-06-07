@@ -172,6 +172,7 @@ export default function IngredientMealFinder() {
     return builderResults
   }, [builderResults, chefMode])
   const builderShowNoResults = builderSearch.trim().length >= 2 && !builderSearching && !filteredBuilderResults.length && !builderStatus
+  const builderSearchLooksLikeBarcode = /^\d{8,14}$/.test(builderSearch.trim())
 
   const quickFoods = useMemo(() => ({
     favorites: favoriteFoods.slice(0, 6),
@@ -595,7 +596,9 @@ export default function IngredientMealFinder() {
           )}
           {builderShowNoResults && (
             <div className="mt-3 rounded-lg border border-dashed border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
-              No matching foods came back for that search. Try a barcode, a brand name, or a simpler term like "beans", "oats", or "Greek yoghurt".
+              {builderSearchLooksLikeBarcode
+                ? "No product label match came back for that barcode. Try the meal name or brand manually, or add the macros yourself."
+                : 'No matching foods came back for that search. Try a barcode, a brand name, or a simpler term like "beans", "oats", or "Greek yoghurt".'}
             </div>
           )}
 

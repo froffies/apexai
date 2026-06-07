@@ -107,6 +107,18 @@ test("local API server exposes health, local nutrition, telemetry, and sanitized
   assert.ok(Array.isArray(nutrition.results))
   assert.ok(nutrition.results.length > 0)
 
+  const nutritionPhotoResponse = await fetch(`http://127.0.0.1:${port}/api/nutrition/analyze-photo`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Origin: "http://127.0.0.1:5173",
+    },
+    body: JSON.stringify({ imageDataUrl: "data:image/png;base64,aGVsbG8=" }),
+  })
+  const nutritionPhoto = await nutritionPhotoResponse.json()
+  assert.equal(nutritionPhotoResponse.status, 503)
+  assert.match(nutritionPhoto.error, /photo analysis is unavailable right now/i)
+
   const telemetryResponse = await fetch(`http://127.0.0.1:${port}/api/telemetry`, {
     method: "POST",
     headers: {
@@ -1990,4 +2002,16 @@ test("protected API endpoints require auth when production auth is enabled", asy
   const nutrition = await nutritionResponse.json()
   assert.equal(nutritionResponse.status, 401)
   assert.match(nutrition.error, /Missing Authorization bearer token/i)
+
+  const nutritionPhotoResponse = await fetch(`http://127.0.0.1:${port}/api/nutrition/analyze-photo`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Origin: "http://127.0.0.1:5173",
+    },
+    body: JSON.stringify({ imageDataUrl: "data:image/png;base64,aGVsbG8=" }),
+  })
+  const nutritionPhoto = await nutritionPhotoResponse.json()
+  assert.equal(nutritionPhotoResponse.status, 401)
+  assert.match(nutritionPhoto.error, /Missing Authorization bearer token/i)
 })

@@ -9,6 +9,7 @@ import {
   buildDeterministicWorkoutDeletionAction,
   deterministicAlreadyLoggedReply,
   deterministicClarifyActionFromSession,
+  estimateMealFromSession,
   formatDeterministicMealAnswer,
 } from "../server/coachLoggingRules.mjs"
 import { buildCoachSessionState, emptyMealSessionState, emptyWorkoutSessionState } from "../server/coachSessionState.mjs"
@@ -80,7 +81,17 @@ test("coach logging rules can estimate a deterministic meal action from session 
     },
     explicitActions: [],
     candidateFoodMatches: {
-      egg: [{ name: "2 large eggs", aliases: ["2 eggs", "eggs"], quantity: "2 large eggs", calories: 148, protein_g: 12.6, carbs_g: 1.1, fat_g: 10.2 }],
+      egg: [{
+        name: "2 large eggs",
+        aliases: ["2 eggs", "eggs"],
+        quantity: "2 large eggs",
+        calories: 148,
+        protein_g: 12.6,
+        carbs_g: 1.1,
+        fat_g: 10.2,
+        source: "Australian Food Composition Database curated local catalogue",
+        source_type: "curated_au_catalogue",
+      }],
     },
     reply: "",
     prompt: "i had egg and tea",
@@ -92,6 +103,70 @@ test("coach logging rules can estimate a deterministic meal action from session 
   assert.ok(action.calories > 1900)
   assert.ok(action.protein_g > 100)
   assert.ok(action.fat_g > 150)
+  assert.equal(action.nutrition_source_type, "mixed_reference_and_estimate")
+  assert.equal(action.macro_confidence, "low")
+})
+
+test("coach logging rules keep verified provenance when a meal resolves entirely from trusted references", () => {
+  const action = buildDeterministicMealAction({
+    mealSession: {
+      readyToLog: true,
+      alreadyLogged: false,
+      summary: "2 eggs",
+      items: [
+        {
+          baseName: "egg",
+          label: "Eggs",
+          category: "food",
+          quantity: { amount: 2, unit: "egg", text: "2 eggs" },
+        },
+      ],
+    },
+    prompt: "i had 2 eggs",
+    candidateFoodMatches: {
+      egg: [{
+        name: "2 large eggs",
+        aliases: ["2 eggs", "eggs"],
+        quantity: "2 large eggs",
+        calories: 148,
+        protein_g: 12.6,
+        carbs_g: 1.1,
+        fat_g: 10.2,
+        source: "Australian Food Composition Database curated local catalogue",
+        source_type: "curated_au_catalogue",
+      }],
+    },
+  })
+  const estimate = estimateMealFromSession({
+    items: [
+      {
+        baseName: "egg",
+        label: "Eggs",
+        category: "food",
+        quantity: { amount: 2, unit: "egg", text: "2 eggs" },
+      },
+    ],
+  }, {
+    egg: [{
+      name: "2 large eggs",
+      aliases: ["2 eggs", "eggs"],
+      quantity: "2 large eggs",
+      calories: 148,
+      protein_g: 12.6,
+      carbs_g: 1.1,
+      fat_g: 10.2,
+      source: "Australian Food Composition Database curated local catalogue",
+      source_type: "curated_au_catalogue",
+    }],
+  })
+
+  assert.equal(estimate.estimated, false)
+  assert.equal(estimate.nutrition_source_type, "curated_au_catalogue")
+  assert.equal(estimate.macro_confidence, "high")
+  assert.match(estimate.nutrition_source, /australian food composition database/i)
+  assert.equal(action?.estimated, false)
+  assert.equal(action?.nutrition_source_type, "curated_au_catalogue")
+  assert.equal(action?.macro_confidence, "high")
 })
 
 test("coach logging rules do not treat steak like tea when estimating fallback macros", () => {

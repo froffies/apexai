@@ -2,9 +2,18 @@ import { useEffect, useMemo, useState } from "react"
 import { Check, Heart, History, Search, ShieldCheck, X } from "lucide-react"
 import BarcodeScannerPanel from "@/components/BarcodeScannerPanel"
 import ChoiceGrid from "@/components/ChoiceGrid"
+import FoodPhotoPanel from "@/components/FoodPhotoPanel"
 import { writeAppRecordSync } from "@/lib/appStorage"
 import { starterMeals, storageKeys } from "@/lib/fitnessDefaults"
-import { foodLookupKey, normalizeFoodSnapshot, upsertFoodSnapshot } from "@/lib/nutritionHelpers"
+import {
+  foodLookupKey,
+  normalizeFoodSnapshot,
+  normalizeMacroConfidence,
+  normalizeNutritionSourceType,
+  nutritionSourceLabel,
+  nutritionSourceTone,
+  upsertFoodSnapshot,
+} from "@/lib/nutritionHelpers"
 import { buildNutritionMemory } from "@/lib/nutritionMemory"
 import { searchNutritionDatabase } from "@/lib/nutritionApiClient"
 import { todayISO, uid, useLocalStorage } from "@/lib/useLocalStorage"
@@ -13,14 +22,6 @@ const mealTypeChoices = ["breakfast", "lunch", "dinner", "snack"].map((type) => 
   value: type,
   label: type.charAt(0).toUpperCase() + type.slice(1),
 }))
-
-function sourceTypeLabel(food) {
-  if (food?.source_type === "barcode_label") return "Barcode label"
-  if (food?.source_type === "open_food_facts_label") return "Product label"
-  if (food?.source_type === "curated_au_catalogue") return "Curated AU reference"
-  if (food?.source_type === "manual_user_entry") return "Manual entry"
-  return "Reference"
-}
 
 function createMealForm(existingMeal, defaultMealType) {
   return {
@@ -33,6 +34,8 @@ function createMealForm(existingMeal, defaultMealType) {
     carbs_g: existingMeal?.carbs_g !== undefined ? String(existingMeal.carbs_g) : "",
     fat_g: existingMeal?.fat_g !== undefined ? String(existingMeal.fat_g) : "",
     nutrition_source: existingMeal?.nutrition_source || "",
+    nutrition_source_type: existingMeal?.nutrition_source_type || "",
+    macro_confidence: existingMeal?.macro_confidence || "",
     notes: existingMeal?.notes || "",
   }
 }
@@ -46,12 +49,16 @@ export default function MealLogModal({ defaultMealType = "breakfast", existingMe
   const [matches, setMatches] = useState([])
   const [searching, setSearching] = useState(false)
   const [manualConfirmed, setManualConfirmed] = useState(() => Boolean(existingMeal && (!existingMeal.nutrition_source || existingMeal.estimated)))
+  const [photoEstimated, setPhotoEstimated] = useState(() => existingMeal?.nutrition_source_type === "photo_ai_estimate")
+  const [photoItems, setPhotoItems] = useState(() => Array.isArray(existingMeal?.photo_analysis_items) ? existingMeal.photo_analysis_items : [])
   const [status, setStatus] = useState("")
 
   useEffect(() => {
     setForm(createMealForm(existingMeal, defaultMealType))
     setQuery(existingMeal?.food_name || "")
     setManualConfirmed(Boolean(existingMeal && (!existingMeal.nutrition_source || existingMeal.estimated)))
+    setPhotoEstimated(existingMeal?.nutrition_source_type === "photo_ai_estimate")
+    setPhotoItems(Array.isArray(existingMeal?.photo_analysis_items) ? existingMeal.photo_analysis_items : [])
     setStatus("")
   }, [defaultMealType, existingMeal])
 
@@ -89,6 +96,7 @@ export default function MealLogModal({ defaultMealType = "breakfast", existingMe
   const favoriteKeys = useMemo(() => new Set(favoriteFoods.map((food) => foodLookupKey(food))), [favoriteFoods])
   const nutritionMemory = useMemo(() => buildNutritionMemory(allMeals, []), [allMeals])
   const showNoResults = query.trim().length >= 2 && !searching && !matches.length && !status
+  const queryLooksLikeBarcode = /^\d{8,14}$/.test(query.trim())
   const quickFoods = useMemo(() => ({
     favorites: favoriteFoods.slice(0, 6),
     recent: recentFoods.slice(0, 6),
@@ -120,10 +128,14 @@ export default function MealLogModal({ defaultMealType = "breakfast", existingMe
       carbs_g: String(snapshot.carbs_g),
       fat_g: String(snapshot.fat_g),
       nutrition_source: snapshot.source,
+      nutrition_source_type: snapshot.source_type,
+      macro_confidence: snapshot.macro_confidence,
     }))
     touchRecentFood(snapshot)
     setQuery(snapshot.name)
     setManualConfirmed(false)
+    setPhotoEstimated(false)
+    setPhotoItems([])
     setStatus("")
   }
 
@@ -138,6 +150,10 @@ export default function MealLogModal({ defaultMealType = "breakfast", existingMe
       return
     }
 
+    const derivedSourceType = normalizeNutritionSourceType(form.nutrition_source_type, photoEstimated || !form.nutrition_source)
+    const estimatedFromSource = ["estimated_internal_profile", "photo_ai_estimate", "manual_user_entry", "mixed_reference_and_estimate"].includes(derivedSourceType)
+      || !form.nutrition_source
+
     const meal = {
       ...form,
       id: existingMeal?.id || uid("meal"),
@@ -145,8 +161,11 @@ export default function MealLogModal({ defaultMealType = "breakfast", existingMe
       protein_g: Number(form.protein_g) || 0,
       carbs_g: Number(form.carbs_g) || 0,
       fat_g: Number(form.fat_g) || 0,
-      estimated: !form.nutrition_source,
+      estimated: estimatedFromSource,
       nutrition_source: form.nutrition_source || "Manual user-entered macros",
+      nutrition_source_type: derivedSourceType,
+      macro_confidence: normalizeMacroConfidence(form.macro_confidence, estimatedFromSource ? "low" : "high"),
+      ...(photoEstimated ? { photo_analysis_items: photoItems } : {}),
     }
 
     const nextMeals = existingMeal
@@ -161,7 +180,8 @@ export default function MealLogModal({ defaultMealType = "breakfast", existingMe
       carbs_g: meal.carbs_g,
       fat_g: meal.fat_g,
       source: meal.nutrition_source,
-      source_type: meal.estimated ? "manual_user_entry" : "reference",
+      source_type: meal.nutrition_source_type || (meal.estimated ? "manual_user_entry" : "reference"),
+      macro_confidence: meal.macro_confidence || (meal.estimated ? "low" : "high"),
     }
     const nextRecentFoods = upsertFoodSnapshot(recentFoods, recentSnapshot, 12)
 
@@ -172,6 +192,14 @@ export default function MealLogModal({ defaultMealType = "breakfast", existingMe
     onSaved?.(meal)
     onClose?.()
   }
+
+  const derivedSourceType = normalizeNutritionSourceType(form.nutrition_source_type, photoEstimated || !form.nutrition_source)
+  const sourceMeta = {
+    estimated: ["estimated_internal_profile", "photo_ai_estimate", "manual_user_entry", "mixed_reference_and_estimate"].includes(derivedSourceType) || !form.nutrition_source,
+    nutrition_source_type: derivedSourceType,
+    macro_confidence: normalizeMacroConfidence(form.macro_confidence, (["estimated_internal_profile", "photo_ai_estimate", "manual_user_entry", "mixed_reference_and_estimate"].includes(derivedSourceType) || !form.nutrition_source) ? "low" : "high"),
+  }
+  const sourceEstimated = Boolean(sourceMeta.estimated)
 
   return (
     <form onSubmit={save} className={standalone ? "mx-auto max-w-md p-4" : ""}>
@@ -243,6 +271,33 @@ export default function MealLogModal({ defaultMealType = "breakfast", existingMe
             <Search size={16} /> Verified food search
           </label>
           <p className="mt-1 text-sm text-slate-500">Search products, meals, or paste a barcode/EAN/UPC to find a label match.</p>
+          <FoodPhotoPanel
+            className="mt-3"
+            locale="AU"
+            mealType={form.meal_type}
+            onAnalyzed={(result) => {
+              setForm((current) => ({
+                ...current,
+                food_name: result.food_name || current.food_name,
+                quantity: result.quantity || current.quantity,
+                calories: result.calories !== undefined ? String(result.calories) : current.calories,
+                protein_g: result.protein_g !== undefined ? String(result.protein_g) : current.protein_g,
+                carbs_g: result.carbs_g !== undefined ? String(result.carbs_g) : current.carbs_g,
+                fat_g: result.fat_g !== undefined ? String(result.fat_g) : current.fat_g,
+                nutrition_source: result.nutrition_source || current.nutrition_source,
+                nutrition_source_type: result.nutrition_source_type || current.nutrition_source_type,
+                macro_confidence: result.macro_confidence || current.macro_confidence,
+                notes: [
+                  result.clarification_question ? `Photo review: ${result.clarification_question}` : "",
+                  Array.isArray(result.assumptions) && result.assumptions.length ? `Photo assumptions: ${result.assumptions.join("; ")}` : "",
+                ].filter(Boolean).join("\n\n") || current.notes,
+              }))
+              setPhotoEstimated(true)
+              setPhotoItems(Array.isArray(result.identified_items) ? result.identified_items : [])
+              setManualConfirmed(false)
+              setStatus(result.clarification_question || "Photo analyzed. Review the foods and save when you're happy with it.")
+            }}
+          />
           <BarcodeScannerPanel
             className="mt-3"
             buttonLabel="Scan barcode"
@@ -254,6 +309,21 @@ export default function MealLogModal({ defaultMealType = "breakfast", existingMe
           />
           <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Try: Greek yoghurt, sushi, 9300605123456" className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-950" />
           {searching && <p className="mt-2 text-sm text-slate-500">Searching nutrition sources...</p>}
+          {!!photoItems.length && (
+            <div className="mt-3 rounded-lg bg-slate-50 p-3">
+              <p className="text-sm font-semibold text-slate-900">Photo identified</p>
+              <div className="mt-2 space-y-2">
+                {photoItems.map((item, index) => (
+                  <div key={`${item.matched_food_name || item.name}_${index}`} className="rounded-lg bg-white p-3 text-sm">
+                    <p className="font-medium text-slate-950">{item.name}</p>
+                    <p className="text-slate-500">{item.quantity} {item.matched_food_name ? `- matched to ${item.matched_food_name}` : ""}</p>
+                    <p className="text-slate-500">{item.calories} kcal - {item.protein_g}g protein - {item.carbs_g}g carbs - {item.fat_g}g fat</p>
+                    <p className="text-amber-700">{item.source}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="mt-2 space-y-2">
             {matches.map((food) => {
               const favorite = favoriteKeys.has(foodLookupKey(food))
@@ -263,7 +333,7 @@ export default function MealLogModal({ defaultMealType = "breakfast", existingMe
                     <button type="button" onClick={() => selectFood(food)} className="flex-1 text-left">
                       <p className="font-semibold text-slate-950">{food.name}</p>
                       <p className="text-sm text-slate-500">{food.quantity} - {food.calories} kcal - {food.protein_g}g protein</p>
-                      <p className="mt-1 text-sm text-emerald-700">{sourceTypeLabel(food)} - {food.source}</p>
+                      <p className={`mt-1 text-sm ${nutritionSourceTone(food)}`}>{nutritionSourceLabel(food)} - {food.source}</p>
                     </button>
                     <div className="flex gap-2">
                       <button type="button" onClick={() => toggleFavoriteFood(food)} className={`flex min-h-11 min-w-11 items-center justify-center rounded-lg border ${favorite ? "border-rose-200 bg-rose-50 text-rose-600" : "border-slate-200 bg-white text-slate-400"}`}>
@@ -280,7 +350,9 @@ export default function MealLogModal({ defaultMealType = "breakfast", existingMe
           </div>
           {showNoResults && (
             <div className="mt-3 rounded-lg border border-dashed border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
-              No matching foods came back for that search. Try a barcode, a brand name, or a simpler term like "tuna", "rice", or "yoghurt".
+              {queryLooksLikeBarcode
+                ? "No product label match came back for that barcode. Try the plate-photo tool, search the brand and product name manually, or enter the macros yourself."
+                : 'No matching foods came back for that search. Try a barcode, a brand name, or a simpler term like "tuna", "rice", or "yoghurt".'}
             </div>
           )}
         </div>
@@ -298,11 +370,20 @@ export default function MealLogModal({ defaultMealType = "breakfast", existingMe
             <input value={form.carbs_g} onChange={(event) => update("carbs_g", event.target.value)} inputMode="decimal" placeholder="Carbs g" className="rounded-lg border border-slate-200 px-3 py-2 text-slate-950" />
             <input value={form.fat_g} onChange={(event) => update("fat_g", event.target.value)} inputMode="decimal" placeholder="Fat g" className="rounded-lg border border-slate-200 px-3 py-2 text-slate-950" />
           </div>
-          {form.nutrition_source && (
+          {form.nutrition_source && !sourceEstimated && (
             <div className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-800">
               <div className="flex items-center gap-2 font-semibold">
                 <ShieldCheck size={16} />
-                Verified source
+                {nutritionSourceLabel(sourceMeta)}
+              </div>
+              <p className="mt-1">{form.nutrition_source}</p>
+            </div>
+          )}
+          {form.nutrition_source && sourceEstimated && (
+            <div className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">
+              <div className="flex items-center gap-2 font-semibold">
+                <ShieldCheck size={16} />
+                {nutritionSourceLabel(sourceMeta)}
               </div>
               <p className="mt-1">{form.nutrition_source}</p>
             </div>

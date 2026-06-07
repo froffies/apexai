@@ -28,6 +28,7 @@ import {
   summarizeCoachAction,
 } from "./coachLoggingRules.mjs"
 import { normalizeCoachResponse } from "./normalizeCoachResponse.mjs"
+import { buildFoodPhotoEstimate } from "./nutritionPhotoAnalysis.mjs"
 
 function loadDotEnv() {
   const envPath = path.join(process.cwd(), ".env")
@@ -74,7 +75,7 @@ const telemetrySink = String(
   || (nodeEnv === "production" && adminSupabase ? "supabase_auto" : "file")
 ).trim().toLowerCase()
 const telemetryRateLimitMaxRequests = Number(process.env.TELEMETRY_RATE_LIMIT_MAX_REQUESTS || (nodeEnv === "production" ? 300 : 2000))
-const openFoodFactsTimeoutMs = Number(process.env.OPENFOODFACTS_TIMEOUT_MS || 1000)
+const openFoodFactsTimeoutMs = Number(process.env.OPENFOODFACTS_TIMEOUT_MS || 5000)
 const foodLookupCacheTtlMs = Number(process.env.FOOD_LOOKUP_CACHE_TTL_MS || 15 * 60_000)
 const foodLookupCacheMaxEntries = Number(process.env.FOOD_LOOKUP_CACHE_MAX_ENTRIES || 200)
 const foodLookupCache = new Map()
@@ -221,6 +222,39 @@ const nutritionChefSchema = {
   },
 }
 
+const nutritionPhotoSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["summary", "portion", "overall_confidence", "needs_clarification", "clarification_question", "assumptions", "items"],
+  properties: {
+    summary: { type: "string" },
+    portion: { type: "string" },
+    overall_confidence: { type: "string" },
+    needs_clarification: { type: "boolean" },
+    clarification_question: { type: "string" },
+    assumptions: {
+      type: "array",
+      items: { type: "string" },
+    },
+    items: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["name", "quantity", "category", "preparation", "confidence", "notes"],
+        properties: {
+          name: { type: "string" },
+          quantity: { type: "string" },
+          category: { type: "string" },
+          preparation: { type: "string" },
+          confidence: { type: "string" },
+          notes: { type: "string" },
+        },
+      },
+    },
+  },
+}
+
 const coachInstructions = `
 You are ApexAI, a premium Australian fitness and nutrition coach inside a mobile app.
 
@@ -332,6 +366,33 @@ Goals:
 - Provide totals for the full recipe and per-serving macros.
 - Use Australian spelling and metric-friendly quantities where practical.
 - Do not claim perfect certainty. If the macro basis is mixed, say so briefly in notes.
+`
+
+const nutritionPhotoInstructions = `
+You are ApexAI Vision Nutrition inside an Australian/New Zealand fitness app.
+
+Return JSON only.
+
+Task:
+- Look at one plate or drink photo.
+- Identify only foods and drinks that are actually visible or strongly obvious from the image.
+- Estimate practical portions conservatively.
+- Do NOT invent hidden oils, butter, sauces, brands, or ingredients unless they are clearly visible.
+- If the image is ambiguous, say so and ask for a clarification.
+- Prefer Australian / New Zealand naming and metric-friendly quantities.
+
+Rules:
+- Focus on what is on the plate or in the cup, not what might have been used off-camera.
+- If there are multiple foods, return them as separate items.
+- quantity should be a practical string like "2 eggs", "250ml milk", "180g chicken", "1 slice toast", or "1 plate salad".
+- category must be one of: food, drink, ingredient.
+- preparation should be short, like "fried", "hard boiled", "grilled", or "".
+- confidence must be high, medium, or low.
+- summary should be a short combined description of the whole plate.
+- portion should be a whole-meal container label like "1 plate", "1 bowl", "1 cup", or "1 glass".
+- assumptions should list only the key uncertainty points.
+- needs_clarification should be true if the image is too ambiguous for a solid log without user confirmation.
+- clarification_question should be short and specific when needed, otherwise empty.
 `
 
 function jsonHeaders(origin = fallbackCorsOrigin) {
@@ -696,6 +757,26 @@ function validateNutritionChefBody(body) {
   }
   if (body.allowEstimated !== undefined && typeof body.allowEstimated !== "boolean") {
     const error = new Error("allowEstimated must be a boolean")
+    error.status = 400
+    throw error
+  }
+}
+
+function validateNutritionPhotoBody(body) {
+  assertObject(body, "request body")
+  assertString(body.imageDataUrl, "imageDataUrl", 8_000_000)
+  if (!/^data:image\/[a-z0-9.+-]+;base64,/i.test(String(body.imageDataUrl || ""))) {
+    const error = new Error("imageDataUrl must be a base64 image data URL")
+    error.status = 400
+    throw error
+  }
+  if (body.locale !== undefined && typeof body.locale !== "string") {
+    const error = new Error("locale must be a string")
+    error.status = 400
+    throw error
+  }
+  if (body.mealType !== undefined && typeof body.mealType !== "string") {
+    const error = new Error("mealType must be a string")
     error.status = 400
     throw error
   }
@@ -1126,6 +1207,7 @@ function normalizeOpenFoodFactsProducts(products) {
         category: "packaged food",
         source: product.url || "Open Food Facts product label database",
         source_type: "open_food_facts_label",
+        macro_confidence: "high",
       }
     })
     .filter(Boolean)
@@ -1616,6 +1698,7 @@ function verifiedNutritionResult(food) {
     category: food.category || "food",
     source: food.source,
     source_type: "curated_au_catalogue",
+    macro_confidence: "high",
   }
 }
 
@@ -1681,6 +1764,87 @@ async function handleNutritionSearch(request, response) {
   const query = String(body.query || "")
   const results = await lookupFoodsBroad(query)
   sendJson(response, 200, { results }, requestResponseOrigin(request))
+}
+
+async function handleNutritionPhoto(request, response) {
+  await verifyRequestAuth(request)
+  const body = await readRequestBody(request)
+  validateNutritionPhotoBody(body)
+
+  if (!client) {
+    throw createHttpError(503, "Photo analysis is unavailable right now.", {
+      expose: true,
+      logMessage: "OPENAI_API_KEY is not set for nutrition photo analysis",
+    })
+  }
+
+  const payload = {
+    locale: String(body.locale || "AU").trim() || "AU",
+    meal_type: String(body.mealType || "").trim(),
+  }
+
+  let completion
+  try {
+    completion = await client.chat.completions.create({
+      model,
+      max_completion_tokens: 500,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: nutritionPhotoInstructions },
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(payload),
+            },
+            {
+              type: "image_url",
+              image_url: {
+                url: String(body.imageDataUrl || ""),
+                detail: "low",
+              },
+            },
+          ],
+        },
+      ],
+    })
+  } catch (error) {
+    const status = Number(error?.status || error?.code || 0)
+    const message = String(error?.message || "")
+    if (status === 429 || /rate limit|quota|insufficient_quota/i.test(message)) {
+      throw createHttpError(503, "Photo analysis is busy right now. Try again in a moment or use barcode or manual search.", {
+        expose: true,
+        logMessage: `Photo analysis upstream limit: ${message || "429"}`,
+      })
+    }
+    throw error
+  }
+
+  const parsed = JSON.parse(completion.choices[0]?.message?.content || "{}")
+  const estimatedMeal = await buildFoodPhotoEstimate(parsed, {
+    mealType: payload.meal_type,
+    lookupFoods: async (term) => (await lookupFoodsBroad(term)).slice(0, 6),
+  })
+
+  const action = estimatedMeal.action
+  sendJson(response, 200, {
+    summary: estimatedMeal.analysis.summary,
+    portion: estimatedMeal.analysis.portion,
+    food_name: action?.food_name || estimatedMeal.analysis.summary,
+    quantity: action?.quantity || estimatedMeal.analysis.portion,
+    calories: Number(action?.calories || 0),
+    protein_g: Number(action?.protein_g || 0),
+    carbs_g: Number(action?.carbs_g || 0),
+    fat_g: Number(action?.fat_g || 0),
+    estimated: true,
+    nutrition_source: action?.nutrition_source || "AI plate-photo estimate",
+    identified_items: estimatedMeal.breakdown,
+    macro_confidence: estimatedMeal.macro_confidence,
+    needs_review: estimatedMeal.needs_review,
+    clarification_question: estimatedMeal.clarification_question,
+    assumptions: estimatedMeal.assumptions,
+  }, requestResponseOrigin(request))
 }
 
 function normalizeChefResponse(value) {
@@ -1940,6 +2104,19 @@ const server = http.createServer(async (request, response) => {
       const status = error.status || 500
       logRequest(request, status, "handler=nutrition")
       sendError(response, request, error, "Nutrition search is unavailable right now.")
+    }
+    return
+  }
+
+  if (request.method === "POST" && request.url === "/api/nutrition/analyze-photo") {
+    try {
+      checkRateLimit(request)
+      await handleNutritionPhoto(request, response)
+      logRequest(request, 200, "handler=nutrition-photo")
+    } catch (error) {
+      const status = error.status || 500
+      logRequest(request, status, "handler=nutrition-photo")
+      sendError(response, request, error, "Photo nutrition analysis is unavailable right now.")
     }
     return
   }

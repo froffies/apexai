@@ -323,6 +323,27 @@ function resolveMealNutritionSource(action, fallback = "") {
   return "Coach estimate from user-described ingredients and amounts"
 }
 
+function resolveMealNutritionSourceType(action, fallback = "", estimated = true) {
+  const explicit = String(action?.nutrition_source_type || "").trim().toLowerCase()
+  if (explicit) return explicit
+  if (fallback) return String(fallback || "").trim().toLowerCase()
+  return estimated ? "estimated_internal_profile" : "reference"
+}
+
+function resolveMealMacroConfidence(action, fallback = "", estimated = true) {
+  const explicit = String(action?.macro_confidence || "").trim().toLowerCase()
+  if (["high", "medium", "low"].includes(explicit)) return explicit
+  const persisted = String(fallback || "").trim().toLowerCase()
+  if (["high", "medium", "low"].includes(persisted)) return persisted
+  return estimated ? "low" : "high"
+}
+
+function resolveMealMacroBreakdown(action, fallback = []) {
+  return Array.isArray(action?.macro_breakdown) && action.macro_breakdown.length
+    ? action.macro_breakdown
+    : (Array.isArray(fallback) ? fallback : [])
+}
+
 function normalizeCoachComparableText(value) {
   return String(value || "")
     .toLowerCase()
@@ -1271,7 +1292,11 @@ export default function Coach() {
         if (!hasMacros) {
           continue
         } else {
+          const estimated = action.estimated ?? true
           const nutritionSource = resolveMealNutritionSource(action)
+          const nutritionSourceType = resolveMealNutritionSourceType(action, "", estimated)
+          const macroConfidence = resolveMealMacroConfidence(action, "", estimated)
+          const macroBreakdown = resolveMealMacroBreakdown(action)
           const mealId = uid("meal")
           const nextMeal = {
             id: mealId,
@@ -1283,8 +1308,11 @@ export default function Coach() {
             protein_g: numberOrZero(action.protein_g),
             carbs_g: numberOrZero(action.carbs_g),
             fat_g: numberOrZero(action.fat_g),
-            estimated: action.estimated ?? true,
+            estimated,
             nutrition_source: nutritionSource,
+            nutrition_source_type: nutritionSourceType,
+            macro_confidence: macroConfidence,
+            ...(macroBreakdown.length ? { macro_breakdown: macroBreakdown } : {}),
             notes: action.message || "Logged by OpenAI coach",
           }
           setMeals((current) => [nextMeal, ...current])
@@ -1307,7 +1335,11 @@ export default function Coach() {
           rejectedActions.push("I need the corrected calories and macros before I can update that meal cleanly.")
           continue
         }
+        const estimated = action.estimated ?? existingMeal.estimated
         const nutritionSource = resolveMealNutritionSource(action, existingMeal.nutrition_source)
+        const nutritionSourceType = resolveMealNutritionSourceType(action, existingMeal.nutrition_source_type, estimated)
+        const macroConfidence = resolveMealMacroConfidence(action, existingMeal.macro_confidence, estimated)
+        const macroBreakdown = resolveMealMacroBreakdown(action, existingMeal.macro_breakdown)
 
         const nextMeal = {
           ...existingMeal,
@@ -1319,8 +1351,11 @@ export default function Coach() {
           protein_g: numberOrZero(action.protein_g),
           carbs_g: numberOrZero(action.carbs_g),
           fat_g: numberOrZero(action.fat_g),
-          estimated: action.estimated ?? existingMeal.estimated,
+          estimated,
           nutrition_source: nutritionSource,
+          nutrition_source_type: nutritionSourceType,
+          macro_confidence: macroConfidence,
+          ...(macroBreakdown.length ? { macro_breakdown: macroBreakdown } : {}),
           notes: action.message || existingMeal.notes,
         }
         setMeals((current) => upsertMealEntry(current, nextMeal))

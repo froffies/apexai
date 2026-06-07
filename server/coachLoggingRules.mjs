@@ -279,19 +279,36 @@ function fallbackProfileForItem(item, itemQuantity = null) {
   }
 }
 
-function estimateItemMacros(item, candidateFoodMatches = {}) {
+function estimateItemMacroDetails(item, candidateFoodMatches = {}) {
   const candidate = chooseBestCandidate(item, candidateFoodMatches)
   const itemQuantity = normalizeItemQuantity(item.quantity)
 
   if (candidate) {
     const servingQuantity = parsePortion(candidate.quantity || "")
     const ratio = itemQuantity ? scaleFromPortions(itemQuantity, servingQuantity) : 1
-    return scaleNutrition(candidate, ratio || 1)
+    return {
+      macros: scaleNutrition(candidate, ratio || 1),
+      source: String(candidate.source || "").trim() || "Matched nutrition reference",
+      source_type: String(candidate.source_type || "reference").trim() || "reference",
+      matched_food_name: String(candidate.name || "").trim() || String(item.label || item.baseName || "").trim(),
+      estimated: false,
+    }
   }
 
   const fallback = fallbackProfileForItem(item, itemQuantity)
   const ratio = itemQuantity ? scaleFromPortions(itemQuantity, fallback.serving) : 1
-  return scaleNutrition(fallback.macros, ratio || 1)
+  return {
+    macros: scaleNutrition(fallback.macros, ratio || 1),
+    source: "Estimated from AI-identified foods and internal AU/NZ nutrition fallbacks",
+    source_type: "estimated_internal_profile",
+    matched_food_name: String(item.label || item.baseName || "").trim() || "Estimated food",
+    estimated: true,
+  }
+}
+
+function estimateItemMacros(item, candidateFoodMatches = {}) {
+  const details = estimateItemMacroDetails(item, candidateFoodMatches)
+  return details.macros
 }
 
 function estimateMealMacros(mealSession, candidateFoodMatches = {}) {
@@ -311,6 +328,84 @@ function estimateMealMacros(mealSession, candidateFoodMatches = {}) {
     carbs_g: 0,
     fat_g: 0,
   })
+}
+
+export function estimateMealFromSession(mealSession, candidateFoodMatches = {}) {
+  const items = safeArray(mealSession?.items, 16).map((item) => normalizeSessionItem(item))
+  if (!items.length) {
+    return {
+      items: [],
+      totals: {
+        calories: 0,
+        protein_g: 0,
+        carbs_g: 0,
+        fat_g: 0,
+      },
+      estimated: true,
+      macro_confidence: "low",
+      nutrition_source_type: "estimated_internal_profile",
+      nutrition_source: "Coach estimate from user-described ingredients and amounts",
+    }
+  }
+
+  const breakdown = items.map((item) => {
+    const details = estimateItemMacroDetails(item, candidateFoodMatches)
+    return {
+      name: String(item.label || item.baseName || "").trim() || "Item",
+      quantity: typeof item.quantity === "string"
+        ? item.quantity
+        : String(item?.quantity?.text || "").trim(),
+      category: String(item.category || "").trim().toLowerCase() || "food",
+      matched_food_name: details.matched_food_name,
+      source: details.source,
+      source_type: details.source_type,
+      estimated: details.estimated,
+      calories: details.macros.calories,
+      protein_g: details.macros.protein_g,
+      carbs_g: details.macros.carbs_g,
+      fat_g: details.macros.fat_g,
+    }
+  })
+
+  const totals = breakdown.reduce((accumulator, item) => ({
+    calories: accumulator.calories + item.calories,
+    protein_g: roundMacro(accumulator.protein_g + item.protein_g),
+    carbs_g: roundMacro(accumulator.carbs_g + item.carbs_g),
+    fat_g: roundMacro(accumulator.fat_g + item.fat_g),
+  }), {
+    calories: 0,
+    protein_g: 0,
+    carbs_g: 0,
+    fat_g: 0,
+  })
+
+  const uniqueSourceTypes = [...new Set(breakdown.map((item) => String(item.source_type || "").trim()).filter(Boolean))]
+  const uniqueSources = [...new Set(breakdown.map((item) => String(item.source || "").trim()).filter(Boolean))]
+  const estimated = breakdown.some((item) => item.estimated)
+  const macro_confidence = estimated
+    ? "low"
+    : uniqueSourceTypes.every((type) => ["curated_au_catalogue", "barcode_label", "open_food_facts_label"].includes(type))
+      ? "high"
+      : "medium"
+  const nutrition_source_type = uniqueSourceTypes.length === 1
+    ? uniqueSourceTypes[0]
+    : estimated
+      ? "mixed_reference_and_estimate"
+      : "mixed_verified_sources"
+  const nutrition_source = uniqueSources.length
+    ? uniqueSources.join(" | ")
+    : estimated
+      ? "Coach estimate from user-described ingredients and amounts"
+      : "Verified matched nutrition reference"
+
+  return {
+    items: breakdown,
+    totals,
+    estimated,
+    macro_confidence,
+    nutrition_source_type,
+    nutrition_source,
+  }
 }
 
 export function normalizeAction(action) {
@@ -568,6 +663,10 @@ export function normalizeMealAction(action) {
   return {
     ...action,
     estimated: action.estimated ?? true,
+    nutrition_source_type: String(action.nutrition_source_type || "").trim() || (action.estimated === false ? "reference" : "estimated_internal_profile"),
+    macro_confidence: ["high", "medium", "low"].includes(String(action.macro_confidence || "").trim().toLowerCase())
+      ? String(action.macro_confidence || "").trim().toLowerCase()
+      : (action.estimated === false ? "high" : "low"),
     ...(foodName ? { food_name: foodName } : {}),
     ...(quantity ? { quantity } : {}),
     nutrition_source:
@@ -742,6 +841,7 @@ function buildSingleDeterministicMealAction({
   if (!shouldPersist) return null
 
   const explicit = firstMealAction(explicitActions)
+  const estimatedMeal = estimateMealFromSession(mealSession, candidateFoodMatches)
   const macros = hasMealMacros(explicit)
     ? {
         calories: Number(explicit.calories),
@@ -763,7 +863,7 @@ function buildSingleDeterministicMealAction({
             carbs_g: Number(mealSession.referenceMeal.carbs_g),
             fat_g: Number(mealSession.referenceMeal.fat_g),
           }
-        : estimateMealMacros(mealSession, candidateFoodMatches)
+        : estimatedMeal.totals
 
   if (!macros) return null
 
@@ -773,10 +873,21 @@ function buildSingleDeterministicMealAction({
     meal_type: normalizeMealType(mealTypeOverride) || explicit?.meal_type || mealSession?.referenceMeal?.meal_type || inferMealTypeFromPrompt(prompt),
     food_name: mealSession.summary || mealSession?.referenceMeal?.food_name || "",
     quantity: explicit?.quantity || mealSession?.referenceMeal?.quantity || "1 meal",
-    estimated: explicit?.estimated ?? true,
+    estimated: explicit?.estimated ?? mealSession?.referenceMeal?.estimated ?? estimatedMeal.estimated,
     nutrition_source: typeof explicit?.nutrition_source === "string" && explicit.nutrition_source.trim()
       ? explicit.nutrition_source.trim()
-      : mealSession?.referenceMeal?.nutrition_source || "Coach estimate from accumulated meal details across chat",
+      : mealSession?.referenceMeal?.nutrition_source
+        || (estimatedMeal.items.length ? estimatedMeal.nutrition_source : "")
+        || "Coach estimate from accumulated meal details across chat",
+    nutrition_source_type: String(explicit?.nutrition_source_type || "").trim()
+      || String(mealSession?.referenceMeal?.nutrition_source_type || "").trim()
+      || estimatedMeal.nutrition_source_type,
+    macro_confidence: String(explicit?.macro_confidence || "").trim().toLowerCase()
+      || String(mealSession?.referenceMeal?.macro_confidence || "").trim().toLowerCase()
+      || estimatedMeal.macro_confidence,
+    macro_breakdown: Array.isArray(explicit?.macro_breakdown) && explicit.macro_breakdown.length
+      ? explicit.macro_breakdown
+      : estimatedMeal.items,
     ...macros,
   })
 }

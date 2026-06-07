@@ -50,6 +50,8 @@ export function foodToMeal(food, overrides = {}) {
     fat_g: food.fat_g,
     estimated: false,
     nutrition_source: food.source,
+    nutrition_source_type: "curated_au_catalogue",
+    macro_confidence: "high",
     ...overrides,
   }
 }

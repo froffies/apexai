@@ -25,11 +25,27 @@ function defaultNutritionChefUrl() {
   return `${window.location.protocol}//${host}:8787/api/nutrition/chef`
 }
 
+function defaultNutritionPhotoUrl() {
+  if (typeof window === "undefined") return "http://127.0.0.1:8787/api/nutrition/analyze-photo"
+  const coachUrl = import.meta.env.VITE_OPENAI_COACH_URL || ""
+  if (coachUrl) {
+    try {
+      const base = new URL(coachUrl)
+      return `${base.protocol}//${base.host}/api/nutrition/analyze-photo`
+    } catch {
+      // malformed env var - fall through to host-based default
+    }
+  }
+  const host = window.location.hostname || "127.0.0.1"
+  return `${window.location.protocol}//${host}:8787/api/nutrition/analyze-photo`
+}
+
 function normalizeLocal(food) {
   return {
     ...food,
     source: food.source,
     source_type: "curated_au_catalogue",
+    macro_confidence: "high",
   }
 }
 
@@ -83,6 +99,32 @@ export async function generateChefRecipe({ pantry, goal = "", mealType = "dinner
     return data.recipe || null
   } catch {
     return generateLocalChefRecipe(pantry, mealType, servings, allowEstimated)
+  } finally {
+    window.clearTimeout(timeout)
+  }
+}
+
+export async function analyzeFoodPhoto({ imageDataUrl, locale = "AU", mealType = "" }) {
+  if (!imageDataUrl) throw new Error("Food photo is required")
+
+  const endpoint = import.meta.env.VITE_NUTRITION_PHOTO_API_URL || defaultNutritionPhotoUrl()
+  const controller = new AbortController()
+  const timeout = window.setTimeout(() => controller.abort(), 30000)
+
+  try {
+    const token = await getCloudAccessToken()
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ imageDataUrl, locale, mealType }),
+      signal: controller.signal,
+    })
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok) throw new Error(data.error || "Food photo analysis failed")
+    return data
   } finally {
     window.clearTimeout(timeout)
   }

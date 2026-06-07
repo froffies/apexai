@@ -10,6 +10,7 @@ import SegmentedControl from "@/components/SegmentedControl"
 import { toast } from "@/components/ui/use-toast"
 import { createPageUrl } from "@/utils"
 import { defaultProfile, macroTotals, starterMeals, storageKeys } from "@/lib/fitnessDefaults"
+import { nutritionSourceLabel, nutritionSourceTone } from "@/lib/nutritionHelpers"
 import { buildNutritionMemory } from "@/lib/nutritionMemory"
 import { todayISO, useLocalStorage } from "@/lib/useLocalStorage"
 
@@ -31,14 +32,6 @@ function rankFoodsForTargets(foods, remaining) {
       return { ...food, score }
     })
     .sort((left, right) => right.score - left.score)
-}
-
-function nutritionSourceTone(meal) {
-  return meal?.estimated ? "text-amber-700" : "text-emerald-700"
-}
-
-function nutritionSourceLabel(meal) {
-  return meal?.estimated ? "Estimated" : "Verified"
 }
 
 export default function Nutrition() {
@@ -123,6 +116,8 @@ export default function Nutrition() {
       fat_g: Number(food.fat_g) || 0,
       estimated: false,
       nutrition_source: food.source || "Quick-logged from favourite food",
+      nutrition_source_type: food.source_type || "reference",
+      macro_confidence: food.macro_confidence || "high",
       notes: "Smart suggestion quick-log",
     }, ...current])
   }
