@@ -152,9 +152,10 @@ function scaleNutrition(base, ratio) {
   }
 }
 
-function fallbackProfileForItem(item) {
+function fallbackProfileForItem(item, itemQuantity = null) {
   const baseName = String(item.baseName || item.label || "").toLowerCase()
   const exclusions = safeArray(item.exclusions, 8).map((entry) => String(entry || "").toLowerCase())
+  const conservativeIngredientFallback = !itemQuantity && item.category === "ingredient"
 
   if (hasWholeFoodTerm(baseName, "egg") || hasWholeFoodTerm(baseName, "eggs")) {
     return {
@@ -165,15 +166,23 @@ function fallbackProfileForItem(item) {
 
   if (hasWholeFoodTerm(baseName, "butter")) {
     return {
-      serving: { amount: 100, unit: "g" },
-      macros: { calories: 717, protein_g: 0.9, carbs_g: 0.1, fat_g: 81.1 },
+      serving: conservativeIngredientFallback
+        ? { amount: 1, unit: "tbsp" }
+        : { amount: 100, unit: "g" },
+      macros: conservativeIngredientFallback
+        ? { calories: 102, protein_g: 0.1, carbs_g: 0, fat_g: 11.5 }
+        : { calories: 717, protein_g: 0.9, carbs_g: 0.1, fat_g: 81.1 },
     }
   }
 
   if (hasWholeFoodTerm(baseName, "olive oil") || /\boil\b/i.test(baseName)) {
     return {
-      serving: { amount: 100, unit: "g" },
-      macros: { calories: 884, protein_g: 0, carbs_g: 0, fat_g: 100 },
+      serving: conservativeIngredientFallback
+        ? { amount: 1, unit: "tbsp" }
+        : { amount: 100, unit: "g" },
+      macros: conservativeIngredientFallback
+        ? { calories: 119, protein_g: 0, carbs_g: 0, fat_g: 13.5 }
+        : { calories: 884, protein_g: 0, carbs_g: 0, fat_g: 100 },
     }
   }
 
@@ -248,7 +257,7 @@ function estimateItemMacros(item, candidateFoodMatches = {}) {
     return scaleNutrition(candidate, ratio || 1)
   }
 
-  const fallback = fallbackProfileForItem(item)
+  const fallback = fallbackProfileForItem(item, itemQuantity)
   const ratio = itemQuantity ? scaleFromPortions(itemQuantity, fallback.serving) : 1
   return scaleNutrition(fallback.macros, ratio || 1)
 }

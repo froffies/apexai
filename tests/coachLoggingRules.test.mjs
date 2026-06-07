@@ -479,6 +479,48 @@ test("coach logging rules can build a deterministic macro answer without creatin
   assert.match(formatDeterministicMealAnswer(action), /if you want it saved, tell me to log it/i)
 })
 
+test("coach logging rules use a conservative default for unquantified cooking butter", () => {
+  const action = buildDeterministicMealAction({
+    mealSession: {
+      readyToLog: true,
+      alreadyLogged: false,
+      wantsLogging: true,
+      summary: "2 eggs cooked in butter",
+      persistedMealId: "",
+      correctionRequested: false,
+      items: [
+        {
+          baseName: "egg",
+          label: "Eggs",
+          category: "food",
+          quantity: { amount: 2, unit: "egg", text: "2 eggs" },
+          preparation: ["fried"],
+          exclusions: [],
+        },
+        {
+          baseName: "butter",
+          label: "Butter",
+          category: "ingredient",
+          quantity: null,
+          preparation: [],
+          exclusions: [],
+          attachedTo: "egg::fried",
+          relation: "cooked_in",
+        },
+      ],
+    },
+    explicitActions: [],
+    reply: "",
+    prompt: "eggs were fried in butter",
+  })
+
+  assert.ok(action)
+  assert.equal(action.type, "log_meal")
+  assert.equal(action.food_name, "2 eggs cooked in butter")
+  assert.ok(action.calories < 300)
+  assert.ok(action.fat_g < 25)
+})
+
 test("coach logging rules can answer daily calorie and target questions without persistence wording", () => {
   const caloriesReply = buildDeterministicNutritionStatusReply({
     message: "whats my total calories so far today",
