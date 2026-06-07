@@ -6,6 +6,7 @@ import {
 } from "./coachLoggingRules.mjs"
 
 const PHOTO_CONFIDENCE_LEVELS = new Set(["high", "medium", "low"])
+const PHOTO_VERIFIED_SOURCE_TYPES = new Set(["curated_au_catalogue", "nz_curated_catalogue"])
 
 function cleanText(value = "") {
   return String(value || "").trim().replace(/\s+/g, " ")
@@ -102,7 +103,7 @@ function buildPhotoSourceSummary(breakdown = [], confidence = "low") {
 
 function deriveMacroConfidence(breakdown = []) {
   if (!breakdown.length) return "low"
-  if (breakdown.every((item) => item.source_type === "curated_au_catalogue")) return "high"
+  if (breakdown.every((item) => PHOTO_VERIFIED_SOURCE_TYPES.has(item.source_type))) return "high"
   if (breakdown.every((item) => item.source_type && item.source_type !== "estimated_internal_profile")) return "medium"
   return "low"
 }

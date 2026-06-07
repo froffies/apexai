@@ -13,6 +13,7 @@ import {
   formatDeterministicMealAnswer,
 } from "../server/coachLoggingRules.mjs"
 import { buildCoachSessionState, emptyMealSessionState, emptyWorkoutSessionState } from "../server/coachSessionState.mjs"
+import { verifiedFoods } from "../src/lib/nutritionDatabase.js"
 
 test("coach logging rules build a deterministic meal action from ready session state and explicit macros", () => {
   const action = buildDeterministicMealAction({
@@ -167,6 +168,36 @@ test("coach logging rules keep verified provenance when a meal resolves entirely
   assert.equal(action?.estimated, false)
   assert.equal(action?.nutrition_source_type, "curated_au_catalogue")
   assert.equal(action?.macro_confidence, "high")
+})
+
+test("coach logging rules keep NZ verified provenance when a meal resolves from the curated NZ catalogue", () => {
+  const weetbix = verifiedFoods.find((food) => food.id === "d1056")
+  assert.ok(weetbix)
+
+  const action = buildDeterministicMealAction({
+    mealSession: {
+      readyToLog: true,
+      alreadyLogged: false,
+      summary: "100g Weet-Bix",
+      items: [
+        {
+          baseName: "weet bix",
+          label: "Weet-Bix",
+          category: "food",
+          quantity: { amount: 100, unit: "g", text: "100g" },
+        },
+      ],
+    },
+    prompt: "i had 100g weetbix",
+    candidateFoodMatches: {
+      "weet bix": [weetbix],
+    },
+  })
+
+  assert.equal(action?.estimated, false)
+  assert.equal(action?.nutrition_source_type, "nz_curated_catalogue")
+  assert.equal(action?.macro_confidence, "high")
+  assert.match(action?.nutrition_source || "", /new zealand food composition database/i)
 })
 
 test("coach logging rules do not treat steak like tea when estimating fallback macros", () => {

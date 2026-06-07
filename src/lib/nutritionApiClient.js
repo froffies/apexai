@@ -44,8 +44,8 @@ function normalizeLocal(food) {
   return {
     ...food,
     source: food.source,
-    source_type: "curated_au_catalogue",
-    macro_confidence: "high",
+    source_type: food.source_type || "curated_au_catalogue",
+    macro_confidence: food.macro_confidence || "high",
   }
 }
 

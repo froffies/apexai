@@ -107,6 +107,19 @@ test("local API server exposes health, local nutrition, telemetry, and sanitized
   assert.ok(Array.isArray(nutrition.results))
   assert.ok(nutrition.results.length > 0)
 
+  const nzNutritionResponse = await fetch(`http://127.0.0.1:${port}/api/nutrition/search`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Origin: "http://127.0.0.1:5173",
+    },
+    body: JSON.stringify({ query: "weetbix" }),
+  })
+  const nzNutrition = await nzNutritionResponse.json()
+  assert.equal(nzNutritionResponse.status, 200)
+  assert.equal(nzNutrition.results[0]?.source_type, "nz_curated_catalogue")
+  assert.match(String(nzNutrition.results[0]?.name || ""), /weet/i)
+
   const nutritionPhotoResponse = await fetch(`http://127.0.0.1:${port}/api/nutrition/analyze-photo`, {
     method: "POST",
     headers: {

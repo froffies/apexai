@@ -82,3 +82,28 @@ test("buildFoodPhotoEstimate falls back conservatively when a plate includes unm
   assert.equal(estimate.breakdown.some((item) => item.source_type === "estimated_internal_profile"), true)
   assert.match(estimate.action?.nutrition_source || "", /review before saving/i)
 })
+
+test("buildFoodPhotoEstimate treats curated NZ matches as high-confidence verified references", async () => {
+  const estimate = await buildFoodPhotoEstimate({
+    items: [
+      {
+        name: "weet-bix",
+        quantity: "100g",
+        preparation: "",
+        category: "food",
+        confidence: "high",
+      },
+    ],
+    portion: "1 bowl",
+  }, {
+    mealType: "breakfast",
+    lookupFoods: async (term) => term.includes("weet")
+      ? [{ ...verifiedFoods.find((food) => food.id === "d1056") }]
+      : [],
+  })
+
+  assert.match(estimate.action?.food_name || "", /100g/i)
+  assert.match(estimate.action?.food_name || "", /weet/i)
+  assert.equal(estimate.macro_confidence, "high")
+  assert.equal(estimate.breakdown[0]?.source_type, "nz_curated_catalogue")
+})

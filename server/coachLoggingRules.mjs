@@ -16,6 +16,7 @@ export function titleCase(text) {
 const COUNT_UNITS = new Set(["egg", "slice", "cup", "tin", "can", "block", "bunch", "serve", "bowl", "plate", "mug", "tbsp", "tsp"])
 const MASS_UNITS = new Map([["g", 1], ["kg", 1000], ["oz", 28.3495], ["lb", 453.592]])
 const VOLUME_UNITS = new Map([["ml", 1], ["l", 1000]])
+const VERIFIED_NUTRITION_SOURCE_TYPES = new Set(["curated_au_catalogue", "nz_curated_catalogue", "barcode_label", "open_food_facts_label"])
 const TRAILING_LOG_COMMAND_PATTERN = /\s+\b(?:(?:can|could)\s+you|please|just)?\s*(?:log|save|track|add)\s+(?:all\s+that|that|it)\b.*$/i
 
 const PORTION_PATTERN = /(?<amount>\d+(?:\.\d+)?)\s*(?:large|medium|small|fresh|squeezed|salted|unsalted|wholemeal|wholegrain|rye)?\s*(?<unit>kg|g|oz|lb|lbs|pounds?|ml|l|tbsp|tablespoons?|tsp|teaspoons?|cups?|slices?|tins?|cans?|blocks?|bunch(?:es)?|serves?|servings?|bowls?|plates?|mugs?|eggs?)\b/i
@@ -384,7 +385,7 @@ export function estimateMealFromSession(mealSession, candidateFoodMatches = {}) 
   const estimated = breakdown.some((item) => item.estimated)
   const macro_confidence = estimated
     ? "low"
-    : uniqueSourceTypes.every((type) => ["curated_au_catalogue", "barcode_label", "open_food_facts_label"].includes(type))
+    : uniqueSourceTypes.every((type) => VERIFIED_NUTRITION_SOURCE_TYPES.has(type))
       ? "high"
       : "medium"
   const nutrition_source_type = uniqueSourceTypes.length === 1

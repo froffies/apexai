@@ -2,7 +2,7 @@ export function roundMacro(value) {
   return Math.round((Number(value) || 0) * 10) / 10
 }
 
-const VERIFIED_SOURCE_TYPES = new Set(["curated_au_catalogue", "open_food_facts_label", "barcode_label"])
+const VERIFIED_SOURCE_TYPES = new Set(["curated_au_catalogue", "nz_curated_catalogue", "open_food_facts_label", "barcode_label"])
 const LOW_CONFIDENCE_SOURCE_TYPES = new Set(["estimated_internal_profile", "photo_ai_estimate", "manual_user_entry", "mixed_reference_and_estimate"])
 
 export function foodLookupKey(food) {
@@ -51,7 +51,8 @@ export function nutritionSourceLabel(mealOrFood = {}) {
   const sourceType = normalizeNutritionSourceType(mealOrFood?.nutrition_source_type || mealOrFood?.source_type, Boolean(mealOrFood?.estimated))
   if (sourceType === "barcode_label") return "Barcode label"
   if (sourceType === "open_food_facts_label") return "Product label"
-  if (sourceType === "curated_au_catalogue") return "Curated AU/NZ reference"
+  if (sourceType === "curated_au_catalogue") return "Curated AU reference"
+  if (sourceType === "nz_curated_catalogue") return "Curated NZ reference"
   if (sourceType === "photo_ai_estimate") return "AI photo estimate"
   if (sourceType === "manual_user_entry") return "Manual entry"
   if (sourceType === "mixed_verified_sources") return "Verified references"
