@@ -997,6 +997,54 @@ test("normalizeCoachResponse strict AI-first keeps explicit valid meal persisten
   assert.equal(payload.actions[0].food_name, "200g chicken")
 })
 
+test("normalizeCoachResponse strict AI-first canonicalizes explicit meal persistence when backend can validate the exact meal", () => {
+  const payload = normalizeCoachResponse({
+    reply: "Saved to today's nutrition: half a pound chicken.",
+    actions: [{
+      type: "log_meal",
+      meal_type: "snack",
+      food_name: "half a pound chicken",
+      quantity: "1 meal",
+      calories: 680,
+      protein_g: 48,
+      carbs_g: 76,
+      fat_g: 18,
+      nutrition_source: "Coach estimate from user-described ingredients and amounts",
+      estimated: true,
+    }],
+    warnings: [],
+  }, {
+    preferAIFirst: true,
+    strictAIFirst: true,
+    prompt: "i had 200g chicken no wait half a pound",
+    mealContext: {
+      readyToLog: true,
+      alreadyLogged: false,
+      wantsLogging: true,
+      summary: "half a pound chicken",
+      persistedMealId: "",
+      correctionRequested: false,
+      items: [{
+        baseName: "chicken",
+        label: "Chicken",
+        category: "food",
+        quantity: { amount: 0.5, unit: "lb", text: "half a pound" },
+        preparation: [],
+        exclusions: [],
+      }],
+    },
+    candidatePersistenceActions: [],
+  })
+
+  assert.equal(payload.actions.length, 1)
+  assert.equal(payload.actions[0].type, "log_meal")
+  assert.equal(payload.actions[0].food_name, "half a pound chicken")
+  assert.ok(payload.actions[0].calories > 300)
+  assert.ok(payload.actions[0].calories < 450)
+  assert.ok(payload.actions[0].protein_g > 60)
+  assert.ok(payload.actions[0].carbs_g < 5)
+})
+
 test("normalizeCoachResponse strict AI-first recovers a single validated candidate save when the AI reply confirms it", () => {
   const payload = normalizeCoachResponse({
     reply: "Updated today's nutrition: 1 bowl chips with gravy.",

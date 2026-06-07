@@ -222,6 +222,15 @@ export function normalizeCoachResponse(value, context = {}) {
         workoutSession: context.workoutContext,
         explicitActions,
       })
+  const validationMealActionsRaw = buildDeterministicMealActions({
+    mealSession: context.mealContext,
+    explicitActions: [],
+    prompt: context.prompt,
+  })
+  const validationWorkoutActionsRaw = buildDeterministicWorkoutActions({
+    workoutSession: context.workoutContext,
+    explicitActions: [],
+  })
   const candidatePersistenceActionsInput = safeArray(context.candidatePersistenceActions, 8).map(normalizeAction).filter(Boolean)
   const validatedActions = safeArray(context.validatedActions, 8).map(normalizeAction).filter(Boolean)
   const responseHints = context.responseHints || {}
@@ -243,19 +252,33 @@ export function normalizeCoachResponse(value, context = {}) {
           ...deterministicMealActionsRaw,
           ...deterministicWorkoutActionsRaw,
         ])
+  const validationMealPersistenceActions = validationMealActionsRaw
+    .map(normalizeAction)
+    .filter(Boolean)
+    .filter(isMealPersistenceAction)
+  const validationWorkoutPersistenceActions = validationWorkoutActionsRaw
+    .map(normalizeAction)
+    .filter(Boolean)
+    .filter(isWorkoutPersistenceAction)
   const candidateMealPersistenceActions = candidatePersistenceActions.filter(isMealPersistenceAction)
   const candidateWorkoutPersistenceActions = candidatePersistenceActions.filter(isWorkoutPersistenceAction)
+  const canonicalMealPersistenceActions = candidateMealPersistenceActions.length
+    ? candidateMealPersistenceActions
+    : (strictAIFirst ? validationMealPersistenceActions : [])
+  const canonicalWorkoutPersistenceActions = candidateWorkoutPersistenceActions.length
+    ? candidateWorkoutPersistenceActions
+    : (strictAIFirst ? validationWorkoutPersistenceActions : [])
   const aiRequestedMealPersistence = explicitActions.some(isMealPersistenceAction)
   const aiRequestedWorkoutPersistence = explicitActions.some(isWorkoutPersistenceAction)
   const deterministicMealActions = hasValidatedMealPersistence
     ? []
     : (preferAIFirst
-      ? (aiRequestedMealPersistence ? candidateMealPersistenceActions : [])
+      ? (aiRequestedMealPersistence ? canonicalMealPersistenceActions : [])
       : candidateMealPersistenceActions)
   const deterministicWorkoutActions = hasValidatedWorkoutPersistence
     ? []
     : (preferAIFirst
-      ? (aiRequestedWorkoutPersistence ? candidateWorkoutPersistenceActions : [])
+      ? (aiRequestedWorkoutPersistence ? canonicalWorkoutPersistenceActions : [])
       : candidateWorkoutPersistenceActions)
   const mealHasPendingWork = Boolean(
     context.mealContext
@@ -288,8 +311,8 @@ export function normalizeCoachResponse(value, context = {}) {
   const filteredExplicitActions = explicitActions.filter((action) => {
     if ((deterministicMealActions.length || deterministicMealDeleteAction || hasValidatedMealDelete || hasValidatedMealPersistence) && isMealPersistenceAction(action)) return false
     if ((deterministicWorkoutActions.length || deterministicWorkoutDeleteAction || hasValidatedWorkoutDelete || hasValidatedWorkoutPersistence) && isWorkoutPersistenceAction(action)) return false
-    if (strictAIFirst && candidateMealPersistenceActions.length && isMealPersistenceAction(action)) return false
-    if (strictAIFirst && candidateWorkoutPersistenceActions.length && isWorkoutPersistenceAction(action)) return false
+    if (strictAIFirst && canonicalMealPersistenceActions.length && isMealPersistenceAction(action)) return false
+    if (strictAIFirst && canonicalWorkoutPersistenceActions.length && isWorkoutPersistenceAction(action)) return false
     if (strictAIFirst && isAnswerOnlyMealTurn && isMealPersistenceAction(action)) return false
     if (
       strictAIFirst

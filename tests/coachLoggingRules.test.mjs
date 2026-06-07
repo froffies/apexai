@@ -521,6 +521,41 @@ test("coach logging rules use a conservative default for unquantified cooking bu
   assert.ok(action.fat_g < 25)
 })
 
+test("coach logging rules scale poultry estimates for pound-based quantities", () => {
+  const action = buildDeterministicMealAction({
+    mealSession: {
+      readyToLog: true,
+      alreadyLogged: false,
+      wantsLogging: true,
+      summary: "half a pound chicken",
+      persistedMealId: "",
+      correctionRequested: false,
+      items: [
+        {
+          baseName: "chicken",
+          label: "Chicken",
+          category: "food",
+          quantity: { amount: 0.5, unit: "lb", text: "half a pound" },
+          preparation: [],
+          exclusions: [],
+        },
+      ],
+    },
+    explicitActions: [],
+    reply: "",
+    prompt: "i had 200g chicken no wait half a pound",
+  })
+
+  assert.ok(action)
+  assert.equal(action.type, "log_meal")
+  assert.equal(action.food_name, "half a pound chicken")
+  assert.ok(action.calories > 300)
+  assert.ok(action.calories < 450)
+  assert.ok(action.protein_g > 60)
+  assert.ok(action.carbs_g < 5)
+  assert.ok(action.fat_g < 15)
+})
+
 test("coach logging rules can answer daily calorie and target questions without persistence wording", () => {
   const caloriesReply = buildDeterministicNutritionStatusReply({
     message: "whats my total calories so far today",

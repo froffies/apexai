@@ -14,11 +14,11 @@ export function titleCase(text) {
 }
 
 const COUNT_UNITS = new Set(["egg", "slice", "cup", "tin", "can", "block", "bunch", "serve", "bowl", "plate", "mug", "tbsp", "tsp"])
-const MASS_UNITS = new Map([["g", 1], ["kg", 1000]])
+const MASS_UNITS = new Map([["g", 1], ["kg", 1000], ["oz", 28.3495], ["lb", 453.592]])
 const VOLUME_UNITS = new Map([["ml", 1], ["l", 1000]])
 const TRAILING_LOG_COMMAND_PATTERN = /\s+\b(?:(?:can|could)\s+you|please|just)?\s*(?:log|save|track|add)\s+(?:all\s+that|that|it)\b.*$/i
 
-const PORTION_PATTERN = /(?<amount>\d+(?:\.\d+)?)\s*(?:large|medium|small|fresh|squeezed|salted|unsalted|wholemeal|wholegrain|rye)?\s*(?<unit>kg|g|ml|l|tbsp|tablespoons?|tsp|teaspoons?|cups?|slices?|tins?|cans?|blocks?|bunch(?:es)?|serves?|servings?|bowls?|plates?|mugs?|eggs?)\b/i
+const PORTION_PATTERN = /(?<amount>\d+(?:\.\d+)?)\s*(?:large|medium|small|fresh|squeezed|salted|unsalted|wholemeal|wholegrain|rye)?\s*(?<unit>kg|g|oz|lb|lbs|pounds?|ml|l|tbsp|tablespoons?|tsp|teaspoons?|cups?|slices?|tins?|cans?|blocks?|bunch(?:es)?|serves?|servings?|bowls?|plates?|mugs?|eggs?)\b/i
 
 function roundMacro(value) {
   return Math.round((Number(value) || 0) * 10) / 10
@@ -29,6 +29,7 @@ function normalizeUnit(unit) {
   if (!text) return ""
   if (text === "tablespoon" || text === "tablespoons") return "tbsp"
   if (text === "teaspoon" || text === "teaspoons") return "tsp"
+  if (text === "lbs" || text === "pound" || text === "pounds") return "lb"
   if (text === "cups") return "cup"
   if (text === "slices") return "slice"
   if (text === "tins") return "tin"
@@ -204,6 +205,13 @@ function fallbackProfileForItem(item, itemQuantity = null) {
     return {
       serving: { amount: 100, unit: "g" },
       macros: { calories: 250, protein_g: 25, carbs_g: 0, fat_g: 17 },
+    }
+  }
+
+  if (hasWholeFoodTerm(baseName, "chicken")) {
+    return {
+      serving: { amount: 100, unit: "g" },
+      macros: { calories: 165, protein_g: 31, carbs_g: 0, fat_g: 3.6 },
     }
   }
 
