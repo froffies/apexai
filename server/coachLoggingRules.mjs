@@ -113,6 +113,29 @@ function hasWholeFoodTerm(baseName, term) {
   return new RegExp(`\\b${escapeRegex(normalizedTerm).replace(/\s+/g, "\\s+")}\\b`, "i").test(normalizedBase)
 }
 
+function candidateLooksCompositeMeal(candidate) {
+  const category = String(candidate?.category || "").trim().toLowerCase()
+  if (category === "mixed meal") return true
+  const candidateTerms = [
+    String(candidate?.name || "").toLowerCase(),
+    ...safeArray(candidate?.aliases, 8).map((alias) => String(alias || "").toLowerCase()),
+  ]
+  return candidateTerms.some((term) => /\b(?:and|with|bowl|plate|salad|burrito|sandwich|wrap|taco|tacos)\b/.test(term))
+}
+
+function shouldSkipCompositeCandidate(item, candidate) {
+  const normalizedBase = String(item?.baseName || item?.label || "").trim().toLowerCase()
+  const baseWords = normalizedBase.split(/\s+/).filter(Boolean)
+  if (baseWords.length !== 1) return false
+  if (!candidateLooksCompositeMeal(candidate)) return false
+  const candidateTerms = [
+    String(candidate?.name || "").toLowerCase(),
+    ...safeArray(candidate?.aliases, 8).map((alias) => String(alias || "").toLowerCase()),
+  ]
+  if (candidateTerms.some((term) => term === normalizedBase)) return false
+  return true
+}
+
 function chooseBestCandidate(item, candidateFoodMatches = {}) {
   const keys = [
     String(item.baseName || "").toLowerCase(),
@@ -135,6 +158,7 @@ function chooseBestCandidate(item, candidateFoodMatches = {}) {
   let best = null
   let bestScore = -1
   for (const candidate of candidates) {
+    if (shouldSkipCompositeCandidate(item, candidate)) continue
     const score = baseNameMatches(candidate, item.baseName || item.label)
     if (score > bestScore) {
       best = candidate

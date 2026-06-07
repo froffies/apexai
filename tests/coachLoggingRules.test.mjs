@@ -556,6 +556,51 @@ test("coach logging rules scale poultry estimates for pound-based quantities", (
   assert.ok(action.fat_g < 15)
 })
 
+test("coach logging rules do not match a single-food chicken item to composite chicken bowl catalogue entries", () => {
+  const action = buildDeterministicMealAction({
+    mealSession: {
+      readyToLog: true,
+      alreadyLogged: false,
+      wantsLogging: true,
+      summary: "half a pound chicken",
+      persistedMealId: "",
+      correctionRequested: false,
+      items: [
+        {
+          baseName: "chicken",
+          label: "Chicken",
+          category: "food",
+          quantity: { amount: 0.5, unit: "lb", text: "half a pound" },
+          preparation: [],
+          exclusions: [],
+        },
+      ],
+    },
+    explicitActions: [],
+    reply: "",
+    prompt: "i had 200g chicken no wait half a pound",
+    candidateFoodMatches: {
+      chicken: [{
+        id: "chicken_burrito_bowl",
+        name: "Chicken burrito bowl",
+        aliases: ["chicken burrito bowl", "burrito bowl"],
+        quantity: "1 large bowl",
+        calories: 680,
+        protein_g: 48,
+        carbs_g: 76,
+        fat_g: 18,
+        category: "mixed meal",
+      }],
+    },
+  })
+
+  assert.ok(action)
+  assert.equal(action.food_name, "half a pound chicken")
+  assert.ok(action.calories < 450)
+  assert.ok(action.protein_g > 60)
+  assert.ok(action.carbs_g < 5)
+})
+
 test("coach logging rules can answer daily calorie and target questions without persistence wording", () => {
   const caloriesReply = buildDeterministicNutritionStatusReply({
     message: "whats my total calories so far today",
