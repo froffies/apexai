@@ -141,3 +141,21 @@ test("normalizeFoodPhotoAnalysis strips model-generated item numbering noise fro
   assert.equal(normalized.items[0].base_name, "banana")
   assert.equal(normalized.summary, "1 banana")
 })
+
+test("normalizeFoodPhotoAnalysis recovers a real food name from assumptions when the model emits a generic item label", () => {
+  const normalized = normalizeFoodPhotoAnalysis({
+    assumptions: ["Banana is the only item visible."],
+    items: [
+      {
+        name: "item 1",
+        quantity: "1",
+        category: "food",
+        confidence: "high",
+      },
+    ],
+  })
+
+  assert.equal(normalized.items[0].name, "Banana")
+  assert.equal(normalized.items[0].base_name, "banana")
+  assert.equal(normalized.summary, "1 banana")
+})

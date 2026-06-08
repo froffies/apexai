@@ -33,6 +33,11 @@ function normalizePreparation(value = "") {
   return normalized ? normalized.toLowerCase() : ""
 }
 
+function isGenericPhotoFoodName(value = "") {
+  const normalized = cleanText(value).toLowerCase()
+  return /^(?:\d+\s*)?item(?:\s+\d+)?$/.test(normalized) || normalized === "food" || normalized === "meal"
+}
+
 function deriveOverallPhotoConfidence(items = [], requestedValue = "") {
   const requested = normalizeConfidence(requestedValue, "")
   if (requested) return requested
@@ -63,6 +68,18 @@ function normalizePhotoFoodName(value = "") {
     .replace(/^\d+\s*[\).\:-]\s*/g, "")
     .replace(/\s+/g, " ")
     .trim()
+}
+
+function inferPhotoFoodNameFromAssumptions(assumptions = []) {
+  for (const assumption of assumptions) {
+    const text = cleanText(assumption)
+    if (!text) continue
+    const onlyVisible = text.match(/^([A-Za-z][A-Za-z\s'-]+?)\s+is\s+the\s+only\s+item\s+visible\.?$/i)
+    if (onlyVisible?.[1]) return cleanText(onlyVisible[1])
+    const appearsToBe = text.match(/^(?:it|this|the food)\s+(?:looks like|appears to be)\s+([A-Za-z][A-Za-z\s'-]+?)[.]?$/i)
+    if (appearsToBe?.[1]) return cleanText(appearsToBe[1])
+  }
+  return ""
 }
 
 function singularizeFoodName(value = "") {
@@ -127,9 +144,14 @@ function deriveMacroConfidence(breakdown = []) {
 
 export function normalizeFoodPhotoAnalysis(raw = {}) {
   const value = raw && typeof raw === "object" ? raw : {}
+  const assumptions = safeArray(value.assumptions, 8).map((entry) => cleanText(entry)).filter(Boolean)
+  const inferredFoodName = inferPhotoFoodNameFromAssumptions(assumptions)
   const items = safeArray(value.items, 12)
     .map((item, index) => {
-      const normalizedName = normalizePhotoFoodName(item?.name || item?.label || `Item ${index + 1}`)
+      const candidateName = normalizePhotoFoodName(item?.name || item?.label || `Item ${index + 1}`)
+      const normalizedName = candidateName && !isGenericPhotoFoodName(candidateName)
+        ? candidateName
+        : inferredFoodName || candidateName
       const name = titleCase(stripLeadingArticle(normalizedName))
       const preparation = normalizePreparation(item?.preparation || item?.cooking_method || "")
       const quantity = normalizeQuantity(item?.quantity || item?.quantity_text || item?.portion || "1 serve")
@@ -156,7 +178,7 @@ export function normalizeFoodPhotoAnalysis(raw = {}) {
     overall_confidence: deriveOverallPhotoConfidence(items, value.overall_confidence),
     needs_clarification: Boolean(value.needs_clarification),
     clarification_question: cleanText(value.clarification_question || ""),
-    assumptions: safeArray(value.assumptions, 8).map((entry) => cleanText(entry)).filter(Boolean),
+    assumptions,
   }
 }
 
