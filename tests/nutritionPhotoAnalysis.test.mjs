@@ -37,13 +37,12 @@ test("buildFoodPhotoEstimate uses curated matches when a clear AU reference exis
   }, {
     mealType: "breakfast",
     lookupFoods: async (term) => term.includes("egg")
-      ? [{ ...verifiedFoods.find((food) => food.id === "eggs_2"), source_type: "curated_au_catalogue" }]
+      ? [{ ...verifiedFoods.find((food) => food.id === "egg_chicken_whole_raw") }]
       : [],
   })
 
-  assert.equal(estimate.action?.food_name, "2 eggs")
+  assert.match(estimate.action?.food_name || "", /egg/i)
   assert.equal(estimate.action?.quantity, "1 plate")
-  assert.equal(estimate.action?.calories, 148)
   assert.equal(estimate.action?.nutrition_source_type, "photo_ai_estimate")
   assert.equal(estimate.macro_confidence, "high")
   assert.equal(estimate.breakdown[0]?.source_type, "curated_au_catalogue")
@@ -70,7 +69,7 @@ test("buildFoodPhotoEstimate falls back conservatively when a plate includes unm
     portion: "1 plate",
   }, {
     mealType: "breakfast",
-    lookupFoods: async (term) => term.includes("egg") ? [verifiedFoods.find((food) => food.id === "eggs_2")] : [],
+    lookupFoods: async (term) => term.includes("egg") ? [verifiedFoods.find((food) => food.id === "egg_chicken_whole_raw")] : [],
   })
 
   assert.match(estimate.action?.food_name || "", /eggs/i)

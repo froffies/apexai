@@ -1,7 +1,9 @@
 import { createIngredientItemFromFood, recalcRecipeFromIngredients } from "./nutritionHelpers.js"
 
-const auSource = "Australian Food Composition Database / FSANZ AUSNUT reference values, curated local catalogue"
+const auSource = "Australian Food Composition Database / FSANZ AFCD Release 3, curated local catalogue"
+const auDerivedSource = "Australian Food Composition Database / FSANZ AFCD Release 3 reference values, scaled to a common serve"
 const nzSource = "New Zealand Food Composition Database / FOODfiles Concise Tables 14th Edition, curated local catalogue"
+const estimatedSource = "ApexAI internal meal profile estimate"
 
 function curatedFood(food, { source, sourceType }) {
   return {
@@ -12,18 +14,94 @@ function curatedFood(food, { source, sourceType }) {
   }
 }
 
+function estimatedFood(food) {
+  return {
+    ...food,
+    source: estimatedSource,
+    source_type: "estimated_internal_profile",
+    macro_confidence: "medium",
+  }
+}
+
+function derivedFood(food) {
+  return {
+    ...food,
+    source: auDerivedSource,
+    source_type: "curated_au_catalogue",
+    macro_confidence: "high",
+  }
+}
+
 const auVerifiedFoods = [
-  { id: "eggs_2", name: "2 large eggs", aliases: ["2 eggs", "two eggs", "eggs"], quantity: "2 large eggs", calories: 148, protein_g: 12.6, carbs_g: 1.1, fat_g: 10.2, category: "protein" },
-  { id: "toast_2", name: "2 slices wholemeal toast", aliases: ["toast", "wholemeal toast", "2 toast"], quantity: "2 slices", calories: 188, protein_g: 8.0, carbs_g: 31.0, fat_g: 2.8, category: "carbs" },
-  { id: "banana", name: "Banana", aliases: ["banana", "medium banana"], quantity: "1 medium", calories: 105, protein_g: 1.3, carbs_g: 27.0, fat_g: 0.4, category: "produce" },
-  { id: "flat_white", name: "Large flat white", aliases: ["large flat white", "flat white"], quantity: "large", calories: 155, protein_g: 8.0, carbs_g: 12.0, fat_g: 8.0, category: "dairy" },
-  { id: "protein_shake_40", name: "Protein shake", aliases: ["protein shake", "40g protein", "shake"], quantity: "40g protein serve", calories: 210, protein_g: 40.0, carbs_g: 5.0, fat_g: 3.0, category: "protein" },
-  { id: "chicken_burrito_bowl", name: "Chicken burrito bowl", aliases: ["chicken burrito bowl", "burrito bowl"], quantity: "1 large bowl", calories: 680, protein_g: 48.0, carbs_g: 76.0, fat_g: 18.0, category: "mixed meal" },
-  { id: "greek_yoghurt_berries_oats", name: "Greek yoghurt, berries, and oats", aliases: ["yoghurt berries oats", "greek yoghurt", "yogurt berries oats"], quantity: "1 bowl", calories: 430, protein_g: 32.0, carbs_g: 48.0, fat_g: 11.0, category: "breakfast" },
-  { id: "chicken_rice_bowl", name: "Chicken rice bowl", aliases: ["chicken rice", "chicken rice bowl"], quantity: "1 bowl", calories: 620, protein_g: 45.0, carbs_g: 68.0, fat_g: 16.0, category: "mixed meal" },
-  { id: "salmon_potato_salad", name: "Salmon, potato, and salad", aliases: ["salmon potato salad", "salmon and potato"], quantity: "1 plate", calories: 560, protein_g: 39.0, carbs_g: 42.0, fat_g: 24.0, category: "dinner" },
-  { id: "lean_beef_bowl", name: "Lean beef burrito bowl", aliases: ["lean beef bowl", "beef burrito bowl"], quantity: "1 bowl", calories: 720, protein_g: 52.0, carbs_g: 78.0, fat_g: 22.0, category: "mixed meal" },
-  { id: "tuna_rice", name: "Tuna and rice", aliases: ["tuna rice", "tuna and rice"], quantity: "1 bowl", calories: 465, protein_g: 39.0, carbs_g: 58.0, fat_g: 8.0, category: "protein" },
+  { id: "egg_chicken_whole_raw", name: "Egg, chicken, whole, raw", aliases: ["egg", "eggs", "whole egg", "raw egg"], quantity: "100g", calories: 127, protein_g: 12.6, carbs_g: 0.3, fat_g: 8.5, category: "protein" },
+  { id: "egg_chicken_whole_hard_boiled", name: "Egg, chicken, whole, hard-boiled", aliases: ["hard boiled egg", "hard boiled eggs", "boiled egg", "boiled eggs"], quantity: "100g", calories: 136, protein_g: 12.4, carbs_g: 0.7, fat_g: 9.4, category: "protein" },
+  { id: "egg_chicken_whole_fried", name: "Egg, chicken, whole, fried, no fat added", aliases: ["fried egg", "fried eggs"], quantity: "100g", calories: 145, protein_g: 14.3, carbs_g: 0.3, fat_g: 9.6, category: "protein" },
+  { id: "egg_chicken_whole_scrambled", name: "Egg, chicken, whole, scrambled, with regular fat cow's milk, no fat added", aliases: ["scrambled egg", "scrambled eggs"], quantity: "100g", calories: 120, protein_g: 10.8, carbs_g: 2.1, fat_g: 7.7, category: "protein" },
+  { id: "milk_cow_regular", name: "Milk, cow, fluid, regular fat (~3.5%)", aliases: ["milk", "full cream milk", "whole milk", "regular milk"], quantity: "100ml", calories: 66, protein_g: 3.4, carbs_g: 5.5, fat_g: 3.5, category: "dairy" },
+  { id: "milk_cow_reduced_fat_1", name: "Milk, cow, fluid, reduced fat (~1%)", aliases: ["light milk", "reduced fat milk", "low fat milk"], quantity: "100ml", calories: 45, protein_g: 3.5, carbs_g: 5, fat_g: 1.2, category: "dairy" },
+  { id: "milk_cow_skim", name: "Milk, cow, fluid, skim (~0.15% fat)", aliases: ["skim milk", "fat free milk"], quantity: "100ml", calories: 36, protein_g: 3.7, carbs_g: 5.5, fat_g: 0, category: "dairy" },
+  { id: "milk_cow_lactose_free_regular", name: "Milk, cow, fluid, lactose free, regular fat (~3.5%)", aliases: ["lactose free milk", "lactose free whole milk"], quantity: "100ml", calories: 60, protein_g: 3.2, carbs_g: 4.8, fat_g: 3.2, category: "dairy" },
+  { id: "milk_cow_lactose_free_reduced", name: "Milk, cow, fluid, lactose free, reduced fat (~1%)", aliases: ["lactose free light milk", "lactose free reduced fat milk"], quantity: "100ml", calories: 44, protein_g: 3.4, carbs_g: 5.1, fat_g: 1.2, category: "dairy" },
+  { id: "soy_beverage_regular", name: "Soy beverage, regular fat (~3%), unfortified", aliases: ["soy milk", "soy beverage"], quantity: "100ml", calories: 60, protein_g: 3.8, carbs_g: 4.8, fat_g: 2.8, category: "drink" },
+  { id: "soy_beverage_added_calcium", name: "Soy beverage, regular fat (~3%), added Ca", aliases: ["soy milk calcium", "fortified soy milk"], quantity: "100ml", calories: 60, protein_g: 3.8, carbs_g: 4.8, fat_g: 2.8, category: "drink" },
+  { id: "almond_beverage_no_added_sugar", name: "Almond beverage, no added sugar, unfortified", aliases: ["almond milk", "unsweetened almond milk"], quantity: "100ml", calories: 16, protein_g: 0.5, carbs_g: 0, fat_g: 1.5, category: "drink" },
+  { id: "almond_beverage_calcium", name: "Almond beverage, no added sugar, added Ca", aliases: ["almond milk calcium", "fortified almond milk"], quantity: "100ml", calories: 16, protein_g: 0.5, carbs_g: 0, fat_g: 1.5, category: "drink" },
+  { id: "oat_beverage_unfortified", name: "Oat beverage, fluid, unfortified", aliases: ["oat milk", "oat beverage"], quantity: "100ml", calories: 56, protein_g: 1.4, carbs_g: 10.7, fat_g: 0.8, category: "drink" },
+  { id: "oat_beverage_calcium", name: "Oat beverage, fluid, added Ca", aliases: ["fortified oat milk", "oat milk calcium"], quantity: "100ml", calories: 56, protein_g: 1.4, carbs_g: 10.7, fat_g: 0.8, category: "drink" },
+  { id: "yoghurt_natural_regular", name: "Yoghurt, natural, regular fat (~3%)", aliases: ["natural yoghurt", "plain yoghurt", "regular yoghurt"], quantity: "100ml", calories: 76, protein_g: 5.3, carbs_g: 5.2, fat_g: 3.3, category: "dairy" },
+  { id: "yoghurt_flavoured_low_fat", name: "Yoghurt, flavoured, low fat (~2%)", aliases: ["low fat yoghurt", "flavoured yoghurt"], quantity: "100ml", calories: 85, protein_g: 4.8, carbs_g: 12.7, fat_g: 1.4, category: "dairy" },
+  { id: "yoghurt_vanilla", name: "Yoghurt, vanilla flavoured (~2%)", aliases: ["vanilla yoghurt"], quantity: "100ml", calories: 102, protein_g: 5.2, carbs_g: 15, fat_g: 2, category: "dairy" },
+  { id: "cheddar_regular", name: "Cheese, cheddar, natural, regular fat", aliases: ["cheddar cheese", "regular cheddar"], quantity: "100g", calories: 403, protein_g: 24.6, carbs_g: 0.3, fat_g: 33.4, category: "dairy" },
+  { id: "cheddar_reduced_fat", name: "Cheese, cheddar, natural, reduced fat (~25%)", aliases: ["reduced fat cheddar", "lite cheddar"], quantity: "100g", calories: 324, protein_g: 27.9, carbs_g: 0, fat_g: 23.4, category: "dairy" },
+  { id: "bread_white", name: "Bread, from white flour", aliases: ["white bread", "bread"], quantity: "100g", calories: 251, protein_g: 9.5, carbs_g: 46.2, fat_g: 2, category: "carbs" },
+  { id: "bread_white_toasted", name: "Bread, from white flour, toasted", aliases: ["white toast", "toast"], quantity: "100g", calories: 297, protein_g: 10.8, carbs_g: 54.3, fat_g: 2.8, category: "carbs" },
+  { id: "bread_wholemeal", name: "Bread, from wholemeal flour", aliases: ["wholemeal bread", "whole wheat bread"], quantity: "100g", calories: 237, protein_g: 10.4, carbs_g: 39.2, fat_g: 2.5, category: "carbs" },
+  { id: "bread_wholemeal_toasted", name: "Bread, from wholemeal flour, toasted", aliases: ["wholemeal toast", "whole wheat toast"], quantity: "100g", calories: 279, protein_g: 12.2, carbs_g: 46.1, fat_g: 2.9, category: "carbs" },
+  { id: "bread_rye_sourdough", name: "Bread, from rye flour, sour dough", aliases: ["rye bread", "sourdough rye"], quantity: "100g", calories: 234, protein_g: 9.2, carbs_g: 42.7, fat_g: 1.6, category: "carbs" },
+  { id: "bread_rye_sourdough_toasted", name: "Bread, from rye flour, sour dough, toasted", aliases: ["rye toast", "toasted rye bread"], quantity: "100g", calories: 276, protein_g: 10.8, carbs_g: 50.2, fat_g: 1.9, category: "carbs" },
+  { id: "oats_rolled_uncooked", name: "Oats, rolled, uncooked", aliases: ["rolled oats", "oats"], quantity: "100g", calories: 374, protein_g: 12.2, carbs_g: 54.5, fat_g: 9.5, category: "breakfast" },
+  { id: "porridge_oats_water", name: "Porridge, rolled oats, prepared with water", aliases: ["porridge", "oat porridge"], quantity: "100g", calories: 89, protein_g: 3, carbs_g: 11.4, fat_g: 2.9, category: "breakfast" },
+  { id: "rice_white_boiled", name: "Rice, white, boiled or rice cooker, no added salt", aliases: ["white rice", "boiled white rice", "cooked white rice"], quantity: "100g", calories: 158, protein_g: 3.1, carbs_g: 34.7, fat_g: 0.2, category: "carbs" },
+  { id: "rice_brown_boiled", name: "Rice, brown, boiled, no added salt", aliases: ["brown rice", "boiled brown rice", "cooked brown rice"], quantity: "100g", calories: 166, protein_g: 4.1, carbs_g: 33.5, fat_g: 1.1, category: "carbs" },
+  { id: "pasta_white_boiled", name: "Pasta, white wheat flour, boiled from dry, no added salt", aliases: ["pasta", "cooked pasta", "white pasta"], quantity: "100g", calories: 137, protein_g: 5.3, carbs_g: 26.2, fat_g: 0.4, category: "carbs" },
+  { id: "muesli_toasted_fruit_nuts", name: "Muesli, toasted, added dried fruit & nuts, unfortified", aliases: ["toasted muesli", "muesli"], quantity: "100g", calories: 402, protein_g: 8.9, carbs_g: 56.6, fat_g: 13.3, category: "breakfast" },
+  { id: "rice_bubbles", name: "Breakfast cereal, puffed or popped rice, added vitamins & minerals (Kellogg's Rice Bubbles)", aliases: ["rice bubbles", "kelloggs rice bubbles"], quantity: "100g", calories: 370, protein_g: 6.8, carbs_g: 81.2, fat_g: 1.1, category: "breakfast" },
+  { id: "milo_powder", name: "Beverage base, chocolate flavour, added vitamins & minerals (Milo)", aliases: ["milo"], quantity: "100g", calories: 385, protein_g: 12.4, carbs_g: 60.1, fat_g: 9.9, category: "drink" },
+  { id: "vegemite", name: "Spread, yeast, vegemite", aliases: ["vegemite"], quantity: "100g", calories: 163, protein_g: 24.4, carbs_g: 10.9, fat_g: 0.9, category: "pantry" },
+  { id: "chicken_breast_grilled", name: "Chicken, breast, lean flesh, grilled, no added fat", aliases: ["chicken breast", "grilled chicken breast"], quantity: "100g", calories: 143, protein_g: 29.8, carbs_g: 0, fat_g: 2.5, category: "protein" },
+  { id: "chicken_breast_raw", name: "Chicken, breast, lean flesh, raw", aliases: ["raw chicken breast"], quantity: "100g", calories: 98, protein_g: 22.5, carbs_g: 0, fat_g: 0.8, category: "protein" },
+  { id: "chicken_thigh_baked", name: "Chicken, thigh, lean flesh, baked, no added fat", aliases: ["chicken thigh", "baked chicken thigh"], quantity: "100g", calories: 175, protein_g: 24.2, carbs_g: 0, fat_g: 8.7, category: "protein" },
+  { id: "chicken_thigh_raw", name: "Chicken, thigh, lean flesh, raw", aliases: ["raw chicken thigh"], quantity: "100g", calories: 104, protein_g: 19.1, carbs_g: 0, fat_g: 3, category: "protein" },
+  { id: "beef_mince_lower_fat_cooked", name: "Beef, mince, lower fat, stir-fried, no added fat", aliases: ["lean beef mince", "lower fat beef mince", "beef mince"], quantity: "100g", calories: 203, protein_g: 32.3, carbs_g: 0, fat_g: 8.1, category: "protein" },
+  { id: "beef_mince_lower_fat_raw", name: "Beef, mince, lower fat, raw", aliases: ["raw beef mince"], quantity: "100g", calories: 129, protein_g: 22.9, carbs_g: 0, fat_g: 4.1, category: "protein" },
+  { id: "beef_rump_steak_grilled", name: "Beef, rump steak, lean, grilled, no added fat", aliases: ["rump steak", "grilled rump steak", "steak"], quantity: "100g", calories: 170, protein_g: 32, carbs_g: 0, fat_g: 4.5, category: "protein" },
+  { id: "beef_rump_steak_raw", name: "Beef, rump steak, lean, raw", aliases: ["raw rump steak"], quantity: "100g", calories: 108, protein_g: 20.4, carbs_g: 0, fat_g: 2.8, category: "protein" },
+  { id: "beef_sirloin_steak_grilled", name: "Beef, sirloin steak, lean, grilled, no added fat", aliases: ["sirloin steak", "grilled sirloin steak"], quantity: "100g", calories: 158, protein_g: 30.5, carbs_g: 0, fat_g: 3.8, category: "protein" },
+  { id: "beef_sirloin_steak_raw", name: "Beef, sirloin steak, lean, raw", aliases: ["raw sirloin steak"], quantity: "100g", calories: 115, protein_g: 24.1, carbs_g: 0, fat_g: 1.9, category: "protein" },
+  { id: "salmon_atlantic_grilled", name: "Salmon, Atlantic, fillet, grilled, no added fat", aliases: ["salmon", "grilled salmon"], quantity: "100g", calories: 258, protein_g: 22.9, carbs_g: 0, fat_g: 18.6, category: "protein" },
+  { id: "salmon_atlantic_raw", name: "Salmon, Atlantic, fillet, raw", aliases: ["raw salmon"], quantity: "100g", calories: 231, protein_g: 20.5, carbs_g: 0, fat_g: 16.7, category: "protein" },
+  { id: "tuna_canned_water", name: "Tuna, unflavoured, canned in water, drained", aliases: ["tuna", "tuna canned in water"], quantity: "100g", calories: 129, protein_g: 26.1, carbs_g: 0, fat_g: 2.6, category: "protein" },
+  { id: "butter_salted", name: "Butter, plain, salted", aliases: ["salted butter", "butter"], quantity: "100g", calories: 734, protein_g: 1.1, carbs_g: 0.6, fat_g: 82.2, category: "dairy" },
+  { id: "butter_unsalted", name: "Butter, plain, no added salt", aliases: ["unsalted butter"], quantity: "100g", calories: 734, protein_g: 1.1, carbs_g: 0.6, fat_g: 82.2, category: "dairy" },
+  { id: "olive_oil", name: "Oil, olive", aliases: ["olive oil"], quantity: "100ml", calories: 812, protein_g: 0, carbs_g: 0, fat_g: 91.9, category: "pantry" },
+  { id: "peanut_butter_no_added_sugar_or_salt", name: "Peanut butter, smooth & crunchy, no added sugar or salt", aliases: ["peanut butter"], quantity: "100g", calories: 628, protein_g: 24.3, carbs_g: 9.4, fat_g: 54.3, category: "pantry" },
+  { id: "banana_cavendish", name: "Banana, cavendish, peeled, raw", aliases: ["banana"], quantity: "100g", calories: 95, protein_g: 1.4, carbs_g: 19.9, fat_g: 0.2, category: "produce" },
+  { id: "apple_royal_gala", name: "Apple, royal gala, unpeeled, raw", aliases: ["royal gala apple", "apple"], quantity: "100g", calories: 53, protein_g: 0.4, carbs_g: 12.1, fat_g: 0, category: "produce" },
+  { id: "apple_pink_lady", name: "Apple, pink lady, unpeeled, raw", aliases: ["pink lady apple"], quantity: "100g", calories: 58, protein_g: 0.2, carbs_g: 12.3, fat_g: 0, category: "produce" },
+  { id: "avocado_hass", name: "Avocado, hass, raw", aliases: ["avocado", "hass avocado"], quantity: "100g", calories: 156, protein_g: 1.6, carbs_g: 2.2, fat_g: 14.6, category: "produce" },
+  { id: "broccoli_raw", name: "Broccoli, fresh, raw", aliases: ["broccoli"], quantity: "100g", calories: 32, protein_g: 4, carbs_g: 1.2, fat_g: 0.4, category: "produce" },
+  { id: "broccoli_boiled", name: "Broccoli, fresh, boiled, drained", aliases: ["boiled broccoli"], quantity: "100g", calories: 24, protein_g: 2.9, carbs_g: 1.2, fat_g: 0.3, category: "produce" },
+  { id: "carrot_raw", name: "Carrot, mature, peeled, fresh, raw", aliases: ["carrot"], quantity: "100g", calories: 35, protein_g: 0.6, carbs_g: 6.6, fat_g: 0, category: "produce" },
+  { id: "potato_sebago_boiled", name: "Potato, sebago, peeled, boiled, drained", aliases: ["potato", "boiled potato"], quantity: "100g", calories: 73, protein_g: 2.5, carbs_g: 13.1, fat_g: 0.4, category: "produce" },
+  { id: "potato_sebago_raw", name: "Potato, sebago, peeled, raw", aliases: ["raw potato"], quantity: "100g", calories: 72, protein_g: 2.5, carbs_g: 13.8, fat_g: 0.2, category: "produce" },
+  { id: "sweet_potato_boiled", name: "Sweet potato, orange flesh, peeled, fresh, boiled, drained", aliases: ["sweet potato", "boiled sweet potato"], quantity: "100g", calories: 70, protein_g: 1.6, carbs_g: 14.2, fat_g: 0.2, category: "produce" },
+  { id: "sweet_potato_raw", name: "Sweet potato, orange flesh, peeled, fresh, raw", aliases: ["raw sweet potato"], quantity: "100g", calories: 65, protein_g: 1.4, carbs_g: 13.2, fat_g: 0.2, category: "produce" },
+  { id: "flat_white_latte_cappuccino", name: "Coffee, flat white/latte/cappuccino, from ground coffee beans, with regular fat cow's milk", aliases: ["flat white", "latte", "cappuccino"], quantity: "100ml", calories: 48, protein_g: 2.9, carbs_g: 3.5, fat_g: 2.6, category: "drink" },
+  { id: "coffee_espresso", name: "Coffee, espresso, from ground coffee beans", aliases: ["espresso"], quantity: "100ml", calories: 10, protein_g: 1.7, carbs_g: 0, fat_g: 0.3, category: "drink" },
+  { id: "coffee_long_black", name: "Coffee, long black, from ground coffee beans", aliases: ["long black", "black coffee"], quantity: "100ml", calories: 2, protein_g: 0.3, carbs_g: 0, fat_g: 0.1, category: "drink" },
+  { id: "tea_black", name: "Tea, regular, black, brewed from leaf or teabags, without milk", aliases: ["black tea", "tea"], quantity: "100ml", calories: 0, protein_g: 0.1, carbs_g: 0, fat_g: 0, category: "drink" },
+  { id: "tea_green", name: "Tea, green, plain, without milk", aliases: ["green tea"], quantity: "100ml", calories: 1, protein_g: 0.2, carbs_g: 0, fat_g: 0, category: "drink" },
+  { id: "juice_orange", name: "Juice, orange, commercial", aliases: ["orange juice"], quantity: "100ml", calories: 34, protein_g: 0.8, carbs_g: 7.1, fat_g: 0, category: "drink" },
 ].map((food) => curatedFood(food, { source: auSource, sourceType: "curated_au_catalogue" }))
 
 const nzVerifiedFoods = [
@@ -91,33 +169,122 @@ const nzVerifiedFoods = [
   { id: "f1111", name: "Lewis Road Lite Milk", aliases: ["lewis road lite milk", "lewis road light milk"], quantity: "100ml", calories: 44, protein_g: 3.37, carbs_g: 4.4, fat_g: 1.46, category: "dairy" },
 ].map((food) => curatedFood(food, { source: nzSource, sourceType: "nz_curated_catalogue" }))
 
-export const verifiedFoods = [...auVerifiedFoods, ...nzVerifiedFoods]
+const auDerivedFoods = [
+  { id: "eggs_2", name: "2 large eggs", aliases: ["2 eggs", "two eggs"], quantity: "2 large eggs", calories: 148, protein_g: 12.6, carbs_g: 1.1, fat_g: 10.2, category: "protein" },
+  { id: "toast_2", name: "2 slices wholemeal toast", aliases: ["2 toast", "2 slices toast"], quantity: "2 slices", calories: 188, protein_g: 8, carbs_g: 31, fat_g: 2.8, category: "carbs" },
+  { id: "banana", name: "Banana", aliases: ["medium banana"], quantity: "1 medium", calories: 105, protein_g: 1.3, carbs_g: 27, fat_g: 0.4, category: "produce" },
+  { id: "flat_white", name: "Large flat white", aliases: ["large flat white"], quantity: "large", calories: 155, protein_g: 8, carbs_g: 12, fat_g: 8, category: "drink" },
+].map(derivedFood)
+
+const estimatedFoods = [
+  { id: "protein_shake_40", name: "Protein shake", aliases: ["protein shake", "40g protein", "shake"], quantity: "40g protein serve", calories: 210, protein_g: 40, carbs_g: 5, fat_g: 3, category: "protein" },
+  { id: "chicken_burrito_bowl", name: "Chicken burrito bowl", aliases: ["chicken burrito bowl", "burrito bowl"], quantity: "1 large bowl", calories: 680, protein_g: 48, carbs_g: 76, fat_g: 18, category: "mixed meal" },
+  { id: "greek_yoghurt_berries_oats", name: "Greek yoghurt, berries, and oats", aliases: ["yoghurt berries oats", "greek yoghurt", "yogurt berries oats"], quantity: "1 bowl", calories: 430, protein_g: 32, carbs_g: 48, fat_g: 11, category: "breakfast" },
+  { id: "chicken_rice_bowl", name: "Chicken rice bowl", aliases: ["chicken rice", "chicken rice bowl"], quantity: "1 bowl", calories: 620, protein_g: 45, carbs_g: 68, fat_g: 16, category: "mixed meal" },
+  { id: "salmon_potato_salad", name: "Salmon, potato, and salad", aliases: ["salmon potato salad", "salmon and potato"], quantity: "1 plate", calories: 560, protein_g: 39, carbs_g: 42, fat_g: 24, category: "dinner" },
+  { id: "lean_beef_bowl", name: "Lean beef burrito bowl", aliases: ["lean beef bowl", "beef burrito bowl"], quantity: "1 bowl", calories: 720, protein_g: 52, carbs_g: 78, fat_g: 22, category: "mixed meal" },
+  { id: "tuna_rice", name: "Tuna and rice", aliases: ["tuna rice", "tuna and rice"], quantity: "1 bowl", calories: 465, protein_g: 39, carbs_g: 58, fat_g: 8, category: "protein" },
+].map(estimatedFood)
+
+export const verifiedFoods = [...auDerivedFoods, ...auVerifiedFoods, ...nzVerifiedFoods, ...estimatedFoods]
 
 function normalize(text) {
-  return text.toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim()
+  return String(text || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
+function compactNormalize(text) {
+  return normalize(text).replace(/\s+/g, "")
+}
+
+function tokenize(text) {
+  return normalize(text).split(" ").filter(Boolean)
+}
+
+function namesForFood(food) {
+  return [food.name, ...(Array.isArray(food.aliases) ? food.aliases : []), food.category].filter(Boolean)
+}
+
+function sourceRank(food) {
+  if (food.source_type === "curated_au_catalogue") return 4
+  if (food.source_type === "nz_curated_catalogue") return 3
+  if (food.source_type === "barcode_label" || food.source_type === "open_food_facts_label") return 2
+  return 1
+}
+
+function scoreFoodMatch(query, food) {
+  const normalizedQuery = normalize(query)
+  if (!normalizedQuery) return 0
+
+  const compactQuery = compactNormalize(query)
+  const queryTokens = tokenize(query)
+  const names = namesForFood(food)
+
+  let bestScore = 0
+  for (const name of names) {
+    const normalizedName = normalize(name)
+    const compactName = compactNormalize(name)
+    const nameTokens = tokenize(name)
+
+    if (normalizedName === normalizedQuery || compactName === compactQuery) {
+      bestScore = Math.max(bestScore, 300)
+      continue
+    }
+
+    if (normalizedName.startsWith(`${normalizedQuery} `) || compactName.startsWith(compactQuery)) {
+      bestScore = Math.max(bestScore, 240)
+      continue
+    }
+
+    if (queryTokens.length && queryTokens.every((term) => nameTokens.some((token) => token === term || token.startsWith(term)))) {
+      bestScore = Math.max(bestScore, 200 + Math.min(20, queryTokens.length * 4))
+      continue
+    }
+
+    if (normalizedQuery.length >= 5 && normalizedName.includes(normalizedQuery)) {
+      bestScore = Math.max(bestScore, 140)
+    }
+  }
+
+  return bestScore ? bestScore + sourceRank(food) : 0
+}
+
+function summarizeSource(foods) {
+  const sourceTypes = [...new Set(foods.map((food) => food.source_type).filter(Boolean))]
+  if (!sourceTypes.length) return auSource
+  if (sourceTypes.every((type) => type === "curated_au_catalogue")) return auSource
+  if (sourceTypes.every((type) => type === "nz_curated_catalogue")) return nzSource
+  if (sourceTypes.every((type) => type === "estimated_internal_profile")) return estimatedSource
+  return [auSource, nzSource, estimatedSource]
+    .filter((source, index, all) => index === all.indexOf(source))
+    .join(" | ")
+}
+
+function isEstimatedSourceType(value) {
+  return String(value || "").trim().toLowerCase() === "estimated_internal_profile"
 }
 
 export function findVerifiedFood(query) {
-  const normalized = normalize(query)
-  if (!normalized) return null
-
-  return verifiedFoods.find((food) => {
-    const names = [food.name, ...food.aliases].map(normalize)
-    return names.some((name) => normalized.includes(name) || name.includes(normalized))
-  }) || null
+  const ranked = searchVerifiedFoods(query)
+  return ranked[0] || null
 }
 
 export function searchVerifiedFoods(query) {
-  const normalized = normalize(query)
-  if (!normalized) return verifiedFoods
+  const normalizedQuery = normalize(query)
+  if (!normalizedQuery) return verifiedFoods
 
-  return verifiedFoods.filter((food) => {
-    const haystack = normalize(`${food.name} ${food.aliases.join(" ")} ${food.category}`)
-    return normalized.split(" ").every((term) => haystack.includes(term))
-  })
+  return verifiedFoods
+    .map((food) => ({ food, score: scoreFoodMatch(query, food) }))
+    .filter((entry) => entry.score > 0)
+    .sort((left, right) => right.score - left.score || left.food.name.localeCompare(right.food.name))
+    .map((entry) => entry.food)
 }
 
 export function foodToMeal(food, overrides = {}) {
+  const estimated = overrides.estimated ?? isEstimatedSourceType(food.source_type)
   return {
     food_name: food.name,
     quantity: food.quantity,
@@ -125,10 +292,10 @@ export function foodToMeal(food, overrides = {}) {
     protein_g: food.protein_g,
     carbs_g: food.carbs_g,
     fat_g: food.fat_g,
-    estimated: false,
+    estimated,
     nutrition_source: food.source,
     nutrition_source_type: food.source_type || "curated_au_catalogue",
-    macro_confidence: food.macro_confidence || "high",
+    macro_confidence: food.macro_confidence || (estimated ? "medium" : "high"),
     ...overrides,
   }
 }
@@ -136,11 +303,18 @@ export function foodToMeal(food, overrides = {}) {
 export function buildMealSuggestion(ingredients) {
   const terms = normalize(ingredients)
   const matches = verifiedFoods.filter((food) => {
-    const haystack = normalize(`${food.name} ${food.aliases.join(" ")} ${food.category}`)
-    return terms.split(" ").some((term) => term.length > 2 && haystack.includes(term))
+    const haystacks = namesForFood(food)
+    return terms.split(" ").some((term) => term.length > 2 && haystacks.some((name) => tokenize(name).some((token) => token === term || token.startsWith(term))))
   })
 
-  const chosen = matches.length ? matches.slice(0, 2) : [verifiedFoods[1], verifiedFoods[4], verifiedFoods[2]]
+  const chosen = matches.length
+    ? matches.slice(0, 2)
+    : [
+        verifiedFoods.find((food) => food.id === "egg_chicken_whole_raw"),
+        verifiedFoods.find((food) => food.id === "oats_rolled_uncooked"),
+        verifiedFoods.find((food) => food.id === "banana_cavendish"),
+      ].filter(Boolean)
+
   const totals = chosen.reduce(
     (total, food) => ({
       calories: total.calories + food.calories,
@@ -154,13 +328,9 @@ export function buildMealSuggestion(ingredients) {
   return {
     id: `suggestion_${chosen.map((food) => food.id).join("_")}`,
     name: chosen.map((food) => food.name).join(" + "),
-    description: "Built only from foods in the curated AU/NZ nutrition catalogue.",
+    description: "Built from the local AU/NZ nutrition catalogue, preferring trusted AFCD and NZFCD matches.",
     ingredients: chosen.map((food) => food.name),
-    source: chosen.every((food) => food.source_type === "nz_curated_catalogue")
-      ? nzSource
-      : chosen.every((food) => food.source_type === "curated_au_catalogue")
-        ? auSource
-        : `${auSource} | ${nzSource}`,
+    source: summarizeSource(chosen),
     ...totals,
   }
 }
@@ -182,7 +352,7 @@ export function generateLocalChefRecipe(pantry, mealType = "dinner", servings = 
       quantity: "to taste",
       estimated: true,
       source: "Estimated from your ingredient list",
-      source_type: "estimated",
+      source_type: "estimated_internal_profile",
       calories: 0,
       protein_g: 0,
       carbs_g: 0,

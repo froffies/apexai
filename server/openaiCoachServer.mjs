@@ -48,16 +48,25 @@ loadDotEnv()
 const port = Number(process.env.PORT || process.env.OPENAI_COACH_PORT || 8787)
 const host = process.env.OPENAI_COACH_HOST || (process.env.PORT ? "0.0.0.0" : "127.0.0.1")
 const model = process.env.OPENAI_MODEL || "gpt-4o-mini"
+const visionModel = process.env.OPENAI_VISION_MODEL || model
 const nodeEnv = process.env.NODE_ENV || "development"
 const isProduction = nodeEnv === "production"
 const configuredCorsOrigins = (process.env.OPENAI_COACH_CORS_ORIGIN || (nodeEnv === "production" ? "" : "http://127.0.0.1:5173,http://localhost:5173,http://127.0.0.1:4173,http://localhost:4173")).split(",").map((origin) => origin.trim()).filter(Boolean)
 const fallbackCorsOrigin = configuredCorsOrigins[0] || "null"
-const client = process.env.OPENAI_API_KEY
-  ? new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY,
-      ...(process.env.OPENAI_BASE_URL ? { baseURL: process.env.OPENAI_BASE_URL } : {}),
-    })
-  : null
+function buildOpenAIClient(apiKey, baseURL) {
+  return apiKey
+    ? new OpenAI({
+        apiKey,
+        ...(baseURL ? { baseURL } : {}),
+      })
+    : null
+}
+
+const client = buildOpenAIClient(process.env.OPENAI_API_KEY, process.env.OPENAI_BASE_URL)
+const visionClient = buildOpenAIClient(
+  process.env.OPENAI_VISION_API_KEY || process.env.OPENAI_API_KEY,
+  process.env.OPENAI_VISION_BASE_URL || process.env.OPENAI_BASE_URL
+)
 const requireAuth = process.env.OPENAI_COACH_REQUIRE_AUTH ? process.env.OPENAI_COACH_REQUIRE_AUTH === "true" : isProduction
 const supabaseUrl = process.env.SUPABASE_URL || ""
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || ""
@@ -1771,10 +1780,10 @@ async function handleNutritionPhoto(request, response) {
   const body = await readRequestBody(request)
   validateNutritionPhotoBody(body)
 
-  if (!client) {
+  if (!visionClient) {
     throw createHttpError(503, "Photo analysis is unavailable right now.", {
       expose: true,
-      logMessage: "OPENAI_API_KEY is not set for nutrition photo analysis",
+      logMessage: "OPENAI_VISION_API_KEY or OPENAI_API_KEY is not set for nutrition photo analysis",
     })
   }
 
@@ -1785,8 +1794,8 @@ async function handleNutritionPhoto(request, response) {
 
   let completion
   try {
-    completion = await client.chat.completions.create({
-      model,
+    completion = await visionClient.chat.completions.create({
+      model: visionModel,
       max_completion_tokens: 500,
       response_format: { type: "json_object" },
       messages: [
@@ -1812,7 +1821,13 @@ async function handleNutritionPhoto(request, response) {
   } catch (error) {
     const status = Number(error?.status || error?.code || 0)
     const message = String(error?.message || "")
-    if (status === 429 || /rate limit|quota|insufficient_quota/i.test(message)) {
+    if (/insufficient_quota/i.test(message)) {
+      throw createHttpError(503, "Photo analysis is temporarily unavailable because the AI vision quota is exhausted. Try barcode or manual search for now.", {
+        expose: true,
+        logMessage: `Photo analysis upstream quota exhausted: ${message || "insufficient_quota"}`,
+      })
+    }
+    if (status === 429 || /rate limit|quota/i.test(message)) {
       throw createHttpError(503, "Photo analysis is busy right now. Try again in a moment or use barcode or manual search.", {
         expose: true,
         logMessage: `Photo analysis upstream limit: ${message || "429"}`,
@@ -2052,7 +2067,21 @@ const server = http.createServer(async (request, response) => {
   }
 
   if (request.method === "GET" && request.url === "/health") {
-    sendJson(response, 200, { ok: true, model, openaiConfigured: Boolean(client), authRequired: requireAuth, supabaseConfigured: Boolean(serverSupabase), adminConfigured: Boolean(adminSupabase), coachAuditEnabled: auditCapabilities.enabled, telemetrySink, telemetryTableName, corsOrigins: configuredCorsOrigins }, requestResponseOrigin(request))
+    sendJson(response, 200, {
+      ok: true,
+      model,
+      visionModel,
+      openaiConfigured: Boolean(client),
+      openaiVisionConfigured: Boolean(visionClient),
+      openaiVisionUsesDedicatedKey: Boolean(process.env.OPENAI_VISION_API_KEY),
+      authRequired: requireAuth,
+      supabaseConfigured: Boolean(serverSupabase),
+      adminConfigured: Boolean(adminSupabase),
+      coachAuditEnabled: auditCapabilities.enabled,
+      telemetrySink,
+      telemetryTableName,
+      corsOrigins: configuredCorsOrigins,
+    }, requestResponseOrigin(request))
     return
   }
 

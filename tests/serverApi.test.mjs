@@ -90,6 +90,8 @@ test("local API server exposes health, local nutrition, telemetry, and sanitized
   assert.equal(health.ok, true)
   assert.equal(health.authRequired, false)
   assert.equal(health.telemetrySink, "file")
+  assert.equal(health.openaiVisionConfigured, false)
+  assert.equal(health.openaiVisionUsesDedicatedKey, false)
   assert.match(healthResponse.headers.get("access-control-allow-methods") || "", /GET/)
   assert.equal(healthResponse.headers.get("cache-control"), "no-store")
   assert.equal(healthResponse.headers.get("x-content-type-options"), "nosniff")
@@ -119,6 +121,32 @@ test("local API server exposes health, local nutrition, telemetry, and sanitized
   assert.equal(nzNutritionResponse.status, 200)
   assert.equal(nzNutrition.results[0]?.source_type, "nz_curated_catalogue")
   assert.match(String(nzNutrition.results[0]?.name || ""), /weet/i)
+
+  const auNutritionResponse = await fetch(`http://127.0.0.1:${port}/api/nutrition/search`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Origin: "http://127.0.0.1:5173",
+    },
+    body: JSON.stringify({ query: "light milk" }),
+  })
+  const auNutrition = await auNutritionResponse.json()
+  assert.equal(auNutritionResponse.status, 200)
+  assert.equal(auNutrition.results[0]?.source_type, "curated_au_catalogue")
+  assert.match(String(auNutrition.results[0]?.name || ""), /milk/i)
+
+  const teaResponse = await fetch(`http://127.0.0.1:${port}/api/nutrition/search`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Origin: "http://127.0.0.1:5173",
+    },
+    body: JSON.stringify({ query: "tea" }),
+  })
+  const teaResults = await teaResponse.json()
+  assert.equal(teaResponse.status, 200)
+  assert.match(String(teaResults.results[0]?.name || ""), /tea/i)
+  assert.doesNotMatch(String(teaResults.results[0]?.name || ""), /steak/i)
 
   const nutritionPhotoResponse = await fetch(`http://127.0.0.1:${port}/api/nutrition/analyze-photo`, {
     method: "POST",
