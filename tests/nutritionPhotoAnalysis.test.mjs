@@ -46,6 +46,8 @@ test("buildFoodPhotoEstimate uses curated matches when a clear AU reference exis
   assert.equal(estimate.action?.nutrition_source_type, "photo_ai_estimate")
   assert.equal(estimate.macro_confidence, "high")
   assert.equal(estimate.breakdown[0]?.source_type, "curated_au_catalogue")
+  assert.equal(estimate.needs_review, false)
+  assert.equal(estimate.clarification_question, "")
 })
 
 test("buildFoodPhotoEstimate falls back conservatively when a plate includes unmatched foods", async () => {
@@ -105,4 +107,20 @@ test("buildFoodPhotoEstimate treats curated NZ matches as high-confidence verifi
   assert.match(estimate.action?.food_name || "", /weet/i)
   assert.equal(estimate.macro_confidence, "high")
   assert.equal(estimate.breakdown[0]?.source_type, "nz_curated_catalogue")
+  assert.equal(estimate.needs_review, false)
+})
+
+test("normalizeFoodPhotoAnalysis infers high overall confidence from a single high-confidence item", () => {
+  const normalized = normalizeFoodPhotoAnalysis({
+    items: [
+      {
+        name: "banana",
+        quantity: "1 banana",
+        category: "food",
+        confidence: "high",
+      },
+    ],
+  })
+
+  assert.equal(normalized.overall_confidence, "high")
 })

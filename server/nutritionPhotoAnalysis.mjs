@@ -33,6 +33,15 @@ function normalizePreparation(value = "") {
   return normalized ? normalized.toLowerCase() : ""
 }
 
+function deriveOverallPhotoConfidence(items = [], requestedValue = "") {
+  const requested = normalizeConfidence(requestedValue, "")
+  if (requested) return requested
+  if (!items.length) return "low"
+  if (items.every((item) => item.confidence === "high")) return "high"
+  if (items.every((item) => item.confidence === "high" || item.confidence === "medium")) return "medium"
+  return "low"
+}
+
 function buildQuantityPayload(value = "") {
   const text = normalizeQuantity(value, "")
   const match = text.match(/^(?<amount>\d+(?:\.\d+)?)\s*(?<unit>kg|g|oz|lb|lbs|pounds?|ml|l|tbsp|tablespoons?|tsp|teaspoons?|cups?|slices?|tins?|cans?|blocks?|bunch(?:es)?|serves?|servings?|bowls?|plates?|mugs?|eggs?)\b/i)
@@ -135,7 +144,7 @@ export function normalizeFoodPhotoAnalysis(raw = {}) {
     summary,
     portion,
     items,
-    overall_confidence: normalizeConfidence(value.overall_confidence, items.length > 1 ? "medium" : "low"),
+    overall_confidence: deriveOverallPhotoConfidence(items, value.overall_confidence),
     needs_clarification: Boolean(value.needs_clarification),
     clarification_question: cleanText(value.clarification_question || ""),
     assumptions: safeArray(value.assumptions, 8).map((entry) => cleanText(entry)).filter(Boolean),
