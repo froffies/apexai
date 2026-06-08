@@ -124,3 +124,20 @@ test("normalizeFoodPhotoAnalysis infers high overall confidence from a single hi
 
   assert.equal(normalized.overall_confidence, "high")
 })
+
+test("normalizeFoodPhotoAnalysis strips model-generated item numbering noise from food names", () => {
+  const normalized = normalizeFoodPhotoAnalysis({
+    items: [
+      {
+        name: "banana item 1",
+        quantity: "1 banana",
+        category: "food",
+        confidence: "high",
+      },
+    ],
+  })
+
+  assert.equal(normalized.items[0].name, "Banana")
+  assert.equal(normalized.items[0].base_name, "banana")
+  assert.equal(normalized.summary, "1 banana")
+})

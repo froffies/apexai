@@ -57,6 +57,14 @@ function stripLeadingArticle(value = "") {
   return cleanText(value).replace(/^(?:a|an|the)\s+/i, "")
 }
 
+function normalizePhotoFoodName(value = "") {
+  return cleanText(value)
+    .replace(/\bitem\s+\d+\b/gi, "")
+    .replace(/^\d+\s*[\).\:-]\s*/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
 function singularizeFoodName(value = "") {
   const normalized = stripLeadingArticle(value).toLowerCase()
   if (!normalized) return ""
@@ -121,7 +129,8 @@ export function normalizeFoodPhotoAnalysis(raw = {}) {
   const value = raw && typeof raw === "object" ? raw : {}
   const items = safeArray(value.items, 12)
     .map((item, index) => {
-      const name = titleCase(stripLeadingArticle(item?.name || item?.label || `Item ${index + 1}`))
+      const normalizedName = normalizePhotoFoodName(item?.name || item?.label || `Item ${index + 1}`)
+      const name = titleCase(stripLeadingArticle(normalizedName))
       const preparation = normalizePreparation(item?.preparation || item?.cooking_method || "")
       const quantity = normalizeQuantity(item?.quantity || item?.quantity_text || item?.portion || "1 serve")
       return {
