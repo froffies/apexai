@@ -2197,3 +2197,51 @@ test("nutrition photo route surfaces quota exhaustion clearly when the vision up
   assert.equal(nutritionPhotoResponse.status, 503)
   assert.match(String(nutritionPhoto.error || ""), /vision quota is exhausted/i)
 })
+
+test("nutrition photo route explains shared vision exhaustion when the deployment has no dedicated vision key", async (t) => {
+  const fakeOpenAIBaseUrl = await startFakeOpenAIServer(t, async (_request, response) => {
+    response.writeHead(429, { "Content-Type": "application/json" })
+    response.end(JSON.stringify({
+      error: {
+        message: "Rate limit reached for requests per min.",
+        type: "requests",
+        code: "rate_limit_exceeded",
+      },
+    }))
+  })
+
+  const port = randomPort()
+  const serverProcess = spawn(process.execPath, [serverEntry], {
+    cwd,
+    env: {
+      ...process.env,
+      OPENAI_COACH_PORT: String(port),
+      OPENAI_COACH_REQUIRE_AUTH: "false",
+      OPENAI_COACH_CORS_ORIGIN: "http://127.0.0.1:5173",
+      OPENFOODFACTS_ENABLED: "false",
+      OPENAI_API_KEY: "test-key",
+      OPENAI_BASE_URL: fakeOpenAIBaseUrl,
+      OPENAI_VISION_API_KEY: "",
+      NODE_ENV: "production",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  })
+
+  t.after(async () => {
+    serverProcess.kill()
+  })
+
+  await waitForHealth(port)
+
+  const nutritionPhotoResponse = await fetch(`http://127.0.0.1:${port}/api/nutrition/analyze-photo`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Origin: "http://127.0.0.1:5173",
+    },
+    body: JSON.stringify({ imageDataUrl: "data:image/png;base64,aGVsbG8=" }),
+  })
+  const nutritionPhoto = await nutritionPhotoResponse.json()
+  assert.equal(nutritionPhotoResponse.status, 503)
+  assert.match(String(nutritionPhoto.error || ""), /shared ai vision capacity is exhausted/i)
+})

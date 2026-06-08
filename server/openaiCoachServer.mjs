@@ -1866,7 +1866,10 @@ async function handleNutritionPhoto(request, response) {
       })
     }
     if (isVisionTemporarilyBusy(error)) {
-      throw createHttpError(503, "Photo analysis is busy right now. Try again in a moment or use barcode or manual search.", {
+      const sharedCapacityMessage = process.env.OPENAI_VISION_API_KEY
+        ? "Photo analysis is busy right now. Try again in a moment or use barcode or manual search."
+        : "Photo analysis is temporarily unavailable on this deployment because shared AI vision capacity is exhausted. Try again later or use barcode or manual search."
+      throw createHttpError(503, sharedCapacityMessage, {
         expose: true,
         logMessage: `Photo analysis upstream limit: ${details || "429"}`,
       })
