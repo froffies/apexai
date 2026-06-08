@@ -159,3 +159,15 @@ test("normalizeFoodPhotoAnalysis recovers a real food name from assumptions when
   assert.equal(normalized.items[0].base_name, "banana")
   assert.equal(normalized.summary, "1 banana")
 })
+
+test("normalizeFoodPhotoAnalysis recovers a simple single-item meal from summary text when the model omits items", () => {
+  const normalized = normalizeFoodPhotoAnalysis({
+    summary: "A single banana.",
+    items: [],
+  })
+
+  assert.equal(normalized.items.length, 1)
+  assert.equal(normalized.items[0].name, "Banana")
+  assert.equal(normalized.items[0].base_name, "banana")
+  assert.equal(normalized.summary, "1 banana")
+})

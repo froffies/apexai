@@ -82,6 +82,33 @@ function inferPhotoFoodNameFromAssumptions(assumptions = []) {
   return ""
 }
 
+function parseSimpleSummaryItem(summary = "", assumptions = []) {
+  const text = cleanText(summary).replace(/[.!?]+$/g, "")
+  if (!text) return null
+
+  const singlePatterns = [
+    /^(?:a\s+single|single|one|1)\s+([A-Za-z][A-Za-z\s'-]+)$/i,
+    /^([A-Za-z][A-Za-z\s'-]+)$/i,
+  ]
+  for (const pattern of singlePatterns) {
+    const match = text.match(pattern)
+    if (!match?.[1]) continue
+    const inferredName = normalizePhotoFoodName(match[1])
+    if (!inferredName) continue
+    return {
+      id: "photo_item_1",
+      name: titleCase(stripLeadingArticle(inferredName)),
+      base_name: singularizeFoodName(inferredName),
+      quantity: /^(?:a\s+single|single|one|1)\b/i.test(text) ? `1 ${singularizeFoodName(inferredName)}` : "1 serve",
+      preparation: "",
+      category: "food",
+      confidence: assumptions.length ? "medium" : "low",
+      notes: "Recovered from summary text.",
+    }
+  }
+  return null
+}
+
 function singularizeFoodName(value = "") {
   const normalized = stripLeadingArticle(value).toLowerCase()
   if (!normalized) return ""
@@ -167,16 +194,18 @@ export function normalizeFoodPhotoAnalysis(raw = {}) {
       }
     })
     .filter((item) => item.base_name)
+  const recoveredSummaryItem = items.length ? null : parseSimpleSummaryItem(value.summary || "", assumptions)
+  const normalizedItems = recoveredSummaryItem ? [recoveredSummaryItem] : items
 
-  const summary = buildMealSummary(items, value.summary || "")
+  const summary = buildMealSummary(normalizedItems, value.summary || "")
   const portion = normalizeQuantity(value.portion || value.serving || "1 plate", "1 plate")
 
   return {
     summary,
     portion,
-    items,
-    overall_confidence: deriveOverallPhotoConfidence(items, value.overall_confidence),
-    needs_clarification: Boolean(value.needs_clarification),
+    items: normalizedItems,
+    overall_confidence: deriveOverallPhotoConfidence(normalizedItems, value.overall_confidence),
+    needs_clarification: Boolean(value.needs_clarification && normalizedItems.length > 0),
     clarification_question: cleanText(value.clarification_question || ""),
     assumptions,
   }
