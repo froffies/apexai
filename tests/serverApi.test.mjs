@@ -1,5 +1,6 @@
 import assert from "node:assert/strict"
 import fs from "node:fs/promises"
+import http from "node:http"
 import os from "node:os"
 import path from "node:path"
 import { spawn } from "node:child_process"
@@ -40,6 +41,23 @@ async function waitForServerExit(serverProcess, timeoutMs = 50) {
       finish({ code, signal })
     })
   })
+}
+
+async function startFakeOpenAIServer(t, responder) {
+  const port = randomPort()
+  const server = http.createServer(async (request, response) => {
+    let rawBody = ""
+    for await (const chunk of request) {
+      rawBody += chunk
+    }
+    await responder(request, response, rawBody)
+  })
+
+  await new Promise((resolve) => server.listen(port, "127.0.0.1", resolve))
+  t.after(async () => {
+    await new Promise((resolve) => server.close(() => resolve()))
+  })
+  return `http://127.0.0.1:${port}/v1`
 }
 
 test("local API server exposes health, local nutrition, telemetry, and sanitized coach fallback", async (t) => {
@@ -2055,4 +2073,127 @@ test("protected API endpoints require auth when production auth is enabled", asy
   const nutritionPhoto = await nutritionPhotoResponse.json()
   assert.equal(nutritionPhotoResponse.status, 401)
   assert.match(nutritionPhoto.error, /Missing Authorization bearer token/i)
+})
+
+test("nutrition photo route returns a structured photo estimate when the vision upstream succeeds", async (t) => {
+  const fakeOpenAIBaseUrl = await startFakeOpenAIServer(t, async (_request, response) => {
+    response.writeHead(200, { "Content-Type": "application/json" })
+    response.end(JSON.stringify({
+      id: "chatcmpl_photo_test",
+      object: "chat.completion",
+      created: 1,
+      model: "gpt-4o-mini",
+      choices: [
+        {
+          index: 0,
+          finish_reason: "stop",
+          message: {
+            role: "assistant",
+            content: JSON.stringify({
+              summary: "2 eggs",
+              portion: "1 plate",
+              overall_confidence: "high",
+              needs_clarification: false,
+              clarification_question: "",
+              assumptions: [],
+              items: [
+                {
+                  name: "eggs",
+                  quantity: "2 eggs",
+                  category: "food",
+                  preparation: "",
+                  confidence: "high",
+                  notes: "",
+                },
+              ],
+            }),
+          },
+        },
+      ],
+    }))
+  })
+
+  const port = randomPort()
+  const serverProcess = spawn(process.execPath, [serverEntry], {
+    cwd,
+    env: {
+      ...process.env,
+      OPENAI_COACH_PORT: String(port),
+      OPENAI_COACH_REQUIRE_AUTH: "false",
+      OPENAI_COACH_CORS_ORIGIN: "http://127.0.0.1:5173",
+      OPENFOODFACTS_ENABLED: "false",
+      OPENAI_API_KEY: "test-key",
+      OPENAI_BASE_URL: fakeOpenAIBaseUrl,
+      NODE_ENV: "production",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  })
+
+  t.after(async () => {
+    serverProcess.kill()
+  })
+
+  await waitForHealth(port)
+
+  const nutritionPhotoResponse = await fetch(`http://127.0.0.1:${port}/api/nutrition/analyze-photo`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Origin: "http://127.0.0.1:5173",
+    },
+    body: JSON.stringify({ imageDataUrl: "data:image/png;base64,aGVsbG8=" }),
+  })
+  const nutritionPhoto = await nutritionPhotoResponse.json()
+  assert.equal(nutritionPhotoResponse.status, 200)
+  assert.equal(nutritionPhoto.nutrition_source_type, "photo_ai_estimate")
+  assert.match(String(nutritionPhoto.food_name || ""), /egg/i)
+  assert.equal(Array.isArray(nutritionPhoto.identified_items), true)
+  assert.ok(nutritionPhoto.identified_items.length > 0)
+})
+
+test("nutrition photo route surfaces quota exhaustion clearly when the vision upstream is out of credits", async (t) => {
+  const fakeOpenAIBaseUrl = await startFakeOpenAIServer(t, async (_request, response) => {
+    response.writeHead(429, { "Content-Type": "application/json" })
+    response.end(JSON.stringify({
+      error: {
+        message: "You exceeded your current quota, please check your plan and billing details.",
+        type: "insufficient_quota",
+        code: "insufficient_quota",
+      },
+    }))
+  })
+
+  const port = randomPort()
+  const serverProcess = spawn(process.execPath, [serverEntry], {
+    cwd,
+    env: {
+      ...process.env,
+      OPENAI_COACH_PORT: String(port),
+      OPENAI_COACH_REQUIRE_AUTH: "false",
+      OPENAI_COACH_CORS_ORIGIN: "http://127.0.0.1:5173",
+      OPENFOODFACTS_ENABLED: "false",
+      OPENAI_API_KEY: "test-key",
+      OPENAI_BASE_URL: fakeOpenAIBaseUrl,
+      NODE_ENV: "production",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  })
+
+  t.after(async () => {
+    serverProcess.kill()
+  })
+
+  await waitForHealth(port)
+
+  const nutritionPhotoResponse = await fetch(`http://127.0.0.1:${port}/api/nutrition/analyze-photo`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Origin: "http://127.0.0.1:5173",
+    },
+    body: JSON.stringify({ imageDataUrl: "data:image/png;base64,aGVsbG8=" }),
+  })
+  const nutritionPhoto = await nutritionPhotoResponse.json()
+  assert.equal(nutritionPhotoResponse.status, 503)
+  assert.match(String(nutritionPhoto.error || ""), /vision quota is exhausted/i)
 })

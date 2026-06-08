@@ -828,6 +828,45 @@ function createHttpError(status, message, options = {}) {
   return error
 }
 
+function collectProviderErrorParts(error) {
+  return [
+    error?.message,
+    error?.code,
+    error?.type,
+    error?.error?.message,
+    error?.error?.code,
+    error?.error?.type,
+    error?.cause?.message,
+    error?.cause?.code,
+    error?.cause?.type,
+    error?.response?.data?.error?.message,
+    error?.response?.data?.error?.code,
+    error?.response?.data?.error?.type,
+  ]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean)
+}
+
+function providerErrorText(error) {
+  return collectProviderErrorParts(error).join(" | ")
+}
+
+function isVisionQuotaExhausted(error) {
+  const text = providerErrorText(error).toLowerCase()
+  return (
+    text.includes("insufficient_quota")
+    || text.includes("billing_hard_limit_reached")
+    || text.includes("exceeded your current quota")
+    || text.includes("quota_exceeded")
+  )
+}
+
+function isVisionTemporarilyBusy(error) {
+  const status = Number(error?.status || error?.response?.status || error?.cause?.status || 0)
+  const text = providerErrorText(error).toLowerCase()
+  return status === 429 || /rate limit|too many requests|quota/i.test(text)
+}
+
 function sanitizeErrorMessage(error, fallbackMessage) {
   if (!isProduction || error?.expose || (error?.status && error.status < 500)) {
     return error instanceof Error ? error.message : fallbackMessage
@@ -1819,18 +1858,17 @@ async function handleNutritionPhoto(request, response) {
       ],
     })
   } catch (error) {
-    const status = Number(error?.status || error?.code || 0)
-    const message = String(error?.message || "")
-    if (/insufficient_quota/i.test(message)) {
+    const details = providerErrorText(error)
+    if (isVisionQuotaExhausted(error)) {
       throw createHttpError(503, "Photo analysis is temporarily unavailable because the AI vision quota is exhausted. Try barcode or manual search for now.", {
         expose: true,
-        logMessage: `Photo analysis upstream quota exhausted: ${message || "insufficient_quota"}`,
+        logMessage: `Photo analysis upstream quota exhausted: ${details || "insufficient_quota"}`,
       })
     }
-    if (status === 429 || /rate limit|quota/i.test(message)) {
+    if (isVisionTemporarilyBusy(error)) {
       throw createHttpError(503, "Photo analysis is busy right now. Try again in a moment or use barcode or manual search.", {
         expose: true,
-        logMessage: `Photo analysis upstream limit: ${message || "429"}`,
+        logMessage: `Photo analysis upstream limit: ${details || "429"}`,
       })
     }
     throw error
@@ -1854,6 +1892,7 @@ async function handleNutritionPhoto(request, response) {
     fat_g: Number(action?.fat_g || 0),
     estimated: true,
     nutrition_source: action?.nutrition_source || "AI plate-photo estimate",
+    nutrition_source_type: action?.nutrition_source_type || "photo_ai_estimate",
     identified_items: estimatedMeal.breakdown,
     macro_confidence: estimatedMeal.macro_confidence,
     needs_review: estimatedMeal.needs_review,
