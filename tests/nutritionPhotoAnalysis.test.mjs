@@ -281,6 +281,60 @@ test("buildFoodPhotoEstimate can auto-fill obvious pizza and samosa photo dishes
   assert.equal(pizzaEstimate.breakdown[0]?.source_type, "photo_dish_profile")
 })
 
+test("buildFoodPhotoEstimate rescues live-style indirect dish descriptions into plated dish matches", async () => {
+  const burgerEstimate = await buildFoodPhotoEstimate({
+    items: [
+      { name: "grilled beef burger patty", quantity: "1 patty", category: "food", confidence: "medium" },
+      { name: "hamburger bun", quantity: "1 bun", category: "food", confidence: "medium" },
+      { name: "cheese slice", quantity: "1 slice", category: "food", confidence: "medium" },
+      { name: "fried crispy bacon", quantity: "2 slices", category: "food", confidence: "medium" },
+    ],
+    portion: "1 plate",
+    overall_confidence: "medium",
+  }, {
+    mealType: "lunch",
+    lookupFoods: async (term) => searchPhotoReferenceFoods(term),
+  })
+
+  assert.ok(burgerEstimate.action)
+  assert.equal(burgerEstimate.can_autofill, true)
+  assert.equal(burgerEstimate.needs_review, false)
+  assert.equal(burgerEstimate.breakdown[0]?.source_type, "photo_dish_profile")
+
+  const curryEstimate = await buildFoodPhotoEstimate({
+    items: [
+      { name: "spiced curry", quantity: "1 serve", category: "food", confidence: "medium" },
+      { name: "chicken", quantity: "1 serve", category: "food", confidence: "medium" },
+      { name: "flatbreads", quantity: "1 serve", category: "food", confidence: "medium" },
+    ],
+    portion: "1 bowl",
+    overall_confidence: "medium",
+  }, {
+    mealType: "dinner",
+    lookupFoods: async (term) => searchPhotoReferenceFoods(term),
+  })
+
+  assert.ok(curryEstimate.action)
+  assert.equal(curryEstimate.can_autofill, true)
+  assert.equal(curryEstimate.needs_review, false)
+  assert.equal(curryEstimate.breakdown[0]?.source_type, "curated_au_catalogue")
+
+  const biryaniEstimate = await buildFoodPhotoEstimate({
+    summary: "A bowl of yellow rice topped with lentil curry, fried onions, and served with yoghurt.",
+    items: [],
+    portion: "1 bowl",
+    overall_confidence: "medium",
+  }, {
+    mealType: "dinner",
+    lookupFoods: async (term) => searchPhotoReferenceFoods(term),
+  })
+
+  assert.ok(biryaniEstimate.action)
+  assert.equal(biryaniEstimate.can_autofill, true)
+  assert.equal(biryaniEstimate.needs_review, false)
+  assert.equal(biryaniEstimate.breakdown[0]?.source_type, "photo_dish_profile")
+})
+
 test("normalizeFoodPhotoAnalysis infers high overall confidence from a single high-confidence item", () => {
   const normalized = normalizeFoodPhotoAnalysis({
     items: [

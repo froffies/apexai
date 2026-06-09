@@ -356,6 +356,114 @@ function canAutofillPhotoEstimate(analysis, breakdown = [], macroConfidence = "l
   return substantiveItems.every((item) => PHOTO_DEFENSIBLE_SOURCE_TYPES.has(String(item.source_type || "").trim()))
 }
 
+function buildPhotoDishClusterText(analysis = {}, breakdown = []) {
+  return [
+    cleanText(analysis.summary || ""),
+    cleanText(analysis.portion || ""),
+    ...safeArray(analysis.items, 12).flatMap((item) => [item?.name, item?.base_name, item?.notes]),
+    ...safeArray(analysis.assumptions, 8),
+    ...safeArray(breakdown, 12).flatMap((item) => [item?.name, item?.matched_food_name]),
+  ]
+    .map((value) => cleanText(value).toLowerCase())
+    .filter(Boolean)
+    .join(" ")
+}
+
+function inferPhotoDishCluster(analysis = {}, breakdown = []) {
+  const text = buildPhotoDishClusterText(analysis, breakdown)
+  if (!text) return ""
+
+  if ((/\bburger\b|\bhamburger\b/.test(text) || /\bpatty\b/.test(text)) && /\bbun\b/.test(text)) {
+    return /\bfries\b|\bchips\b/.test(text) ? "burger with fries" : "burger"
+  }
+
+  if (/\bpizza\b/.test(text) || ((/\bcheese\b/.test(text) || /\bpepperoni\b/.test(text)) && /\bslices?\b/.test(text))) {
+    return "pizza"
+  }
+
+  if (/\bsamosa\b/.test(text) || /\bpastry triangles?\b/.test(text)) {
+    return "samosas"
+  }
+
+  if (/\bbiryani\b/.test(text) || (/\brice\b/.test(text) && /\bfried onions?\b/.test(text) && /\byoghurt\b/.test(text) && /\bcurry\b/.test(text))) {
+    return "biryani"
+  }
+
+  if (/\bcurry\b/.test(text) && /\bchicken\b/.test(text) && (/\bnaan\b/.test(text) || /\bflatbread\b/.test(text) || /\brice\b/.test(text))) {
+    return /\brice\b/.test(text) ? "butter chicken with rice" : "chicken curry"
+  }
+
+  return ""
+}
+
+async function buildPhotoDishRescueEstimate(analysis, lookupFoods, mealType) {
+  const rescueTerm = inferPhotoDishCluster(analysis)
+  if (!rescueTerm) return null
+
+  const rescueMatches = await lookupFoods(rescueTerm)
+  if (!rescueMatches.length) return null
+
+  const rescueQuantity = defaultQuantityForSummaryTerm(rescueTerm, analysis.summary || analysis.portion || "")
+  const rescueItem = {
+    label: buildItemLabel({
+      name: titleCase(rescueTerm),
+      quantity: rescueQuantity,
+      preparation: "",
+    }),
+    baseName: singularizeFoodName(rescueTerm),
+    base_name: singularizeFoodName(rescueTerm),
+    quantity: buildQuantityPayload(rescueQuantity),
+    category: "food",
+    exclusions: [],
+  }
+  const rescueSession = {
+    readyToLog: true,
+    wantsLogging: true,
+    summary: analysis.summary || rescueItem.label,
+    items: [rescueItem],
+  }
+  const rescueCandidateFoodMatches = {
+    [rescueItem.base_name]: rescueMatches,
+    [String(rescueItem.label || "").toLowerCase()]: rescueMatches,
+  }
+  const rescueBreakdownEstimate = estimateMealFromSession(rescueSession, rescueCandidateFoodMatches)
+  const rescueMacroConfidence = deriveMacroConfidence(rescueBreakdownEstimate.items)
+  const rescueCanAutofill = canAutofillPhotoEstimate(analysis, rescueBreakdownEstimate.items, rescueMacroConfidence)
+  if (!rescueCanAutofill) return null
+
+  const rescueAction = buildDeterministicMealAction({
+    mealSession: rescueSession,
+    explicitActions: [{
+      type: "log_meal",
+      meal_type: mealType,
+      quantity: analysis.portion,
+      estimated: true,
+    }],
+    prompt: analysis.summary || rescueItem.label,
+    candidateFoodMatches: rescueCandidateFoodMatches,
+    allowLooseEstimate: true,
+  })
+  const rescueSource = buildPhotoSourceSummary(rescueBreakdownEstimate.items, rescueMacroConfidence)
+
+  return {
+    action: rescueAction
+      ? {
+          ...rescueAction,
+          estimated: true,
+          nutrition_source: rescueSource,
+          nutrition_source_type: "photo_ai_estimate",
+          macro_confidence: rescueMacroConfidence,
+          macro_breakdown: rescueBreakdownEstimate.items,
+        }
+      : null,
+    breakdown: rescueBreakdownEstimate.items.map((item) => sanitizePhotoBreakdownItem(item, true)),
+    can_autofill: true,
+    macro_confidence: rescueMacroConfidence,
+    nutrition_source: rescueSource,
+    needs_review: false,
+  }
+}
+
 function sanitizePhotoBreakdownItem(item = {}, includeMacros = false) {
   const safeItem = {
     name: String(item.name || "").trim(),
@@ -471,9 +579,30 @@ export async function buildFoodPhotoEstimate(raw = {}, options = {}) {
 
   const breakdownEstimate = estimateMealFromSession(mealSession, candidateFoodMatches)
   const macroConfidence = deriveMacroConfidence(breakdownEstimate.items)
-  const canAutofill = canAutofillPhotoEstimate(analysis, breakdownEstimate.items, macroConfidence)
+  let canAutofill = canAutofillPhotoEstimate(analysis, breakdownEstimate.items, macroConfidence)
+  let action = null
+  let safeBreakdown = breakdownEstimate.items.map((item) => sanitizePhotoBreakdownItem(item, canAutofill))
+  let source = buildPhotoSourceSummary(breakdownEstimate.items, macroConfidence)
+
+  if (!canAutofill) {
+    const rescue = await buildPhotoDishRescueEstimate(analysis, lookupFoods, mealType)
+    if (rescue) {
+      return {
+        analysis,
+        action: rescue.action,
+        breakdown: rescue.breakdown,
+        can_autofill: rescue.can_autofill,
+        macro_confidence: rescue.macro_confidence,
+        nutrition_source: rescue.nutrition_source,
+        needs_review: rescue.needs_review,
+        clarification_question: analysis.clarification_question || "",
+        assumptions: analysis.assumptions,
+      }
+    }
+  }
+
   const needsReview = !canAutofill
-  const action = canAutofill
+  action = canAutofill
     ? buildDeterministicMealAction({
         mealSession,
         explicitActions: [{
@@ -487,8 +616,6 @@ export async function buildFoodPhotoEstimate(raw = {}, options = {}) {
         allowLooseEstimate: true,
       })
     : null
-  const safeBreakdown = breakdownEstimate.items.map((item) => sanitizePhotoBreakdownItem(item, canAutofill))
-  const source = buildPhotoSourceSummary(breakdownEstimate.items, macroConfidence)
 
   return {
     analysis,
