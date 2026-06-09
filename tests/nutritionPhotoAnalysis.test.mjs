@@ -422,6 +422,24 @@ test("buildFoodPhotoEstimate rescues live-style indirect dish descriptions into 
   assert.equal(curryEstimate.needs_review, false)
   assert.equal(curryEstimate.breakdown[0]?.source_type, "curated_au_catalogue")
 
+  const friedRiceEstimate = await buildFoodPhotoEstimate({
+    items: [
+      { name: "fried rice", quantity: "1 cup", category: "food", confidence: "medium" },
+      { name: "fried egg", quantity: "1", category: "food", confidence: "medium" },
+      { name: "spring onions", quantity: "1 tablespoon", category: "ingredient", confidence: "medium" },
+    ],
+    portion: "1 plate",
+    overall_confidence: "low",
+  }, {
+    mealType: "lunch",
+    lookupFoods: async (term) => searchPhotoReferenceFoods(term),
+  })
+
+  assert.ok(friedRiceEstimate.action)
+  assert.equal(friedRiceEstimate.can_autofill, true)
+  assert.equal(friedRiceEstimate.needs_review, false)
+  assert.equal(friedRiceEstimate.breakdown[0]?.source_type, "photo_dish_profile")
+
   const biryaniEstimate = await buildFoodPhotoEstimate({
     summary: "A bowl of yellow rice topped with lentil curry, fried onions, and served with yoghurt.",
     items: [],
@@ -436,6 +454,21 @@ test("buildFoodPhotoEstimate rescues live-style indirect dish descriptions into 
   assert.equal(biryaniEstimate.can_autofill, true)
   assert.equal(biryaniEstimate.needs_review, false)
   assert.equal(biryaniEstimate.breakdown[0]?.source_type, "photo_dish_profile")
+
+  const idliEstimate = await buildFoodPhotoEstimate({
+    summary: "A soft fermented rice dish served with coconut chutney and sambar.",
+    items: [],
+    portion: "1 plate",
+    overall_confidence: "low",
+  }, {
+    mealType: "breakfast",
+    lookupFoods: async (term) => searchPhotoReferenceFoods(term),
+  })
+
+  assert.ok(idliEstimate.action)
+  assert.equal(idliEstimate.can_autofill, true)
+  assert.equal(idliEstimate.needs_review, false)
+  assert.equal(idliEstimate.breakdown[0]?.source_type, "photo_dish_profile")
 })
 
 test("normalizeFoodPhotoAnalysis infers high overall confidence from a single high-confidence item", () => {

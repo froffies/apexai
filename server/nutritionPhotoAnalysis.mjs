@@ -409,7 +409,7 @@ function inferPhotoDishCluster(analysis = {}, breakdown = []) {
   const text = buildPhotoDishClusterText(analysis, breakdown)
   if (!text) return ""
 
-  if ((/\bburger\b|\bhamburger\b/.test(text) || /\bpatty\b/.test(text)) && /\bbun\b/.test(text)) {
+  if ((/\bburger\b|\bhamburger\b/.test(text) && (/\bbun\b/.test(text) || /\bfries\b|\bchips\b|\bketchup\b|\bpickle\b/.test(text))) || (/\bpatty\b/.test(text) && /\bbun\b/.test(text))) {
     return /\bfries\b|\bchips\b/.test(text) ? "burger with fries" : "burger"
   }
 
@@ -417,14 +417,28 @@ function inferPhotoDishCluster(analysis = {}, breakdown = []) {
     return "pizza"
   }
 
-  if (/\bsamosa\b/.test(text) || /\bpastry triangles?\b/.test(text) || /\btriangular pastries?\b/.test(text)) {
+  if (
+    /\bsamosa\b/.test(text)
+    || /\bpastry triangles?\b/.test(text)
+    || /\btriangular pastries?\b/.test(text)
+    || ((/\bfried\b|\bbaked\b/.test(text)) && /\bpastr(?:y|ies)\b/.test(text) && (/\bfilled\b/.test(text) || /\bpockets?\b/.test(text) || /\bpieces?\b/.test(text)))
+  ) {
     return "samosas"
+  }
+
+  if (/\bfried rice\b/.test(text) || (/\brice\b/.test(text) && (/\bfried egg\b/.test(text) || /\bspring onions?\b/.test(text) || /\bmixed vegetables?\b/.test(text)))) {
+    return "fried rice"
+  }
+
+  if ((/\bidli\b|\bidly\b/.test(text)) || ((/\bfermented rice dish\b/.test(text) || /\brice cakes?\b/.test(text)) && (/\bsambar\b/.test(text) || /\bchutney\b/.test(text)))) {
+    return "idli with sambar"
   }
 
   if (
     /\bbiryani\b/.test(text)
     || (/\brice\b/.test(text) && /\bfried onions?\b/.test(text) && /\byoghurt\b/.test(text) && /\bcurry\b/.test(text))
     || (/\brice\b/.test(text) && /\bfried onions?\b/.test(text) && /\byog(?:h)?urt\b/.test(text) && (/\bchicken\b/.test(text) || /\bmeat\b/.test(text) || /\blamb\b/.test(text)))
+    || (/\bbasmati rice\b/.test(text) && /\byog(?:h)?urt\b/.test(text) && (/\bchicken\b/.test(text) || /\bmeat\b/.test(text) || /\blamb\b/.test(text)))
   ) {
     return "biryani"
   }
@@ -432,7 +446,15 @@ function inferPhotoDishCluster(analysis = {}, breakdown = []) {
   if (
     /\bcurry\b/.test(text)
     && /\bchicken\b/.test(text)
-    && (/\bnaan\b/.test(text) || /\broti\b/.test(text) || /\bflatbread\b/.test(text) || /\bunleavened bread\b/.test(text) || /\brice\b/.test(text))
+    && (/\bnaan\b/.test(text) || /\broti\b/.test(text) || /\bflatbread\b/.test(text) || /\bunleavened bread\b/.test(text) || /\brice\b/.test(text) || /\bcoriander\b/.test(text) || /\bherbs?\b/.test(text))
+  ) {
+    return /\brice\b/.test(text) ? "butter chicken with rice" : "chicken curry"
+  }
+
+  if (
+    /\bchicken\b/.test(text)
+    && (/\bsauce\b/.test(text) || /\bcreamy\b/.test(text))
+    && (/\brice\b/.test(text) || /\bcoriander\b/.test(text) || /\bherbs?\b/.test(text))
   ) {
     return /\brice\b/.test(text) ? "butter chicken with rice" : "chicken curry"
   }
