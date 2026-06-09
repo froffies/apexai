@@ -91,7 +91,7 @@ const foodLookupCacheMaxEntries = Number(process.env.FOOD_LOOKUP_CACHE_MAX_ENTRI
 const foodLookupCache = new Map()
 const auditCapabilities = coachAuditCapabilities(adminSupabase)
 const defaultRequestBodyLimitBytes = 1_000_000
-const photoRequestBodyLimitBytes = 10_000_000
+const photoRequestBodyLimitBytes = 20_000_000
 
 const coachResponseSchema = {
   type: "object",
@@ -788,7 +788,7 @@ function validateNutritionChefBody(body) {
 
 function validateNutritionPhotoBody(body) {
   assertObject(body, "request body")
-  assertString(body.imageDataUrl, "imageDataUrl", 8_000_000)
+  assertString(body.imageDataUrl, "imageDataUrl", 15_000_000)
   if (!/^data:image\/[a-z0-9.+-]+;base64,/i.test(String(body.imageDataUrl || ""))) {
     const error = new Error("imageDataUrl must be a base64 image data URL")
     error.status = 400
