@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { verifiedFoods } from "../src/lib/nutritionDatabase.js"
+import { searchPhotoReferenceFoods, verifiedFoods } from "../src/lib/nutritionDatabase.js"
 import { buildFoodPhotoEstimate, normalizeFoodPhotoAnalysis } from "../server/nutritionPhotoAnalysis.mjs"
 
 test("normalizeFoodPhotoAnalysis builds clean plate-photo item labels", () => {
@@ -141,6 +141,144 @@ test("buildFoodPhotoEstimate keeps multi-item verified photos auto-fillable when
   assert.equal(estimate.can_autofill, true)
   assert.equal(estimate.needs_review, false)
   assert.equal(estimate.breakdown.every((item) => Number.isFinite(item.calories)), true)
+})
+
+test("buildFoodPhotoEstimate can auto-fill from a curated photo dish profile for complex meals", async () => {
+  const estimate = await buildFoodPhotoEstimate({
+    items: [
+      {
+        name: "veg biryani",
+        quantity: "1 bowl",
+        category: "food",
+        confidence: "high",
+      },
+    ],
+    portion: "1 bowl",
+    overall_confidence: "high",
+  }, {
+    mealType: "dinner",
+    lookupFoods: async () => [{
+      id: "photo_biryani",
+      name: "Biryani",
+      aliases: ["veg biryani"],
+      quantity: "1 bowl",
+      calories: 680,
+      protein_g: 19,
+      carbs_g: 92,
+      fat_g: 24,
+      category: "mixed meal",
+      source: "ApexAI curated plate-photo dish profile",
+      source_type: "photo_dish_profile",
+      macro_confidence: "medium",
+    }],
+  })
+
+  assert.ok(estimate.action)
+  assert.equal(estimate.can_autofill, true)
+  assert.equal(estimate.needs_review, false)
+  assert.equal(estimate.macro_confidence, "medium")
+})
+
+test("buildFoodPhotoEstimate can expand a complex summary into trusted component foods", async () => {
+  const estimate = await buildFoodPhotoEstimate({
+    summary: "A plate of pasta with tomato sauce and basil, accompanied by cherry tomatoes and grated cheese.",
+    items: [],
+    portion: "1 plate",
+    overall_confidence: "high",
+  }, {
+    mealType: "dinner",
+    lookupFoods: async (term) => {
+      if (term.includes("pasta")) return [{ ...verifiedFoods.find((food) => food.id === "pasta_cooked_200g") }]
+      if (term.includes("tomato sauce")) return [{ ...verifiedFoods.find((food) => food.id === "tomato_pasta_sauce_125g") }]
+      if (term.includes("basil")) return [{ ...verifiedFoods.find((food) => food.id === "basil_5g") }]
+      if (term.includes("cherry tomato")) return [{ ...verifiedFoods.find((food) => food.id === "cherry_tomatoes_100g") }]
+      if (term.includes("grated cheese")) return [{ ...verifiedFoods.find((food) => food.id === "cheese_grated_15g") }]
+      return []
+    },
+  })
+
+  assert.ok(estimate.action)
+  assert.equal(estimate.can_autofill, true)
+  assert.equal(estimate.needs_review, false)
+  assert.match(estimate.analysis.summary, /pasta/i)
+  assert.ok(estimate.breakdown.length >= 3)
+})
+
+test("buildFoodPhotoEstimate recovers summary-only burgers as plated dish matches instead of broken components", async () => {
+  const estimate = await buildFoodPhotoEstimate({
+    summary: "A wholemeal burger with grilled meat, tomato, onion, and cucumber.",
+    items: [],
+    portion: "1 plate",
+    overall_confidence: "high",
+  }, {
+    mealType: "lunch",
+    lookupFoods: async (term) => searchPhotoReferenceFoods(term),
+  })
+
+  assert.ok(estimate.action)
+  assert.equal(estimate.can_autofill, true)
+  assert.equal(estimate.needs_review, false)
+  assert.match(String(estimate.action?.food_name || ""), /burger/i)
+  assert.ok(estimate.breakdown.every((item) => item.source_type !== "estimated_internal_profile"))
+
+  const burgerWithFries = await buildFoodPhotoEstimate({
+    summary: "1 serve cheeseburger with melted cheese and pickles alongside a serving of fries",
+    items: [],
+    portion: "1 plate",
+    overall_confidence: "high",
+  }, {
+    mealType: "lunch",
+    lookupFoods: async (term) => searchPhotoReferenceFoods(term),
+  })
+
+  assert.ok(burgerWithFries.action)
+  assert.equal(burgerWithFries.can_autofill, true)
+  assert.equal(burgerWithFries.needs_review, false)
+  assert.match(String(burgerWithFries.action?.food_name || ""), /burger/i)
+})
+
+test("buildFoodPhotoEstimate can auto-fill obvious pizza and samosa photo dishes", async () => {
+  const samosaEstimate = await buildFoodPhotoEstimate({
+    items: [
+      {
+        name: "deep-fried samosas",
+        quantity: "1 serve",
+        category: "food",
+        confidence: "high",
+      },
+    ],
+    portion: "1 serve",
+    overall_confidence: "high",
+  }, {
+    mealType: "snack",
+    lookupFoods: async (term) => searchPhotoReferenceFoods(term),
+  })
+
+  assert.ok(samosaEstimate.action)
+  assert.equal(samosaEstimate.can_autofill, true)
+  assert.equal(samosaEstimate.needs_review, false)
+  assert.equal(samosaEstimate.breakdown[0]?.source_type, "photo_dish_profile")
+
+  const pizzaEstimate = await buildFoodPhotoEstimate({
+    items: [
+      {
+        name: "pepperoni pizza",
+        quantity: "2 slices",
+        category: "food",
+        confidence: "high",
+      },
+    ],
+    portion: "1 plate",
+    overall_confidence: "high",
+  }, {
+    mealType: "dinner",
+    lookupFoods: async (term) => searchPhotoReferenceFoods(term),
+  })
+
+  assert.ok(pizzaEstimate.action)
+  assert.equal(pizzaEstimate.can_autofill, true)
+  assert.equal(pizzaEstimate.needs_review, false)
+  assert.equal(pizzaEstimate.breakdown[0]?.source_type, "photo_dish_profile")
 })
 
 test("normalizeFoodPhotoAnalysis infers high overall confidence from a single high-confidence item", () => {

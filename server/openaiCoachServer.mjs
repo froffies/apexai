@@ -29,6 +29,7 @@ import {
 } from "./coachLoggingRules.mjs"
 import { normalizeCoachResponse } from "./normalizeCoachResponse.mjs"
 import { buildFoodPhotoEstimate } from "./nutritionPhotoAnalysis.mjs"
+import { normalizeVisionImageDataUrl } from "./visionImagePrep.mjs"
 
 function loadDotEnv() {
   const envPath = path.join(process.cwd(), ".env")
@@ -89,6 +90,8 @@ const foodLookupCacheTtlMs = Number(process.env.FOOD_LOOKUP_CACHE_TTL_MS || 15 *
 const foodLookupCacheMaxEntries = Number(process.env.FOOD_LOOKUP_CACHE_MAX_ENTRIES || 200)
 const foodLookupCache = new Map()
 const auditCapabilities = coachAuditCapabilities(adminSupabase)
+const defaultRequestBodyLimitBytes = 1_000_000
+const photoRequestBodyLimitBytes = 10_000_000
 
 const coachResponseSchema = {
   type: "object",
@@ -473,28 +476,40 @@ function checkRateLimit(request) {
   }
 }
 
-function readRequestBody(request) {
+function readRequestBody(request, maxBytes = defaultRequestBodyLimitBytes) {
   return new Promise((resolve, reject) => {
     let body = ""
+    let settled = false
+
+    function rejectOnce(error) {
+      if (settled) return
+      settled = true
+      reject(error)
+    }
+
     request.on("data", (chunk) => {
+      if (settled) return
       body += chunk
-      if (body.length > 1_000_000) {
+      if (body.length > maxBytes) {
         const error = new Error("Request body too large")
         error.status = 413
-        reject(error)
-        request.destroy()
+        rejectOnce(error)
       }
     })
     request.on("end", () => {
+      if (settled) return
       try {
+        settled = true
         resolve(body ? JSON.parse(body) : {})
       } catch {
         const error = new Error("Invalid JSON request body")
         error.status = 400
-        reject(error)
+        rejectOnce(error)
       }
     })
-    request.on("error", reject)
+    request.on("error", (error) => {
+      rejectOnce(error)
+    })
   })
 }
 
@@ -1870,7 +1885,7 @@ async function handleNutritionSearch(request, response) {
 
 async function handleNutritionPhoto(request, response) {
   await verifyRequestAuth(request)
-  const body = await readRequestBody(request)
+  const body = await readRequestBody(request, photoRequestBodyLimitBytes)
   validateNutritionPhotoBody(body)
 
   if (!visionClient) {
@@ -1884,6 +1899,7 @@ async function handleNutritionPhoto(request, response) {
     locale: String(body.locale || "AU").trim() || "AU",
     meal_type: String(body.mealType || "").trim(),
   }
+  const normalizedImageDataUrl = await normalizeVisionImageDataUrl(String(body.imageDataUrl || ""))
 
   let completion
   try {
@@ -1903,7 +1919,7 @@ async function handleNutritionPhoto(request, response) {
             {
               type: "image_url",
               image_url: {
-                url: String(body.imageDataUrl || ""),
+                url: normalizedImageDataUrl,
                 detail: "low",
               },
             },

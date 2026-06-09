@@ -1,10 +1,12 @@
 import assert from "node:assert/strict"
+import crypto from "node:crypto"
 import fs from "node:fs/promises"
 import http from "node:http"
 import os from "node:os"
 import path from "node:path"
 import { spawn } from "node:child_process"
 import test from "node:test"
+import sharp from "sharp"
 
 const cwd = process.cwd()
 const serverEntry = path.join(cwd, "server", "openaiCoachServer.mjs")
@@ -2232,6 +2234,96 @@ test("nutrition photo route retries transient upstream failures before giving up
   assert.equal(attemptCount, 3)
   assert.equal(nutritionPhoto.has_trusted_macros, true)
   assert.equal(Number(nutritionPhoto.calories), 105)
+})
+
+test("nutrition photo route accepts large image payloads and normalizes them before the vision request", async (t) => {
+  let upstreamImageUrlLength = 0
+  const fakeOpenAIBaseUrl = await startFakeOpenAIServer(t, async (_request, response, rawBody) => {
+    const requestBody = JSON.parse(rawBody || "{}")
+    upstreamImageUrlLength = String(
+      requestBody?.messages?.[1]?.content?.find?.((part) => part?.type === "image_url")?.image_url?.url || ""
+    ).length
+    response.writeHead(200, { "Content-Type": "application/json" })
+    response.end(JSON.stringify({
+      id: "chatcmpl_large_photo_test",
+      object: "chat.completion",
+      created: 1,
+      model: "gpt-4o-mini",
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: "assistant",
+            content: JSON.stringify({
+              summary: "Pepperoni pizza",
+              portion: "1 plate",
+              overall_confidence: "high",
+              needs_clarification: false,
+              clarification_question: "",
+              assumptions: [],
+              items: [
+                {
+                  name: "pepperoni pizza",
+                  quantity: "2 slices",
+                  category: "food",
+                  preparation: "",
+                  confidence: "high",
+                  notes: "",
+                },
+              ],
+            }),
+          },
+          finish_reason: "stop",
+        },
+      ],
+    }))
+  })
+
+  const port = randomPort()
+  const serverProcess = spawn(process.execPath, [serverEntry], {
+    cwd,
+    env: {
+      ...process.env,
+      OPENAI_COACH_PORT: String(port),
+      OPENAI_COACH_REQUIRE_AUTH: "false",
+      OPENAI_COACH_CORS_ORIGIN: "http://127.0.0.1:5173",
+      OPENFOODFACTS_ENABLED: "false",
+      OPENAI_API_KEY: "test-key",
+      OPENAI_BASE_URL: fakeOpenAIBaseUrl,
+      OPENAI_VISION_API_KEY: "test-vision-key",
+      OPENAI_VISION_BASE_URL: fakeOpenAIBaseUrl,
+      NODE_ENV: "production",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  })
+
+  t.after(async () => {
+    serverProcess.kill()
+  })
+
+  await waitForHealth(port)
+
+  const noisyPixels = crypto.randomBytes(1000 * 1000 * 3)
+  const largePng = await sharp(noisyPixels, {
+    raw: { width: 1000, height: 1000, channels: 3 },
+  }).png({ compressionLevel: 0 }).toBuffer()
+  const originalDataUrl = `data:image/png;base64,${largePng.toString("base64")}`
+  assert.ok(originalDataUrl.length > 1_000_000)
+
+  const nutritionPhotoResponse = await fetch(`http://127.0.0.1:${port}/api/nutrition/analyze-photo`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Origin: "http://127.0.0.1:5173",
+    },
+    body: JSON.stringify({ imageDataUrl: originalDataUrl }),
+  })
+  const nutritionPhoto = await nutritionPhotoResponse.json()
+  assert.equal(nutritionPhotoResponse.status, 200)
+  assert.equal(nutritionPhoto.needs_review, false)
+  assert.match(String(nutritionPhoto.food_name || ""), /pizza/i)
+  assert.ok(upstreamImageUrlLength > 0)
+  assert.ok(upstreamImageUrlLength < originalDataUrl.length)
 })
 
 test("nutrition photo route surfaces quota exhaustion clearly when the vision upstream is out of credits", async (t) => {

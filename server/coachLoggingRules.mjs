@@ -149,12 +149,6 @@ function chooseBestCandidate(item, candidateFoodMatches = {}) {
       candidates.push(match)
     }
   }
-  for (const [key, matches] of Object.entries(candidateFoodMatches || {})) {
-    if (keys.includes(String(key).toLowerCase())) continue
-    for (const match of safeArray(matches, 4)) {
-      candidates.push(match)
-    }
-  }
 
   let best = null
   let bestScore = -1

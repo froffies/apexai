@@ -4,6 +4,7 @@ const auSource = "Australian Food Composition Database / FSANZ AFCD Release 3, c
 const auDerivedSource = "Australian Food Composition Database / FSANZ AFCD Release 3 reference values, scaled to a common serve"
 const nzSource = "New Zealand Food Composition Database / FOODfiles Concise Tables 14th Edition, curated local catalogue"
 const estimatedSource = "ApexAI internal meal profile estimate"
+const photoDishSource = "ApexAI curated plate-photo dish profile"
 
 function curatedFood(food, { source, sourceType }) {
   return {
@@ -29,6 +30,15 @@ function derivedFood(food) {
     source: auDerivedSource,
     source_type: "curated_au_catalogue",
     macro_confidence: "high",
+  }
+}
+
+function photoDishFood(food) {
+  return {
+    ...food,
+    source: photoDishSource,
+    source_type: "photo_dish_profile",
+    macro_confidence: "medium",
   }
 }
 
@@ -174,6 +184,26 @@ const auDerivedFoods = [
   { id: "toast_2", name: "2 slices wholemeal toast", aliases: ["2 toast", "2 slices toast"], quantity: "2 slices", calories: 188, protein_g: 8, carbs_g: 31, fat_g: 2.8, category: "carbs" },
   { id: "banana", name: "Banana", aliases: ["medium banana"], quantity: "1 medium", calories: 105, protein_g: 1.3, carbs_g: 27, fat_g: 0.4, category: "produce" },
   { id: "flat_white", name: "Large flat white", aliases: ["large flat white"], quantity: "large", calories: 155, protein_g: 8, carbs_g: 12, fat_g: 8, category: "drink" },
+  { id: "burger_bun", name: "Burger bun", aliases: ["hamburger bun", "bun", "bread roll"], quantity: "1 bun", calories: 190, protein_g: 6.4, carbs_g: 34.8, fat_g: 3.2, category: "carbs" },
+  { id: "beef_patty_grilled", name: "Grilled beef patty", aliases: ["beef patty", "burger patty", "grilled patty", "grilled beef patty"], quantity: "1 patty", calories: 250, protein_g: 24, carbs_g: 0, fat_g: 17, category: "protein" },
+  { id: "bacon_2_slices", name: "Cooked bacon", aliases: ["bacon", "cooked bacon", "2 slices bacon"], quantity: "2 slices", calories: 84, protein_g: 6, carbs_g: 0.2, fat_g: 6.6, category: "protein" },
+  { id: "cheddar_slice", name: "Cheddar cheese slice", aliases: ["cheese slice", "slice cheddar cheese"], quantity: "1 slice", calories: 80, protein_g: 5, carbs_g: 0.1, fat_g: 6.6, category: "dairy" },
+  { id: "lettuce_leaf", name: "Lettuce leaf", aliases: ["lettuce", "leaf lettuce"], quantity: "1 leaf", calories: 1, protein_g: 0.1, carbs_g: 0.2, fat_g: 0, category: "produce" },
+  { id: "tomato_2_slices", name: "Tomato slices", aliases: ["tomato", "sliced tomato", "2 slices tomato", "cherry tomatoes"], quantity: "2 slices", calories: 4, protein_g: 0.2, carbs_g: 0.9, fat_g: 0, category: "produce" },
+  { id: "onion_2_slices", name: "Onion slices", aliases: ["onion", "sliced onion", "2 slices onion"], quantity: "2 slices", calories: 6, protein_g: 0.1, carbs_g: 1.4, fat_g: 0, category: "produce" },
+  { id: "capsicum_2_slices", name: "Capsicum slices", aliases: ["capsicum", "green capsicum", "red capsicum", "sliced capsicum", "2 slices capsicum"], quantity: "2 slices", calories: 5, protein_g: 0.2, carbs_g: 1.1, fat_g: 0, category: "produce" },
+  { id: "pickle_4_slices", name: "Pickle slices", aliases: ["pickles", "pickle", "gherkin", "4 slices pickle"], quantity: "4 slices", calories: 3, protein_g: 0.1, carbs_g: 0.6, fat_g: 0, category: "produce" },
+  { id: "mustard_tsp", name: "Mustard", aliases: ["mustard", "1 teaspoon mustard"], quantity: "1 teaspoon", calories: 4, protein_g: 0.2, carbs_g: 0.3, fat_g: 0.2, category: "pantry" },
+  { id: "basil_5g", name: "Fresh basil", aliases: ["basil", "fresh basil"], quantity: "5g", calories: 1, protein_g: 0.2, carbs_g: 0.1, fat_g: 0, category: "produce" },
+  { id: "coriander_10g", name: "Fresh coriander", aliases: ["coriander", "coriander garnish"], quantity: "10g", calories: 2, protein_g: 0.2, carbs_g: 0.4, fat_g: 0, category: "produce" },
+  { id: "hot_chips_small", name: "Hot chips", aliases: ["fries", "chips", "hot chips", "small fries"], quantity: "1 small serve", calories: 260, protein_g: 3.4, carbs_g: 34, fat_g: 12, category: "carbs" },
+  { id: "naan_piece", name: "Plain naan", aliases: ["naan", "naan bread", "1 piece naan bread"], quantity: "1 piece", calories: 285, protein_g: 9, carbs_g: 50, fat_g: 6, category: "carbs" },
+  { id: "pasta_cooked_200g", name: "Cooked pasta", aliases: ["pasta", "spaghetti", "fettuccine", "plain pasta"], quantity: "200g", calories: 274, protein_g: 10.6, carbs_g: 52.4, fat_g: 0.8, category: "carbs" },
+  { id: "tomato_pasta_sauce_125g", name: "Tomato pasta sauce", aliases: ["tomato sauce", "pasta sauce", "tomato pasta sauce"], quantity: "125g", calories: 60, protein_g: 1.8, carbs_g: 11.5, fat_g: 1.2, category: "pantry" },
+  { id: "cheese_grated_15g", name: "Grated cheese", aliases: ["grated cheese", "shredded cheese", "parmesan", "parmesan cheese", "grated parmesan"], quantity: "15g", calories: 61, protein_g: 3.7, carbs_g: 0.1, fat_g: 5, category: "dairy" },
+  { id: "cherry_tomatoes_100g", name: "Cherry tomatoes", aliases: ["cherry tomatoes", "fresh tomatoes"], quantity: "100g", calories: 18, protein_g: 0.9, carbs_g: 3.9, fat_g: 0.2, category: "produce" },
+  { id: "chicken_curry_200g", name: "Cooked chicken curry", aliases: ["chicken curry", "cooked chicken curry", "butter chicken", "chicken in sauce"], quantity: "200g", calories: 360, protein_g: 28, carbs_g: 14, fat_g: 20, category: "mixed meal" },
+  { id: "rice_cooked_200g", name: "Cooked rice", aliases: ["cooked rice", "rice"], quantity: "200g", calories: 316, protein_g: 6.2, carbs_g: 69.4, fat_g: 0.4, category: "carbs" },
 ].map(derivedFood)
 
 const estimatedFoods = [
@@ -185,6 +215,20 @@ const estimatedFoods = [
   { id: "lean_beef_bowl", name: "Lean beef burrito bowl", aliases: ["lean beef bowl", "beef burrito bowl"], quantity: "1 bowl", calories: 720, protein_g: 52, carbs_g: 78, fat_g: 22, category: "mixed meal" },
   { id: "tuna_rice", name: "Tuna and rice", aliases: ["tuna rice", "tuna and rice"], quantity: "1 bowl", calories: 465, protein_g: 39, carbs_g: 58, fat_g: 8, category: "protein" },
 ].map(estimatedFood)
+
+const photoDishProfiles = [
+  { id: "photo_burger", name: "Burger", aliases: ["burger", "wholemeal burger", "cheeseburger", "burger with egg", "burger with bacon", "grilled burger"], quantity: "1 burger", calories: 650, protein_g: 32, carbs_g: 45, fat_g: 38, category: "mixed meal" },
+  { id: "photo_burger_with_fries", name: "Burger with fries", aliases: ["burger with fries", "burger and fries", "cheeseburger with fries", "burger served with fries"], quantity: "1 burger + small fries", calories: 910, protein_g: 35, carbs_g: 82, fat_g: 50, category: "mixed meal" },
+  { id: "photo_butter_chicken_rice", name: "Butter chicken with rice", aliases: ["butter chicken", "butter chicken with rice", "chicken curry with rice"], quantity: "1 bowl", calories: 760, protein_g: 34, carbs_g: 74, fat_g: 34, category: "mixed meal" },
+  { id: "photo_pasta_tomato", name: "Pasta with tomato sauce", aliases: ["pasta with tomato sauce", "spaghetti with tomato sauce", "pasta"], quantity: "1 plate", calories: 420, protein_g: 14, carbs_g: 70, fat_g: 9, category: "mixed meal" },
+  { id: "photo_fried_rice", name: "Fried rice", aliases: ["fried rice"], quantity: "1 plate", calories: 620, protein_g: 17, carbs_g: 86, fat_g: 21, category: "mixed meal" },
+  { id: "photo_biryani", name: "Biryani", aliases: ["biryani", "veg biryani", "vegetable biryani", "chicken biryani"], quantity: "1 bowl", calories: 680, protein_g: 19, carbs_g: 92, fat_g: 24, category: "mixed meal" },
+  { id: "photo_samosa", name: "Samosas", aliases: ["samosa", "samosas", "fried samosa", "fried samosas", "deep fried samosa", "deep fried samosas"], quantity: "1 serve", calories: 320, protein_g: 7, carbs_g: 36, fat_g: 16, category: "snack" },
+  { id: "photo_dosa", name: "Dosa", aliases: ["dosa", "dosas"], quantity: "1 serve", calories: 340, protein_g: 8, carbs_g: 52, fat_g: 11, category: "mixed meal" },
+  { id: "photo_idli_sambar", name: "Idli with sambar", aliases: ["idli", "idly", "idli with sambar"], quantity: "1 serve", calories: 330, protein_g: 10, carbs_g: 58, fat_g: 6, category: "mixed meal" },
+  { id: "photo_macarons", name: "Macarons", aliases: ["macaron", "macarons"], quantity: "5 pieces", calories: 360, protein_g: 6, carbs_g: 46, fat_g: 17, category: "dessert" },
+  { id: "photo_pizza", name: "Pizza", aliases: ["pizza", "pepperoni pizza", "pizza slice", "slice of pizza", "slice of pepperoni pizza"], quantity: "2 slices", calories: 570, protein_g: 24, carbs_g: 60, fat_g: 25, category: "mixed meal" },
+].map(photoDishFood)
 
 export const verifiedFoods = [...auDerivedFoods, ...auVerifiedFoods, ...nzVerifiedFoods, ...estimatedFoods]
 
@@ -211,6 +255,7 @@ function namesForFood(food) {
 function sourceRank(food) {
   if (food.source_type === "curated_au_catalogue") return 4
   if (food.source_type === "nz_curated_catalogue") return 3
+  if (food.source_type === "photo_dish_profile") return 2.5
   if (food.source_type === "barcode_label" || food.source_type === "open_food_facts_label") return 2
   return 1
 }
@@ -278,7 +323,7 @@ function simplifyPhotoSearchQuery(query = "") {
 
   const simplified = normalizedQuery
     .replace(/\b\d+(?:\.\d+)?\s*(?:kg|g|oz|lb|lbs|ml|l|pieces?|piece|serves?|servings?|bowls?|plates?|cups?|slices?)\b/g, " ")
-    .replace(/\b(?:ripe|fresh|plain|cooked|steamed|fried|grilled|baked|boiled|poached|scrambled|toasted|roasted|crispy|creamy|mixed|wholemeal|wholegrain|garnish|garnished|served|serving|slice|slices|piece|pieces|plate|bowl|glass|cup)\b/g, " ")
+    .replace(/\b(?:ripe|fresh|plain|cooked|steamed|fried|grilled|baked|boiled|poached|scrambled|toasted|roasted|crispy|creamy|mixed|wholemeal|wholegrain|garnish|garnished|served|serving|slice|slices|piece|pieces|plate|bowl|glass|cup|deep|featuring|drizzle|dipping)\b/g, " ")
     .replace(/\s+/g, " ")
     .trim()
 
@@ -322,9 +367,20 @@ export function searchVerifiedFoods(query) {
 
 export function searchPhotoReferenceFoods(query) {
   const variants = [...new Set([query, simplifyPhotoSearchQuery(query)].filter(Boolean))]
-  const ranked = variants
+  const baseMatches = variants
     .flatMap((variant) => searchVerifiedFoods(variant))
     .filter((food, index, all) => !isEstimatedSourceType(food.source_type) && all.findIndex((entry) => entry.id === food.id) === index)
+  const shouldIncludeDishProfiles = looksLikeCompositePhotoQuery(query) || baseMatches.length <= 2
+  const dishMatches = shouldIncludeDishProfiles
+    ? variants
+      .flatMap((variant) => photoDishProfiles
+        .map((food) => ({ food, score: scoreFoodMatch(variant, food) }))
+        .filter((entry) => entry.score > 0)
+        .sort((left, right) => right.score - left.score || left.food.name.localeCompare(right.food.name))
+        .map((entry) => entry.food))
+      .filter((food, index, all) => all.findIndex((entry) => entry.id === food.id) === index)
+    : []
+  const ranked = [...baseMatches, ...dishMatches].filter((food, index, all) => all.findIndex((entry) => entry.id === food.id) === index)
   if (!ranked.length) return []
 
   const targetCategories = inferPhotoTargetCategories(query)

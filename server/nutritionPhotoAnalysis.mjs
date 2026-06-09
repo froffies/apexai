@@ -7,6 +7,8 @@ import {
 
 const PHOTO_CONFIDENCE_LEVELS = new Set(["high", "medium", "low"])
 const PHOTO_VERIFIED_SOURCE_TYPES = new Set(["curated_au_catalogue", "nz_curated_catalogue"])
+const PHOTO_DEFENSIBLE_SOURCE_TYPES = new Set(["curated_au_catalogue", "nz_curated_catalogue", "photo_dish_profile"])
+const LOW_IMPACT_PHOTO_TERMS = ["lettuce", "tomato", "onion", "capsicum", "pickle", "mustard", "basil", "coriander", "sauce", "herb"]
 
 function cleanText(value = "") {
   return String(value || "").trim().replace(/\s+/g, " ")
@@ -85,6 +87,9 @@ function inferPhotoFoodNameFromAssumptions(assumptions = []) {
 function parseSimpleSummaryItem(summary = "", assumptions = []) {
   const text = cleanText(summary).replace(/[.!?]+$/g, "")
   if (!text) return null
+  if (/[,:]/.test(text) || /\b(?:with|and|served|accompanied|alongside|topped|featuring|plus)\b/i.test(text)) {
+    return null
+  }
 
   const singlePatterns = [
     /^(?:a\s+single|single|one|1)\s+([A-Za-z][A-Za-z\s'-]+)$/i,
@@ -109,9 +114,169 @@ function parseSimpleSummaryItem(summary = "", assumptions = []) {
   return null
 }
 
+function defaultQuantityForSummaryTerm(term = "", summaryText = "") {
+  const normalized = cleanText(term).toLowerCase()
+  const summary = cleanText(summaryText).toLowerCase()
+  if (!normalized) return "1 serve"
+  if (/^\d/.test(normalized)) return normalized
+  if (normalized.includes("burger with fries")) return "1 burger + small fries"
+  if (normalized.includes("burger")) return "1 burger"
+  if (normalized.includes("bun")) return "1 bun"
+  if (normalized.includes("patty")) return "1 patty"
+  if (normalized.includes("pizza")) {
+    const sliceMatch = summary.match(/(\d+)\s*slices?\b/i)
+    return sliceMatch ? `${sliceMatch[1]} slices` : "2 slices"
+  }
+  if (normalized.includes("fries") || normalized.includes("chips")) return "1 small serve"
+  if (normalized.includes("samosa")) {
+    const countMatch = summary.match(/(\d+)\s*(?:pieces?|samosas?)\b/i)
+    return countMatch ? `${countMatch[1]} pieces` : "1 serve"
+  }
+  if (normalized.includes("bacon")) return "2 slices"
+  if (normalized.includes("cheese")) return normalized.includes("grated") ? "15g" : "1 slice"
+  if (normalized.includes("lettuce")) return "1 leaf"
+  if (normalized.includes("tomato sauce")) return "125g"
+  if (normalized.includes("tomato")) return normalized.includes("cherry") ? "100g" : "2 slices"
+  if (normalized.includes("onion")) return "2 slices"
+  if (normalized.includes("capsicum")) return "2 slices"
+  if (normalized.includes("pickle")) return "4 slices"
+  if (normalized.includes("mustard")) return "1 teaspoon"
+  if (normalized.includes("basil")) return "5g"
+  if (normalized.includes("coriander")) return "10g"
+  if (normalized.includes("naan")) return "1 piece"
+  if (normalized.includes("pasta") || normalized.includes("spaghetti") || normalized.includes("fettuccine")) return "200g"
+  if (normalized.includes("rice")) return "200g"
+  if (normalized.includes("yoghurt") || normalized.includes("yogurt")) return "100g"
+  if (normalized.includes("chicken curry") || normalized.includes("butter chicken") || normalized.includes("chicken in sauce")) return "200g"
+  if (normalized.includes("biryani")) return "1 bowl"
+  if (normalized.includes("dosa")) return "1 serve"
+  if (normalized.includes("idli")) return "1 serve"
+  return "1 serve"
+}
+
+function parseNamedPhotoDishFromSummary(summary = "", assumptions = []) {
+  const text = cleanText(summary).replace(/[.!?]+$/g, "")
+  if (!text) return null
+
+  const normalized = text.toLowerCase()
+  const rule = [
+    {
+      pattern: /\b(?:pepperoni\s+)?pizza\b/i,
+      resolveName() {
+        return normalized.includes("pepperoni") ? "pepperoni pizza" : "pizza"
+      },
+    },
+    {
+      pattern: /\bcheeseburger\b/i,
+      resolveName() {
+        return normalized.includes("fries") ? "cheeseburger with fries" : "cheeseburger"
+      },
+    },
+    {
+      pattern: /\bburger\b/i,
+      resolveName() {
+        if (normalized.includes("fries")) return "burger with fries"
+        if (normalized.includes("wholemeal burger")) return "wholemeal burger"
+        return "burger"
+      },
+    },
+    {
+      pattern: /\bbutter chicken\b/i,
+      resolveName() {
+        return normalized.includes("rice") ? "butter chicken with rice" : "butter chicken"
+      },
+    },
+    {
+      pattern: /\bchicken curry\b/i,
+      resolveName() {
+        return normalized.includes("rice") ? "chicken curry with rice" : "chicken curry"
+      },
+    },
+    {
+      pattern: /\bbiryani\b/i,
+      resolveName() {
+        if (normalized.includes("vegetable") || normalized.includes("veg")) return "veg biryani"
+        if (normalized.includes("chicken")) return "chicken biryani"
+        return "biryani"
+      },
+    },
+    {
+      pattern: /\b(?:deep\s+fried\s+|fried\s+)?samosa(?:s)?\b/i,
+      resolveName() {
+        return "samosas"
+      },
+    },
+    {
+      pattern: /\bdosa(?:s)?\b/i,
+      resolveName() {
+        return "dosa"
+      },
+    },
+    {
+      pattern: /\bidli(?:s)?\b/i,
+      resolveName() {
+        return normalized.includes("sambar") ? "idli with sambar" : "idli"
+      },
+    },
+  ].find((candidate) => candidate.pattern.test(normalized))
+
+  if (!rule) return null
+
+  const name = cleanText(rule.resolveName())
+  if (!name) return null
+
+  return {
+    id: "photo_item_1",
+    name: titleCase(name),
+    base_name: singularizeFoodName(name),
+    quantity: defaultQuantityForSummaryTerm(name, text),
+    preparation: "",
+    category: "food",
+    confidence: assumptions.length ? "medium" : "low",
+    notes: "Recovered plated dish from summary text.",
+  }
+}
+
+function parseCompositeSummaryItems(summary = "", assumptions = []) {
+  const text = cleanText(summary).replace(/[.!?]+$/g, "")
+  if (!text) return []
+
+  const normalized = text
+    .replace(/^(?:a|an|the)\s+/i, "")
+    .replace(/^(?:plate|bowl|glass|cup|serving|serve)\s+of\s+/i, "")
+    .replace(/^(?:a|an)\s+(?:plate|bowl|glass|cup|serving|serve)\s+of\s+/i, "")
+    .replace(/\b(?:accompanied by|served with|topped with|with a side of|with)\b/gi, ",")
+    .replace(/\s+\band\b\s+/gi, ", ")
+
+  const parts = normalized
+    .split(",")
+    .map((part) => normalizePhotoFoodName(part))
+    .map((part) => stripLeadingArticle(part))
+    .map((part) => part.replace(/^(?:some|side of|portion of)\s+/i, "").trim())
+    .filter(Boolean)
+    .filter((part) => !/^(?:meal|food|plate|bowl|glass|cup)$/i.test(part))
+
+  if (parts.length < 2) return []
+
+  return parts.slice(0, 8).map((part, index) => {
+    const quantity = defaultQuantityForSummaryTerm(part, text)
+    return {
+      id: `photo_item_${index + 1}`,
+      name: titleCase(stripLeadingArticle(part)),
+      base_name: singularizeFoodName(part),
+      quantity,
+      preparation: "",
+      category: normalizeCategory(/(?:sauce|mustard|basil|coriander)/i.test(part) ? "ingredient" : "food"),
+      confidence: assumptions.length ? "medium" : "low",
+      notes: "Recovered from complex summary text.",
+    }
+  }).filter((item) => item.base_name)
+}
+
 function singularizeFoodName(value = "") {
   const normalized = stripLeadingArticle(value).toLowerCase()
   if (!normalized) return ""
+  if (normalized.endsWith("fries")) return normalized
   if (normalized.endsWith("ies")) return `${normalized.slice(0, -3)}y`
   if (normalized.endsWith("ses")) return normalized.slice(0, -2)
   if (normalized.endsWith("s") && !normalized.endsWith("ss")) return normalized.slice(0, -1)
@@ -153,8 +318,8 @@ function buildPhotoSourceSummary(breakdown = [], confidence = "low") {
 
   if (confidence === "medium") {
     return sources.length
-      ? `AI plate-photo estimate cross-checked against matched nutrition references and product labels: ${sources.join(" | ")}`
-      : "AI plate-photo estimate cross-checked against matched nutrition references and product labels."
+      ? `AI plate-photo estimate cross-checked against matched nutrition references and curated dish profiles: ${sources.join(" | ")}`
+      : "AI plate-photo estimate cross-checked against matched nutrition references and curated dish profiles."
   }
 
   return sources.length
@@ -165,8 +330,28 @@ function buildPhotoSourceSummary(breakdown = [], confidence = "low") {
 function deriveMacroConfidence(breakdown = []) {
   if (!breakdown.length) return "low"
   if (breakdown.every((item) => PHOTO_VERIFIED_SOURCE_TYPES.has(item.source_type))) return "high"
+  if (breakdown.every((item) => PHOTO_DEFENSIBLE_SOURCE_TYPES.has(item.source_type))) return "medium"
   if (breakdown.every((item) => item.source_type && item.source_type !== "estimated_internal_profile")) return "medium"
   return "low"
+}
+
+function isLowImpactEstimatedPhotoItem(item = {}) {
+  if (String(item.source_type || "").trim() !== "estimated_internal_profile") return false
+  const name = cleanText(item.name || item.matched_food_name || "").toLowerCase()
+  const category = cleanText(item.category || "").toLowerCase()
+  const calories = Number(item.calories || 0)
+  return (
+    calories <= 35
+    && (category === "ingredient" || category === "produce" || LOW_IMPACT_PHOTO_TERMS.some((term) => name.includes(term)))
+  )
+}
+
+function canAutofillPhotoEstimate(analysis, breakdown = [], macroConfidence = "low") {
+  if (analysis?.needs_clarification || analysis?.overall_confidence !== "high" || !breakdown.length) return false
+  if (macroConfidence === "high") return true
+  const substantiveItems = breakdown.filter((item) => !isLowImpactEstimatedPhotoItem(item))
+  if (!substantiveItems.length) return false
+  return substantiveItems.every((item) => PHOTO_DEFENSIBLE_SOURCE_TYPES.has(String(item.source_type || "").trim()))
 }
 
 function sanitizePhotoBreakdownItem(item = {}, includeMacros = false) {
@@ -216,7 +401,16 @@ export function normalizeFoodPhotoAnalysis(raw = {}) {
     })
     .filter((item) => item.base_name)
   const recoveredSummaryItem = items.length ? null : parseSimpleSummaryItem(value.summary || "", assumptions)
-  const normalizedItems = recoveredSummaryItem ? [recoveredSummaryItem] : items
+  const recoveredDishItem = !items.length && !recoveredSummaryItem ? parseNamedPhotoDishFromSummary(value.summary || "", assumptions) : null
+  const recoveredCompositeItems = !items.length && !recoveredSummaryItem && !recoveredDishItem ? parseCompositeSummaryItems(value.summary || "", assumptions) : []
+  const summaryExpandedItems = items.length === 1 ? parseCompositeSummaryItems(value.summary || "", assumptions) : []
+  const normalizedItems = recoveredSummaryItem
+    ? [recoveredSummaryItem]
+    : recoveredDishItem
+      ? [recoveredDishItem]
+    : recoveredCompositeItems.length
+      ? recoveredCompositeItems
+      : (summaryExpandedItems.length > 1 ? summaryExpandedItems : items)
 
   const summary = buildMealSummary(normalizedItems, value.summary || "")
   const portion = normalizeQuantity(value.portion || value.serving || "1 plate", "1 plate")
@@ -275,8 +469,8 @@ export async function buildFoodPhotoEstimate(raw = {}, options = {}) {
 
   const breakdownEstimate = estimateMealFromSession(mealSession, candidateFoodMatches)
   const macroConfidence = deriveMacroConfidence(breakdownEstimate.items)
-  const needsReview = analysis.needs_clarification || analysis.overall_confidence !== "high" || macroConfidence !== "high"
-  const canAutofill = !needsReview
+  const canAutofill = canAutofillPhotoEstimate(analysis, breakdownEstimate.items, macroConfidence)
+  const needsReview = !canAutofill
   const action = canAutofill
     ? buildDeterministicMealAction({
         mealSession,
