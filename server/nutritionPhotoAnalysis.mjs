@@ -68,6 +68,7 @@ function normalizePhotoFoodName(value = "") {
   return cleanText(value)
     .replace(/\bitem\s+\d+\b/gi, "")
     .replace(/^\d+\s*[\).\:-]\s*/g, "")
+    .replace(/^(?:\d+|a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+(?:(?:large|medium|small)\s+)?(?:(?:serves?|servings?|pieces?|slices?|bowls?|plates?|cups?|mugs?)\s+)?/i, "")
     .replace(/\s+/g, " ")
     .trim()
 }
@@ -347,7 +348,8 @@ function isLowImpactEstimatedPhotoItem(item = {}) {
 }
 
 function canAutofillPhotoEstimate(analysis, breakdown = [], macroConfidence = "low") {
-  if (analysis?.needs_clarification || analysis?.overall_confidence !== "high" || !breakdown.length) return false
+  if (analysis?.needs_clarification || !breakdown.length) return false
+  if (String(analysis?.overall_confidence || "").trim().toLowerCase() === "low") return false
   if (macroConfidence === "high") return true
   const substantiveItems = breakdown.filter((item) => !isLowImpactEstimatedPhotoItem(item))
   if (!substantiveItems.length) return false

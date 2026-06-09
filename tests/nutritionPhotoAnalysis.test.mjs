@@ -241,14 +241,14 @@ test("buildFoodPhotoEstimate can auto-fill obvious pizza and samosa photo dishes
   const samosaEstimate = await buildFoodPhotoEstimate({
     items: [
       {
-        name: "deep-fried samosas",
+        name: "five fried samosas",
         quantity: "1 serve",
         category: "food",
-        confidence: "high",
+        confidence: "medium",
       },
     ],
     portion: "1 serve",
-    overall_confidence: "high",
+    overall_confidence: "medium",
   }, {
     mealType: "snack",
     lookupFoods: async (term) => searchPhotoReferenceFoods(term),
@@ -265,11 +265,11 @@ test("buildFoodPhotoEstimate can auto-fill obvious pizza and samosa photo dishes
         name: "pepperoni pizza",
         quantity: "2 slices",
         category: "food",
-        confidence: "high",
+        confidence: "medium",
       },
     ],
     portion: "1 plate",
-    overall_confidence: "high",
+    overall_confidence: "medium",
   }, {
     mealType: "dinner",
     lookupFoods: async (term) => searchPhotoReferenceFoods(term),

@@ -12,7 +12,7 @@ const cwd = process.cwd()
 const serverEntry = path.join(cwd, "server", "openaiCoachServer.mjs")
 
 function randomPort() {
-  return 8800 + Math.floor(Math.random() * 500)
+  return crypto.randomInt(10_000, 55_000)
 }
 
 async function waitForHealth(port, timeoutMs = 15000) {
