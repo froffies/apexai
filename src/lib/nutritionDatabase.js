@@ -272,6 +272,19 @@ function looksLikeCompositePhotoQuery(query = "") {
   return /\b(?:and|with|bowl|plate|salad|burrito|sandwich|wrap|taco|burger|pizza|biryani|curry|fried rice|stir fry|pasta bake|dessert)\b/.test(normalizedQuery)
 }
 
+function simplifyPhotoSearchQuery(query = "") {
+  const normalizedQuery = normalize(query)
+  if (!normalizedQuery || looksLikeCompositePhotoQuery(normalizedQuery)) return normalizedQuery
+
+  const simplified = normalizedQuery
+    .replace(/\b\d+(?:\.\d+)?\s*(?:kg|g|oz|lb|lbs|ml|l|pieces?|piece|serves?|servings?|bowls?|plates?|cups?|slices?)\b/g, " ")
+    .replace(/\b(?:ripe|fresh|plain|cooked|steamed|fried|grilled|baked|boiled|poached|scrambled|toasted|roasted|crispy|creamy|mixed|wholemeal|wholegrain|garnish|garnished|served|serving|slice|slices|piece|pieces|plate|bowl|glass|cup)\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+
+  return simplified || normalizedQuery
+}
+
 function foodLooksCompositeForPhoto(food = {}) {
   return namesForFood(food).some((name) => /\b(?:and|with|bowl|plate|salad|burrito|sandwich|wrap|taco|burger|pizza|biryani|curry|fried rice|stir fry|dessert)\b/.test(normalize(name)))
 }
@@ -308,7 +321,10 @@ export function searchVerifiedFoods(query) {
 }
 
 export function searchPhotoReferenceFoods(query) {
-  const ranked = searchVerifiedFoods(query).filter((food) => !isEstimatedSourceType(food.source_type))
+  const variants = [...new Set([query, simplifyPhotoSearchQuery(query)].filter(Boolean))]
+  const ranked = variants
+    .flatMap((variant) => searchVerifiedFoods(variant))
+    .filter((food, index, all) => !isEstimatedSourceType(food.source_type) && all.findIndex((entry) => entry.id === food.id) === index)
   if (!ranked.length) return []
 
   const targetCategories = inferPhotoTargetCategories(query)

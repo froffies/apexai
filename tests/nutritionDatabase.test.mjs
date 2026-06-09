@@ -8,6 +8,10 @@ test("searchPhotoReferenceFoods prefers plain staple foods for simple photo term
   assert.ok(riceMatches.length > 0)
   assert.match(riceMatches[0].name, /^Rice,/)
   assert.equal(/Rice Bubbles/i.test(riceMatches[0].name), false)
+
+  const bananaMatches = searchPhotoReferenceFoods("ripe banana")
+  assert.ok(bananaMatches.length > 0)
+  assert.match(bananaMatches[0].name, /Banana/i)
 })
 
 test("searchPhotoReferenceFoods excludes estimated mixed-meal profiles for photo queries", () => {
