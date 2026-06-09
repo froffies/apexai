@@ -281,6 +281,47 @@ test("buildFoodPhotoEstimate can auto-fill obvious pizza and samosa photo dishes
   assert.equal(pizzaEstimate.breakdown[0]?.source_type, "photo_dish_profile")
 })
 
+test("buildFoodPhotoEstimate keeps dish confidence when the model omits the item name", async () => {
+  const samosaEstimate = await buildFoodPhotoEstimate({
+    summary: "Five fried samosas.",
+    items: [
+      { quantity: "5 pieces", category: "food", preparation: "fried", confidence: "high" },
+    ],
+    portion: "1 plate",
+    assumptions: [],
+    needs_clarification: false,
+    clarification_question: "",
+  }, {
+    mealType: "snack",
+    lookupFoods: async (term) => searchPhotoReferenceFoods(term),
+  })
+
+  assert.ok(samosaEstimate.action)
+  assert.equal(samosaEstimate.can_autofill, true)
+  assert.equal(samosaEstimate.needs_review, false)
+  assert.equal(samosaEstimate.macro_confidence, "medium")
+  assert.equal(samosaEstimate.breakdown[0]?.source_type, "photo_dish_profile")
+
+  const pastryEstimate = await buildFoodPhotoEstimate({
+    summary: "Five fried triangular pastries.",
+    items: [
+      { quantity: "5 pieces", category: "food", preparation: "fried", confidence: "high" },
+    ],
+    portion: "1 plate",
+    assumptions: [],
+    needs_clarification: false,
+    clarification_question: "",
+  }, {
+    mealType: "snack",
+    lookupFoods: async (term) => searchPhotoReferenceFoods(term),
+  })
+
+  assert.ok(pastryEstimate.action)
+  assert.equal(pastryEstimate.can_autofill, true)
+  assert.equal(pastryEstimate.needs_review, false)
+  assert.equal(pastryEstimate.breakdown[0]?.source_type, "photo_dish_profile")
+})
+
 test("buildFoodPhotoEstimate rescues live-style indirect dish descriptions into plated dish matches", async () => {
   const burgerEstimate = await buildFoodPhotoEstimate({
     items: [
