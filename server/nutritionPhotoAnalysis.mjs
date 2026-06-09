@@ -472,7 +472,13 @@ async function buildPhotoDishRescueEstimate(analysis, lookupFoods, mealType) {
   }
   const rescueBreakdownEstimate = estimateMealFromSession(rescueSession, rescueCandidateFoodMatches)
   const rescueMacroConfidence = deriveMacroConfidence(rescueBreakdownEstimate.items)
-  const rescueCanAutofill = canAutofillPhotoEstimate(analysis, rescueBreakdownEstimate.items, rescueMacroConfidence)
+  const rescueAnalysis = {
+    ...analysis,
+    overall_confidence: normalizeConfidence(analysis?.overall_confidence, "medium") === "low"
+      ? "medium"
+      : normalizeConfidence(analysis?.overall_confidence, "medium"),
+  }
+  const rescueCanAutofill = canAutofillPhotoEstimate(rescueAnalysis, rescueBreakdownEstimate.items, rescueMacroConfidence)
   if (!rescueCanAutofill) return null
 
   const rescueAction = buildDeterministicMealAction({

@@ -370,6 +370,7 @@ test("buildFoodPhotoEstimate can rescue items that only describe themselves in i
       "Type of side yogurt",
       "Exact proportions of coriander and fried onion",
     ],
+    overall_confidence: "low",
     needs_clarification: false,
     clarification_question: "",
   }, {
