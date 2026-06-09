@@ -322,6 +322,41 @@ test("buildFoodPhotoEstimate keeps dish confidence when the model omits the item
   assert.equal(pastryEstimate.breakdown[0]?.source_type, "photo_dish_profile")
 })
 
+test("buildFoodPhotoEstimate can rescue items that only describe themselves in item summaries", async () => {
+  const curryEstimate = await buildFoodPhotoEstimate({
+    items: [
+      {
+        quantity: "1 serving",
+        category: "food",
+        preparation: "cooked",
+        confidence: "high",
+        summary: "Chicken curry with sauce and garnished with coriander",
+      },
+      {
+        quantity: "1 piece",
+        category: "food",
+        preparation: "flatbread",
+        confidence: "high",
+        summary: "Roti or naan flatbread",
+      },
+    ],
+    assumptions: [
+      "The curry contains chicken as the main protein",
+      "Coriander is used as a garnish",
+    ],
+    needs_clarification: false,
+    clarification_question: "",
+  }, {
+    mealType: "dinner",
+    lookupFoods: async (term) => searchPhotoReferenceFoods(term),
+  })
+
+  assert.ok(curryEstimate.action)
+  assert.equal(curryEstimate.can_autofill, true)
+  assert.equal(curryEstimate.needs_review, false)
+  assert.equal(curryEstimate.breakdown[0]?.source_type, "curated_au_catalogue")
+})
+
 test("buildFoodPhotoEstimate rescues live-style indirect dish descriptions into plated dish matches", async () => {
   const burgerEstimate = await buildFoodPhotoEstimate({
     items: [

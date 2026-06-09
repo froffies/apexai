@@ -425,7 +425,11 @@ function inferPhotoDishCluster(analysis = {}, breakdown = []) {
     return "biryani"
   }
 
-  if (/\bcurry\b/.test(text) && /\bchicken\b/.test(text) && (/\bnaan\b/.test(text) || /\bflatbread\b/.test(text) || /\brice\b/.test(text))) {
+  if (
+    /\bcurry\b/.test(text)
+    && /\bchicken\b/.test(text)
+    && (/\bnaan\b/.test(text) || /\broti\b/.test(text) || /\bflatbread\b/.test(text) || /\bunleavened bread\b/.test(text) || /\brice\b/.test(text))
+  ) {
     return /\brice\b/.test(text) ? "butter chicken with rice" : "chicken curry"
   }
 
@@ -532,7 +536,8 @@ export function normalizeFoodPhotoAnalysis(raw = {}) {
   )
   const items = rawItems
     .map((item, index) => {
-      const candidateName = normalizePhotoFoodName(item?.name || item?.label || `Item ${index + 1}`)
+      const rawCandidateName = item?.name || item?.label || ""
+      const candidateName = normalizePhotoFoodName(rawCandidateName || item?.summary || `Item ${index + 1}`)
       const normalizedName = candidateName && !isGenericPhotoFoodName(candidateName)
         ? candidateName
         : inferredFoodName || candidateName
