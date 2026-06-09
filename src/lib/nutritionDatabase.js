@@ -267,6 +267,30 @@ function isEstimatedSourceType(value) {
   return String(value || "").trim().toLowerCase() === "estimated_internal_profile"
 }
 
+function looksLikeCompositePhotoQuery(query = "") {
+  const normalizedQuery = normalize(query)
+  return /\b(?:and|with|bowl|plate|salad|burrito|sandwich|wrap|taco|burger|pizza|biryani|curry|fried rice|stir fry|pasta bake|dessert)\b/.test(normalizedQuery)
+}
+
+function foodLooksCompositeForPhoto(food = {}) {
+  return namesForFood(food).some((name) => /\b(?:and|with|bowl|plate|salad|burrito|sandwich|wrap|taco|burger|pizza|biryani|curry|fried rice|stir fry|dessert)\b/.test(normalize(name)))
+}
+
+function inferPhotoTargetCategories(query = "") {
+  const normalizedQuery = normalize(query)
+  const categories = new Set()
+
+  if (/\b(?:egg|eggs|chicken|steak|beef|lamb|pork|fish|salmon|tuna)\b/.test(normalizedQuery)) categories.add("protein")
+  if (/\b(?:milk|yoghurt|yogurt|cheese|butter)\b/.test(normalizedQuery)) categories.add("dairy")
+  if (/\b(?:tea|coffee|juice|water|smoothie|shake)\b/.test(normalizedQuery)) categories.add("drink")
+  if (/\b(?:rice|pasta|bread|toast|oats|porridge|potato|fries|chips|noodle|noodles)\b/.test(normalizedQuery)) categories.add("carbs")
+  if (/\b(?:banana|apple|berry|berries|blueberry|orange|fruit|avocado|salad|tomato|vegetable|vegetables|veggie|veggies)\b/.test(normalizedQuery)) categories.add("produce")
+  if (/\b(?:oats|porridge|muesli|cereal|weetbix|weet bix|weet-bix)\b/.test(normalizedQuery)) categories.add("breakfast")
+  if (/\b(?:vegemite|marmite|chutney|jam|sauce|condiment)\b/.test(normalizedQuery)) categories.add("pantry")
+
+  return categories
+}
+
 export function findVerifiedFood(query) {
   const ranked = searchVerifiedFoods(query)
   return ranked[0] || null
@@ -281,6 +305,22 @@ export function searchVerifiedFoods(query) {
     .filter((entry) => entry.score > 0)
     .sort((left, right) => right.score - left.score || left.food.name.localeCompare(right.food.name))
     .map((entry) => entry.food)
+}
+
+export function searchPhotoReferenceFoods(query) {
+  const ranked = searchVerifiedFoods(query).filter((food) => !isEstimatedSourceType(food.source_type))
+  if (!ranked.length) return []
+
+  const targetCategories = inferPhotoTargetCategories(query)
+  const simpleQuery = tokenize(query).length <= 2 && !looksLikeCompositePhotoQuery(query)
+  const shapeFiltered = ranked.filter((food) => !(simpleQuery && foodLooksCompositeForPhoto(food)))
+  const categoryFiltered = targetCategories.size
+    ? shapeFiltered.filter((food) => targetCategories.has(String(food.category || "").trim().toLowerCase()))
+    : shapeFiltered
+
+  if (categoryFiltered.length) return categoryFiltered
+  if (shapeFiltered.length) return shapeFiltered
+  return ranked
 }
 
 export function foodToMeal(food, overrides = {}) {

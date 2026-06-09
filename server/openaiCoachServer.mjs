@@ -3,7 +3,7 @@ import fs from "node:fs"
 import path from "node:path"
 import OpenAI from "openai"
 import { createClient } from "@supabase/supabase-js"
-import { searchVerifiedFoods, verifiedFoods } from "../src/lib/nutritionDatabase.js"
+import { searchPhotoReferenceFoods, searchVerifiedFoods, verifiedFoods } from "../src/lib/nutritionDatabase.js"
 import { buildCoachSessionState } from "./coachSessionState.mjs"
 import {
   buildCoachAuditResponseMeta,
@@ -1797,6 +1797,19 @@ async function lookupFoodsBroad(query) {
   return results
 }
 
+async function lookupFoodsForPhoto(query) {
+  const normalizedQuery = String(query || "").trim()
+  if (!normalizedQuery) return []
+
+  const cacheKey = `photo:${cleanLookupText(normalizedQuery)}`
+  const cached = readFoodLookupCache(cacheKey)
+  if (cached) return cached
+
+  const results = searchPhotoReferenceFoods(query).map(verifiedNutritionResult)
+  writeFoodLookupCache(cacheKey, results)
+  return results
+}
+
 function extractIngredientTerms(text) {
   const rawTerms = String(text || "")
     .split(/[\n,]/)
@@ -1880,28 +1893,35 @@ async function handleNutritionPhoto(request, response) {
   const parsed = JSON.parse(completion.choices[0]?.message?.content || "{}")
   const estimatedMeal = await buildFoodPhotoEstimate(parsed, {
     mealType: payload.meal_type,
-    lookupFoods: async (term) => (await lookupFoodsBroad(term)).slice(0, 6),
+    lookupFoods: async (term) => (await lookupFoodsForPhoto(term)).slice(0, 6),
   })
 
   const action = estimatedMeal.action
-  sendJson(response, 200, {
+  const responseBody = {
     summary: estimatedMeal.analysis.summary,
     portion: estimatedMeal.analysis.portion,
     food_name: action?.food_name || estimatedMeal.analysis.summary,
     quantity: action?.quantity || estimatedMeal.analysis.portion,
-    calories: Number(action?.calories || 0),
-    protein_g: Number(action?.protein_g || 0),
-    carbs_g: Number(action?.carbs_g || 0),
-    fat_g: Number(action?.fat_g || 0),
     estimated: true,
-    nutrition_source: action?.nutrition_source || "AI plate-photo estimate",
+    nutrition_source: action?.nutrition_source || estimatedMeal.nutrition_source || "AI plate-photo estimate",
     nutrition_source_type: action?.nutrition_source_type || "photo_ai_estimate",
     identified_items: estimatedMeal.breakdown,
     macro_confidence: estimatedMeal.macro_confidence,
+    has_trusted_macros: Boolean(action),
+    can_autofill: Boolean(estimatedMeal.can_autofill),
     needs_review: estimatedMeal.needs_review,
     clarification_question: estimatedMeal.clarification_question,
     assumptions: estimatedMeal.assumptions,
-  }, requestResponseOrigin(request))
+  }
+
+  if (action) {
+    responseBody.calories = Number(action.calories || 0)
+    responseBody.protein_g = Number(action.protein_g || 0)
+    responseBody.carbs_g = Number(action.carbs_g || 0)
+    responseBody.fat_g = Number(action.fat_g || 0)
+  }
+
+  sendJson(response, 200, responseBody, requestResponseOrigin(request))
 }
 
 function normalizeChefResponse(value) {

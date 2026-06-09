@@ -40,6 +40,13 @@ function createMealForm(existingMeal, defaultMealType) {
   }
 }
 
+function hasTrustedPhotoMacros(result = {}) {
+  return Boolean(
+    result?.has_trusted_macros
+    && ["calories", "protein_g", "carbs_g", "fat_g"].every((key) => Number.isFinite(Number(result?.[key])))
+  )
+}
+
 export default function MealLogModal({ defaultMealType = "breakfast", existingMeal = null, onClose, onSaved = null, standalone = false }) {
   const [allMeals, setMeals] = useLocalStorage(storageKeys.meals, starterMeals)
   const [favoriteFoods, setFavoriteFoods] = useLocalStorage(storageKeys.favoriteFoods, [])
@@ -276,26 +283,33 @@ export default function MealLogModal({ defaultMealType = "breakfast", existingMe
             locale="AU"
             mealType={form.meal_type}
             onAnalyzed={(result) => {
+              const trustedMacros = hasTrustedPhotoMacros(result)
               setForm((current) => ({
                 ...current,
                 food_name: result.food_name || current.food_name,
                 quantity: result.quantity || current.quantity,
-                calories: result.calories !== undefined ? String(result.calories) : current.calories,
-                protein_g: result.protein_g !== undefined ? String(result.protein_g) : current.protein_g,
-                carbs_g: result.carbs_g !== undefined ? String(result.carbs_g) : current.carbs_g,
-                fat_g: result.fat_g !== undefined ? String(result.fat_g) : current.fat_g,
-                nutrition_source: result.nutrition_source || current.nutrition_source,
-                nutrition_source_type: result.nutrition_source_type || current.nutrition_source_type,
-                macro_confidence: result.macro_confidence || current.macro_confidence,
+                calories: trustedMacros ? String(result.calories) : "",
+                protein_g: trustedMacros ? String(result.protein_g) : "",
+                carbs_g: trustedMacros ? String(result.carbs_g) : "",
+                fat_g: trustedMacros ? String(result.fat_g) : "",
+                nutrition_source: trustedMacros ? (result.nutrition_source || current.nutrition_source) : "",
+                nutrition_source_type: trustedMacros ? (result.nutrition_source_type || current.nutrition_source_type) : "",
+                macro_confidence: trustedMacros ? (result.macro_confidence || current.macro_confidence) : "",
                 notes: [
+                  !trustedMacros && result.nutrition_source ? `Photo analysis: ${result.nutrition_source}` : "",
                   result.clarification_question ? `Photo review: ${result.clarification_question}` : "",
                   Array.isArray(result.assumptions) && result.assumptions.length ? `Photo assumptions: ${result.assumptions.join("; ")}` : "",
                 ].filter(Boolean).join("\n\n") || current.notes,
               }))
-              setPhotoEstimated(true)
+              setPhotoEstimated(trustedMacros)
               setPhotoItems(Array.isArray(result.identified_items) ? result.identified_items : [])
               setManualConfirmed(false)
-              setStatus(result.clarification_question || "Photo analyzed. Review the foods and save when you're happy with it.")
+              setStatus(
+                result.clarification_question
+                  || (trustedMacros
+                    ? "Photo analyzed. Review the foods and save when you're happy with it."
+                    : "Photo identified the foods, but the macros still need review before you save it.")
+              )
             }}
           />
           <BarcodeScannerPanel
@@ -317,7 +331,9 @@ export default function MealLogModal({ defaultMealType = "breakfast", existingMe
                   <div key={`${item.matched_food_name || item.name}_${index}`} className="rounded-lg bg-white p-3 text-sm">
                     <p className="font-medium text-slate-950">{item.name}</p>
                     <p className="text-slate-500">{item.quantity} {item.matched_food_name ? `- matched to ${item.matched_food_name}` : ""}</p>
-                    <p className="text-slate-500">{item.calories} kcal - {item.protein_g}g protein - {item.carbs_g}g carbs - {item.fat_g}g fat</p>
+                    {(Number.isFinite(Number(item.calories)) && Number.isFinite(Number(item.protein_g)) && Number.isFinite(Number(item.carbs_g)) && Number.isFinite(Number(item.fat_g)))
+                      ? <p className="text-slate-500">{item.calories} kcal - {item.protein_g}g protein - {item.carbs_g}g carbs - {item.fat_g}g fat</p>
+                      : <p className="text-amber-700">Macros need review before saving.</p>}
                     <p className="text-amber-700">{item.source}</p>
                   </div>
                 ))}

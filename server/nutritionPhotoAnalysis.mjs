@@ -169,6 +169,27 @@ function deriveMacroConfidence(breakdown = []) {
   return "low"
 }
 
+function sanitizePhotoBreakdownItem(item = {}, includeMacros = false) {
+  const safeItem = {
+    name: String(item.name || "").trim(),
+    quantity: String(item.quantity || "").trim(),
+    category: String(item.category || "").trim(),
+    matched_food_name: String(item.matched_food_name || "").trim(),
+    source: String(item.source || "").trim(),
+    source_type: String(item.source_type || "").trim(),
+    estimated: Boolean(item.estimated),
+  }
+
+  if (includeMacros) {
+    safeItem.calories = Number(item.calories || 0)
+    safeItem.protein_g = Number(item.protein_g || 0)
+    safeItem.carbs_g = Number(item.carbs_g || 0)
+    safeItem.fat_g = Number(item.fat_g || 0)
+  }
+
+  return safeItem
+}
+
 export function normalizeFoodPhotoAnalysis(raw = {}) {
   const value = raw && typeof raw === "object" ? raw : {}
   const assumptions = safeArray(value.assumptions, 8).map((entry) => cleanText(entry)).filter(Boolean)
@@ -254,20 +275,23 @@ export async function buildFoodPhotoEstimate(raw = {}, options = {}) {
 
   const breakdownEstimate = estimateMealFromSession(mealSession, candidateFoodMatches)
   const macroConfidence = deriveMacroConfidence(breakdownEstimate.items)
-  const action = buildDeterministicMealAction({
-    mealSession,
-    explicitActions: [{
-      type: "log_meal",
-      meal_type: mealType,
-      quantity: analysis.portion,
-      estimated: true,
-    }],
-    prompt: analysis.summary,
-    candidateFoodMatches,
-    allowLooseEstimate: true,
-  })
-
   const needsReview = analysis.needs_clarification || analysis.overall_confidence !== "high" || macroConfidence !== "high"
+  const canAutofill = !needsReview
+  const action = canAutofill
+    ? buildDeterministicMealAction({
+        mealSession,
+        explicitActions: [{
+          type: "log_meal",
+          meal_type: mealType,
+          quantity: analysis.portion,
+          estimated: true,
+        }],
+        prompt: analysis.summary,
+        candidateFoodMatches,
+        allowLooseEstimate: true,
+      })
+    : null
+  const safeBreakdown = breakdownEstimate.items.map((item) => sanitizePhotoBreakdownItem(item, canAutofill))
   const source = buildPhotoSourceSummary(breakdownEstimate.items, macroConfidence)
 
   return {
@@ -282,10 +306,12 @@ export async function buildFoodPhotoEstimate(raw = {}, options = {}) {
           macro_breakdown: breakdownEstimate.items,
         }
       : null,
-    breakdown: breakdownEstimate.items,
+    breakdown: safeBreakdown,
+    can_autofill: canAutofill,
     macro_confidence: macroConfidence,
+    nutrition_source: source,
     needs_review: needsReview,
-    clarification_question: analysis.clarification_question || (needsReview ? "Review the foods and portions before saving." : ""),
+    clarification_question: analysis.clarification_question || (needsReview ? "I identified the foods, but the macros still need review before you save this." : ""),
     assumptions: analysis.assumptions,
   }
 }
