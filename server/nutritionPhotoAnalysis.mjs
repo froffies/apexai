@@ -421,7 +421,11 @@ function inferPhotoDishCluster(analysis = {}, breakdown = []) {
     return "samosas"
   }
 
-  if (/\bbiryani\b/.test(text) || (/\brice\b/.test(text) && /\bfried onions?\b/.test(text) && /\byoghurt\b/.test(text) && /\bcurry\b/.test(text))) {
+  if (
+    /\bbiryani\b/.test(text)
+    || (/\brice\b/.test(text) && /\bfried onions?\b/.test(text) && /\byoghurt\b/.test(text) && /\bcurry\b/.test(text))
+    || (/\brice\b/.test(text) && /\bfried onions?\b/.test(text) && /\byog(?:h)?urt\b/.test(text) && (/\bchicken\b/.test(text) || /\bmeat\b/.test(text) || /\blamb\b/.test(text)))
+  ) {
     return "biryani"
   }
 

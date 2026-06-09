@@ -355,6 +355,32 @@ test("buildFoodPhotoEstimate can rescue items that only describe themselves in i
   assert.equal(curryEstimate.can_autofill, true)
   assert.equal(curryEstimate.needs_review, false)
   assert.equal(curryEstimate.breakdown[0]?.source_type, "curated_au_catalogue")
+
+  const biryaniEstimate = await buildFoodPhotoEstimate({
+    items: [
+      { name: "chicken", quantity: "1 serve", category: "food", confidence: "medium" },
+      { name: "rice", quantity: "200g", category: "food", confidence: "medium" },
+      { name: "yogurt", quantity: "100g", category: "food", confidence: "medium" },
+      { name: "fried onions", quantity: "2 slices", category: "food", confidence: "medium" },
+      { name: "coriander", quantity: "10g", category: "ingredient", confidence: "medium" },
+    ],
+    portion: "1 bowl",
+    assumptions: [
+      "Type and exact preparation of rice",
+      "Type of side yogurt",
+      "Exact proportions of coriander and fried onion",
+    ],
+    needs_clarification: false,
+    clarification_question: "",
+  }, {
+    mealType: "dinner",
+    lookupFoods: async (term) => searchPhotoReferenceFoods(term),
+  })
+
+  assert.ok(biryaniEstimate.action)
+  assert.equal(biryaniEstimate.can_autofill, true)
+  assert.equal(biryaniEstimate.needs_review, false)
+  assert.equal(biryaniEstimate.breakdown[0]?.source_type, "photo_dish_profile")
 })
 
 test("buildFoodPhotoEstimate rescues live-style indirect dish descriptions into plated dish matches", async () => {
