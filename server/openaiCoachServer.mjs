@@ -851,6 +851,10 @@ function providerErrorText(error) {
   return collectProviderErrorParts(error).join(" | ")
 }
 
+function providerErrorStatus(error) {
+  return Number(error?.status || error?.response?.status || error?.cause?.status || 0)
+}
+
 function isVisionQuotaExhausted(error) {
   const text = providerErrorText(error).toLowerCase()
   return (
@@ -862,9 +866,46 @@ function isVisionQuotaExhausted(error) {
 }
 
 function isVisionTemporarilyBusy(error) {
-  const status = Number(error?.status || error?.response?.status || error?.cause?.status || 0)
+  const status = providerErrorStatus(error)
   const text = providerErrorText(error).toLowerCase()
   return status === 429 || /rate limit|too many requests|quota/i.test(text)
+}
+
+function isVisionTransientUpstreamError(error) {
+  const status = providerErrorStatus(error)
+  const text = providerErrorText(error).toLowerCase()
+  return (
+    status === 408
+    || status === 500
+    || status === 502
+    || status === 503
+    || status === 504
+    || text.includes("bad gateway")
+    || text.includes("gateway error")
+    || text.includes("temporarily unavailable")
+    || text.includes("upstream")
+    || text.includes("timeout")
+  )
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function createVisionCompletion(requestBody) {
+  let lastError = null
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return await visionClient.chat.completions.create(requestBody)
+    } catch (error) {
+      lastError = error
+      if (!isVisionTransientUpstreamError(error) || attempt === 2) {
+        throw error
+      }
+      await sleep(400 * (attempt + 1))
+    }
+  }
+  throw lastError || new Error("Vision completion failed")
 }
 
 function sanitizeErrorMessage(error, fallbackMessage) {
@@ -1846,7 +1887,7 @@ async function handleNutritionPhoto(request, response) {
 
   let completion
   try {
-    completion = await visionClient.chat.completions.create({
+    completion = await createVisionCompletion({
       model: visionModel,
       max_completion_tokens: 500,
       response_format: { type: "json_object" },
@@ -1885,6 +1926,12 @@ async function handleNutritionPhoto(request, response) {
       throw createHttpError(503, sharedCapacityMessage, {
         expose: true,
         logMessage: `Photo analysis upstream limit: ${details || "429"}`,
+      })
+    }
+    if (isVisionTransientUpstreamError(error)) {
+      throw createHttpError(503, "Photo analysis is temporarily unavailable right now. Try again in a moment or use barcode or manual search.", {
+        expose: true,
+        logMessage: `Photo analysis transient upstream failure: ${details || "vision transient upstream error"}`,
       })
     }
     throw error
