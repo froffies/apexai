@@ -1423,6 +1423,12 @@ function primaryWorkoutCandidateActivity(activities = []) {
   return activities.find((activity) => activity?.primary) || activities[0] || null
 }
 
+function parsedWorkoutStartsFreshExercise(parsedWorkout = null, session = null) {
+  const parsedExercise = cleanText(parsedWorkout?.exercise_name || parsedWorkout?.workout_type || "")
+  const sessionExercise = cleanText(session?.exercise_name || session?.workout_type || "")
+  return Boolean(parsedExercise && sessionExercise && !equivalentWorkoutExerciseName(parsedExercise, sessionExercise))
+}
+
 function shouldReuseWorkoutCandidateActivities(session = null, currentMessage = "", parsedWorkout = null) {
   const normalized = cleanText(currentMessage)
   if (!normalized) return false
@@ -1430,6 +1436,7 @@ function shouldReuseWorkoutCandidateActivities(session = null, currentMessage = 
   if (candidateActivities.length < 2) return false
   if (suppressionRequested(currentMessage) || workoutDeleteRequested(currentMessage)) return false
   if (looksLikeStandaloneMealMessage(currentMessage) || isExplicitMealStart(currentMessage)) return false
+  if (parsedWorkoutStartsFreshExercise(parsedWorkout, session)) return false
   return Boolean(
     (hasWorkoutClarificationContext(session) || session?.persisted)
     && (
@@ -1678,6 +1685,21 @@ function parseWorkoutMessage(message) {
       weight_kg: 0,
       duration_seconds: 0,
       distance_km: distanceKm > 0 ? Number(distanceKm.toFixed(2)) : 0,
+    }
+  }
+
+  const marathonPattern = text.match(/\b(?:(?:i\s+)?(?:ran|run|running|completed|finished)\s+)?(?<kind>half\s+marathon|marathon)\b/)
+  if (marathonPattern?.groups?.kind) {
+    const normalizedKind = cleanText(marathonPattern.groups.kind)
+    return {
+      exercise_name: "Run",
+      workout_type: "Run",
+      muscle_group: "cardio",
+      sets: 1,
+      reps: 0,
+      weight_kg: 0,
+      duration_seconds: 0,
+      distance_km: normalizedKind.includes("half") ? 21.1 : 42.2,
     }
   }
 
@@ -2018,8 +2040,9 @@ function buildWorkoutSessionState(recentMessages = [], currentMessage = "", exis
     .map((activity) => normalizeWorkoutCandidateActivity(activity))
     .filter(Boolean)
   const reusesCandidateActivities = shouldReuseWorkoutCandidateActivities(prior, currentMessage, currentParsedWorkout)
+  const startsFreshExercise = parsedWorkoutStartsFreshExercise(currentParsedWorkout, prior)
 
-  if ((prior.active || prior.persisted) && !isExplicitMealStart(normalizedCurrent)) {
+  if ((prior.active || prior.persisted) && !isExplicitMealStart(normalizedCurrent) && !startsFreshExercise) {
     mergeWorkoutMetrics(state, prior)
   }
 

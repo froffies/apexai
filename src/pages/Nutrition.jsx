@@ -1,6 +1,6 @@
 import { Suspense, lazy, useMemo, useState } from "react"
 import { Link } from "react-router-dom"
-import { BookOpen, Pencil, Plus, ShoppingBasket, SlidersHorizontal, Trash2, Utensils } from "lucide-react"
+import { BookOpen, Camera, Pencil, Plus, ShieldCheck, ShoppingBasket, SlidersHorizontal, Trash2, Utensils } from "lucide-react"
 import MacroTargetEditor from "@/components/MacroTargetEditor"
 import MacroRing from "@/components/MacroRing"
 import MealLogModal from "@/components/MealLogModal"
@@ -10,7 +10,7 @@ import SegmentedControl from "@/components/SegmentedControl"
 import { toast } from "@/components/ui/use-toast"
 import { createPageUrl } from "@/utils"
 import { defaultProfile, macroTotals, starterMeals, storageKeys } from "@/lib/fitnessDefaults"
-import { nutritionSourceLabel, nutritionSourceTone } from "@/lib/nutritionHelpers"
+import { macroConfidenceLabel, nutritionSourceLabel, nutritionSourceTone } from "@/lib/nutritionHelpers"
 import { buildNutritionMemory } from "@/lib/nutritionMemory"
 import { todayISO, useLocalStorage } from "@/lib/useLocalStorage"
 
@@ -32,6 +32,25 @@ function rankFoodsForTargets(foods, remaining) {
       return { ...food, score }
     })
     .sort((left, right) => right.score - left.score)
+}
+
+function renderMealSourceMeta(meal) {
+  if (!meal?.nutrition_source) return null
+  const sourceType = String(meal.nutrition_source_type || "").trim().toLowerCase()
+  const confidenceLabel = macroConfidenceLabel(meal.macro_confidence, Boolean(meal.estimated))
+  const Icon = sourceType === "photo_ai_estimate" ? Camera : ShieldCheck
+
+  return (
+    <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
+      <span className={`inline-flex items-center gap-1 rounded-full px-2 py-1 font-semibold ${nutritionSourceTone(meal)}`}>
+        <Icon size={12} /> {nutritionSourceLabel(meal)}
+      </span>
+      <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-1 font-medium text-slate-600">
+        {confidenceLabel}
+      </span>
+      <span className={`text-sm ${nutritionSourceTone(meal)}`}>{meal.nutrition_source}</span>
+    </div>
+  )
 }
 
 export default function Nutrition() {
@@ -230,7 +249,7 @@ export default function Nutrition() {
                 <div>
                   <p className="font-semibold text-slate-900">{meal.food_name}</p>
                   <p className="text-sm text-slate-500">{meal.meal_type} - {meal.calories} kcal - {meal.protein_g}g protein</p>
-                  {meal.nutrition_source && <p className={`mt-1 text-sm ${nutritionSourceTone(meal)}`}>{nutritionSourceLabel(meal)}: {meal.nutrition_source}</p>}
+                  {renderMealSourceMeta(meal)}
                 </div>
                 <div className="flex items-center gap-1">
                   <button type="button" aria-label={`Edit ${meal.food_name}`} onClick={() => setEditingMeal(meal)} className="rounded-xl p-2 text-slate-400 hover:bg-white hover:text-indigo-600">
@@ -265,7 +284,7 @@ export default function Nutrition() {
                 <div>
                   <p className="font-semibold text-slate-900">{meal.food_name}</p>
                   <p className="text-sm text-slate-500">{meal.meal_type} - {meal.calories} kcal - {meal.protein_g}g protein</p>
-                  {meal.nutrition_source && <p className={`mt-1 text-sm ${nutritionSourceTone(meal)}`}>{nutritionSourceLabel(meal)}: {meal.nutrition_source}</p>}
+                  {renderMealSourceMeta(meal)}
                 </div>
                 <div className="flex items-center gap-1">
                   <button type="button" aria-label={`Edit ${meal.food_name}`} onClick={() => setEditingMeal(meal)} className="rounded-lg p-2 text-slate-400 hover:bg-white hover:text-indigo-600">

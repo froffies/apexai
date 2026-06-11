@@ -422,9 +422,25 @@ export function normalizeCoachResponse(value, context = {}) {
   const singleCandidatePersistenceAction = candidatePersistenceActions.length === 1
     ? normalizeMealAction(candidatePersistenceActions[0])
     : null
+  const singleMealCandidatePersistenceAction = candidateMealPersistenceActions.length === 1
+    ? normalizeMealAction(candidateMealPersistenceActions[0])
+    : null
   const singleWorkoutCandidatePersistenceAction = candidateWorkoutPersistenceActions.length === 1
     ? normalizeMealAction(candidateWorkoutPersistenceActions[0])
     : null
+  const normalizedOriginalReply = cleanReplyText(originalReply)
+  const replyLooksQuestionLike = Boolean(
+    originalReply
+    && (
+      /[?]$/.test(originalReply)
+      || /\b(?:how|what|which|can you|could you)\b/.test(normalizedOriginalReply)
+    )
+  )
+  const replyLooksLikeWrongWorkoutAlreadyLogged = Boolean(
+    originalReply
+    && /\balready\b/.test(normalizedOriginalReply)
+    && /\b(?:workout|pushup|pushups|rep|reps|set|sets|bench|squat|run|running|marathon)\b/.test(normalizedOriginalReply)
+  )
   if (
     preferAIFirst
     && originalReply
@@ -440,6 +456,27 @@ export function normalizeCoachResponse(value, context = {}) {
       .map(normalizeMealAction)
       .filter(shouldAllowAction)
       .slice(0, 8)
+  }
+  const shouldRecoverSingleMealActionFromBadReply = Boolean(
+    preferAIFirst
+    && strictAIFirst
+    && originalReply
+    && !actions.some(isMealPersistenceAction)
+    && !hasValidatedMealPersistence
+    && singleMealCandidatePersistenceAction
+    && context.mealContext?.readyToLog
+    && (replyLooksQuestionLike || replyLooksLikeWrongWorkoutAlreadyLogged)
+  )
+  let forceRecoveredMealReply = false
+  if (shouldRecoverSingleMealActionFromBadReply) {
+    actions = [
+      ...actions,
+      singleMealCandidatePersistenceAction,
+    ]
+      .map(normalizeMealAction)
+      .filter(shouldAllowAction)
+      .slice(0, 8)
+    forceRecoveredMealReply = true
   }
   const workoutCompletionReplyAcknowledged = replyAcknowledgesWorkoutCompletion(originalReply, context.workoutContext)
   const recoverableWorkoutPersistenceAction = (
@@ -471,6 +508,29 @@ export function normalizeCoachResponse(value, context = {}) {
       .filter(shouldAllowAction)
       .slice(0, 8)
     prependRecoveredWorkoutSummary = strictAIFirst && !workoutCompletionReplyAcknowledged
+  }
+  const shouldOverrideWrongMealClarifyReply = Boolean(
+    preferAIFirst
+    && strictAIFirst
+    && originalReply
+    && hintMealClarify
+    && !actions.some(isMealPersistenceAction)
+    && !replyAddressesMealClarification(originalReply, context.mealContext, hintMealClarify)
+    && (replyLooksQuestionLike || replyLooksLikeWrongWorkoutAlreadyLogged)
+  )
+  let forceMealClarifyReply = false
+  if (shouldOverrideWrongMealClarifyReply) {
+    const recoveredMealClarifyAction = buildClarifyRecoveryAction(context.mealContext, hintMealClarify)
+    if (recoveredMealClarifyAction) {
+      actions = [
+        ...actions,
+        recoveredMealClarifyAction,
+      ]
+        .map(normalizeMealAction)
+        .filter(shouldAllowAction)
+        .slice(0, 8)
+    }
+    forceMealClarifyReply = true
   }
   const canRecoverMealClarifyAction = Boolean(
     preferAIFirst
@@ -535,6 +595,25 @@ export function normalizeCoachResponse(value, context = {}) {
     summarizeCoachActions(actions) ||
     summarizeCoachAction(actions[0]) ||
     "Tell me what happened or what you want to change, and I'll help you sort the next move."
+
+  if (forceRecoveredMealReply) {
+    reply = summarizeCoachActions(actions)
+      || summarizeCoachAction(singleMealCandidatePersistenceAction)
+      || reply
+  } else if (forceMealClarifyReply) {
+    reply = hintMealClarify || reply
+  }
+
+  if (
+    preferAIFirst
+    && strictAIFirst
+    && actions.some(isMealPersistenceAction)
+    && (replyLooksQuestionLike || replyLooksLikeWrongWorkoutAlreadyLogged)
+  ) {
+    reply = summarizeCoachActions(actions)
+      || summarizeCoachAction(actions.find(isMealPersistenceAction))
+      || reply
+  }
 
   if (prependRecoveredWorkoutSummary) {
     const workoutSummaryPrefix = summarizeCoachAction(recoverableWorkoutPersistenceAction)

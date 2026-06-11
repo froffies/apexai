@@ -98,7 +98,10 @@ function normalizePhotoFoodName(value = "") {
   return cleanText(value)
     .replace(/\bitem\s+\d+\b/gi, "")
     .replace(/^\d+\s*[\).\:-]\s*/g, "")
-    .replace(/^(?:\d+|a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+(?:(?:large|medium|small)\s+)?(?:(?:serves?|servings?|pieces?|slices?|bowls?|plates?|cups?|mugs?)\s+)?/i, "")
+    .replace(/^(?:\d+(?:\.\d+)?\s*(?:kg|g|oz|lb|lbs|pounds?|ml|l|cups?|bowls?|plates?|mugs?|tablespoons?|tbsp|teaspoons?|tsp|serves?|servings?|pieces?|piece|slices?|sprigs?)?|\b(?:a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve))\s+(?:(?:large|medium|small)\s+)?/i, "")
+    .replace(/^(?:of\s+)/i, "")
+    .replace(/^(?:sprig|sprigs|piece|pieces|serve|serving|portion|cup|cups|bowl|bowls|plate|plates|glass|mug|tablespoon|tablespoons|tbsp|teaspoon|teaspoons|tsp)\s+of\s+/i, "")
+    .replace(/\b(\w+)\s+\1\b/gi, "$1")
     .replace(/\s+/g, " ")
     .trim()
 }
@@ -156,6 +159,7 @@ function defaultQuantityForSummaryTerm(term = "", summaryText = "") {
   if (/^\d/.test(normalized)) return normalized
   if (normalized.includes("burger with fries")) return count > 1 ? `${count} burgers + fries` : "1 burger + small fries"
   if (normalized.includes("burger")) return count > 1 ? `${count} burgers` : "1 burger"
+  if (normalized.includes("pasta with tomato sauce")) return "1 plate"
   if (normalized.includes("bun")) return "1 bun"
   if (normalized.includes("patty")) return "1 patty"
   if (normalized.includes("pizza")) {
@@ -184,6 +188,7 @@ function defaultQuantityForSummaryTerm(term = "", summaryText = "") {
   if (normalized.includes("pasta") || normalized.includes("spaghetti") || normalized.includes("fettuccine")) return "200g"
   if (normalized.includes("rice")) return "200g"
   if (normalized.includes("yoghurt") || normalized.includes("yogurt")) return "100g"
+  if (normalized.includes("butter chicken with rice") || normalized.includes("chicken curry with rice")) return "1 bowl"
   if (normalized.includes("chicken curry") || normalized.includes("butter chicken") || normalized.includes("chicken in sauce")) return "200g"
   if (normalized.includes("biryani")) return "1 bowl"
   if (normalized.includes("dosa")) return "1 serve"
@@ -418,6 +423,13 @@ function inferPhotoDishCluster(analysis = {}, breakdown = []) {
   }
 
   if (
+    /\b(?:pasta|spaghetti|penne|farfalle|fettuccine|pappardelle|tagliatelle)\b/.test(text)
+    && (/\btomato sauce\b/.test(text) || /\bbolognese\b/.test(text) || /\bmeatballs?\b/.test(text) || /\bparmesan\b/.test(text) || /\bbasil\b/.test(text) || /\bgarlic\b/.test(text) || /\bcherry tomatoes?\b/.test(text))
+  ) {
+    return "pasta with tomato sauce"
+  }
+
+  if (
     /\bsamosa\b/.test(text)
     || /\bpastry triangles?\b/.test(text)
     || /\btriangular pastries?\b/.test(text)
@@ -430,7 +442,18 @@ function inferPhotoDishCluster(analysis = {}, breakdown = []) {
     return "fried rice"
   }
 
-  if ((/\bidli\b|\bidly\b/.test(text)) || ((/\bfermented rice dish\b/.test(text) || /\brice cakes?\b/.test(text)) && (/\bsambar\b/.test(text) || /\bchutney\b/.test(text)))) {
+  if (
+    /\bdosa\b/.test(text)
+    || (/\bmashed potatoes?\b/.test(text) && (/\bcoconut chutney\b/.test(text) || /\bpeanut chutney\b/.test(text)))
+  ) {
+    return "dosa"
+  }
+
+  if (
+    (/\bidli\b|\bidly\b/.test(text))
+    || ((/\bfermented rice dish\b/.test(text) || /\brice cakes?\b/.test(text)) && (/\bsambar\b/.test(text) || /\bchutney\b/.test(text)))
+    || ((/\bround dumplings?\b/.test(text) || /\bsteamed (?:sweet )?dumplings?\b/.test(text)) && (/\bcoconut(?:-based)? dip\b/.test(text) || /\blentil (?:dish|sauce)\b/.test(text) || /\bsambar\b/.test(text) || /\braita\b/.test(text)))
+  ) {
     return "idli with sambar"
   }
 
@@ -439,8 +462,20 @@ function inferPhotoDishCluster(analysis = {}, breakdown = []) {
     || (/\brice\b/.test(text) && /\bfried onions?\b/.test(text) && /\byoghurt\b/.test(text) && /\bcurry\b/.test(text))
     || (/\brice\b/.test(text) && /\bfried onions?\b/.test(text) && /\byog(?:h)?urt\b/.test(text) && (/\bchicken\b/.test(text) || /\bmeat\b/.test(text) || /\blamb\b/.test(text)))
     || (/\bbasmati rice\b/.test(text) && /\byog(?:h)?urt\b/.test(text) && (/\bchicken\b/.test(text) || /\bmeat\b/.test(text) || /\blamb\b/.test(text)))
+    || (/\brice\b/.test(text) && /\bvegetables?\b/.test(text) && /\bherbs?\b/.test(text) && /\bnuts?\b/.test(text))
+    || (/\brice\b/.test(text) && /\bchicken\b/.test(text) && /\bcoriander\b/.test(text))
+    || (/\bbasmati rice\b/.test(text) && /\bboiled eggs?\b/.test(text) && /\blime\b/.test(text))
+    || (/\brice\b/.test(text) && /\bchicken\b/.test(text) && /\bboiled eggs?\b/.test(text) && /\blime\b/.test(text))
   ) {
     return "biryani"
+  }
+
+  if (
+    /\bnaan\b/.test(text)
+    && (/\bmeatballs?\b/.test(text) || /\bbutter chicken\b/.test(text) || /\bchicken\b/.test(text))
+    && (/\bsauce\b/.test(text) || /\bcurry\b/.test(text) || /\brice\b/.test(text))
+  ) {
+    return /\brice\b/.test(text) ? "butter chicken with rice" : "chicken curry"
   }
 
   if (
@@ -528,7 +563,10 @@ async function buildPhotoDishRescueEstimate(analysis, lookupFoods, mealType) {
           macro_breakdown: rescueBreakdownEstimate.items,
         }
       : null,
-    breakdown: rescueBreakdownEstimate.items.map((item) => sanitizePhotoBreakdownItem(item, true)),
+    breakdown: rescueBreakdownEstimate.items.map((item) => sanitizePhotoBreakdownItem({
+      ...item,
+      confidence: rescueAnalysis.items[0]?.confidence || rescueAnalysis.overall_confidence || rescueMacroConfidence,
+    }, true)),
     can_autofill: true,
     macro_confidence: rescueMacroConfidence,
     nutrition_source: rescueSource,
@@ -541,6 +579,7 @@ function sanitizePhotoBreakdownItem(item = {}, includeMacros = false) {
     name: String(item.name || "").trim(),
     quantity: String(item.quantity || "").trim(),
     category: String(item.category || "").trim(),
+    confidence: String(item.confidence || "").trim(),
     matched_food_name: String(item.matched_food_name || "").trim(),
     source: String(item.source || "").trim(),
     source_type: String(item.source_type || "").trim(),
@@ -614,8 +653,39 @@ export function normalizeFoodPhotoAnalysis(raw = {}) {
   }
 }
 
-export async function buildFoodPhotoEstimate(raw = {}, options = {}) {
-  const analysis = normalizeFoodPhotoAnalysis(raw)
+function normalizeReviewedPhotoAnalysis(raw = {}) {
+  const value = raw && typeof raw === "object" ? raw : {}
+  const items = safeArray(value.items, 12)
+    .map((item, index) => {
+      const rawName = normalizePhotoFoodName(item?.name || item?.label || item?.summary || `Item ${index + 1}`)
+      const name = titleCase(stripLeadingArticle(rawName))
+      const baseName = singularizeFoodName(name)
+      if (!baseName) return null
+      return {
+        id: `photo_item_${index + 1}`,
+        name,
+        base_name: baseName,
+        quantity: normalizeQuantity(item?.quantity || item?.portion || "1 serve"),
+        preparation: normalizePreparation(item?.preparation || ""),
+        category: normalizeCategory(item?.category),
+        confidence: normalizeConfidence(item?.confidence, "medium"),
+        notes: cleanText(item?.notes || ""),
+      }
+    })
+    .filter(Boolean)
+
+  return {
+    summary: buildMealSummary(items, value.summary || ""),
+    portion: normalizeQuantity(value.portion || value.quantity || "1 plate", "1 plate"),
+    items,
+    overall_confidence: deriveOverallPhotoConfidence(items, value.overall_confidence || "medium"),
+    needs_clarification: false,
+    clarification_question: "",
+    assumptions: [],
+  }
+}
+
+async function estimatePreparedPhotoAnalysis(analysis = {}, options = {}, { manualReview = false } = {}) {
   if (!analysis.items.length) {
     return {
       analysis,
@@ -657,12 +727,16 @@ export async function buildFoodPhotoEstimate(raw = {}, options = {}) {
 
   const breakdownEstimate = estimateMealFromSession(mealSession, candidateFoodMatches)
   const macroConfidence = deriveMacroConfidence(breakdownEstimate.items)
-  let canAutofill = canAutofillPhotoEstimate(analysis, breakdownEstimate.items, macroConfidence)
+  const naturalAutofill = canAutofillPhotoEstimate(analysis, breakdownEstimate.items, macroConfidence)
+  let canAutofill = manualReview ? true : naturalAutofill
   let action = null
-  let safeBreakdown = breakdownEstimate.items.map((item) => sanitizePhotoBreakdownItem(item, canAutofill))
+  let safeBreakdown = breakdownEstimate.items.map((item, index) => sanitizePhotoBreakdownItem({
+    ...item,
+    confidence: analysis.items[index]?.confidence || analysis.overall_confidence || macroConfidence,
+  }, canAutofill || manualReview))
   let source = buildPhotoSourceSummary(breakdownEstimate.items, macroConfidence)
 
-  if (!canAutofill) {
+  if (!canAutofill && !manualReview) {
     const rescue = await buildPhotoDishRescueEstimate(analysis, lookupFoods, mealType)
     if (rescue) {
       return {
@@ -679,8 +753,8 @@ export async function buildFoodPhotoEstimate(raw = {}, options = {}) {
     }
   }
 
-  const needsReview = !canAutofill
-  action = canAutofill
+  const needsReview = manualReview ? false : !canAutofill
+  action = (canAutofill || manualReview)
     ? buildDeterministicMealAction({
         mealSession,
         explicitActions: [{
@@ -708,11 +782,21 @@ export async function buildFoodPhotoEstimate(raw = {}, options = {}) {
         }
       : null,
     breakdown: safeBreakdown,
-    can_autofill: canAutofill,
+    can_autofill: canAutofill || manualReview,
     macro_confidence: macroConfidence,
     nutrition_source: source,
     needs_review: needsReview,
     clarification_question: analysis.clarification_question || (needsReview ? "I identified the foods, but the macros still need review before you save this." : ""),
     assumptions: analysis.assumptions,
   }
+}
+
+export async function buildFoodPhotoEstimate(raw = {}, options = {}) {
+  const analysis = normalizeFoodPhotoAnalysis(raw)
+  return estimatePreparedPhotoAnalysis(analysis, options)
+}
+
+export async function buildReviewedFoodPhotoEstimate(raw = {}, options = {}) {
+  const analysis = normalizeReviewedPhotoAnalysis(raw)
+  return estimatePreparedPhotoAnalysis(analysis, options, { manualReview: true })
 }

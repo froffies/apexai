@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { Bot, Dumbbell, Mic, MicOff, RotateCcw, Salad, Send, UserRound } from "lucide-react"
+import { Bot, Camera, Dumbbell, Mic, MicOff, PackageSearch, RotateCcw, Salad, Send, ShieldCheck, UserRound } from "lucide-react"
+import BarcodeScannerPanel from "@/components/BarcodeScannerPanel"
+import FoodPhotoPanel from "@/components/FoodPhotoPanel"
 import PageHeader from "@/components/PageHeader"
 import SectionCard from "@/components/SectionCard"
 import WorkoutPlanCard from "@/components/WorkoutPlanCard"
 import { coachAuditEnabled, coachAuditNotice, sendCoachAuditEvent } from "@/lib/coachAuditClient"
+import { reviewFoodPhotoEstimate, searchNutritionDatabase } from "@/lib/nutritionApiClient"
 import { requestOpenAICoach } from "@/lib/openaiCoachClient"
 import {
   applyWorkoutPlanEdit,
@@ -50,6 +53,7 @@ import {
   resolveCoachSessionStates,
   sanitizeMealSummaryText,
 } from "@/lib/coachSessionMerge.js"
+import { coachMealConfidenceNote, macroConfidenceLabel, normalizeMacroConfidence, nutritionSourceLabel, nutritionSourceTone } from "@/lib/nutritionHelpers"
 import { recommendProgressionBlock } from "@/lib/progressionEngine"
 import { advanceActiveWorkout, getCurrentActiveExercise, logSetToActiveWorkout, summarizeActiveWorkout, summarizeRecovery } from "@/lib/workoutIntelligence"
 import { todayISO, uid, useLocalStorage } from "@/lib/useLocalStorage"
@@ -554,7 +558,8 @@ function normalizeWorkoutPersistenceAction(action, currentSession, nextSession, 
 }
 
 function formatCoachMealConfirmation(prefix, meal) {
-  return `${prefix}: ${meal.food_name}. ${Math.round(Number(meal.calories) || 0)} kcal, ${Math.round(Number(meal.protein_g) || 0)}g protein, ${Math.round(Number(meal.carbs_g) || 0)}g carbs, ${Math.round(Number(meal.fat_g) || 0)}g fat.`
+  const note = coachMealConfidenceNote(meal)
+  return `${prefix}: ${meal.food_name}. ${Math.round(Number(meal.calories) || 0)} kcal, ${Math.round(Number(meal.protein_g) || 0)}g protein, ${Math.round(Number(meal.carbs_g) || 0)}g carbs, ${Math.round(Number(meal.fat_g) || 0)}g fat.${note ? ` ${note}` : ""}`
 }
 
 function formatCoachMealBatchConfirmation(prefix, meals) {
@@ -563,7 +568,12 @@ function formatCoachMealBatchConfirmation(prefix, meals) {
     const mealLabel = mealType ? `${mealTypeLabel(mealType)} - ` : ""
     return `${mealLabel}${meal.food_name}`
   })
-  return `${prefix}: ${lines.join("; ")}.`
+  const hasEstimated = meals.some((meal) => coachMealConfidenceNote(meal) && normalizeMacroConfidence(meal?.macro_confidence, meal?.estimated ? "low" : "high") !== "high")
+  const hasVerified = meals.some((meal) => normalizeMacroConfidence(meal?.macro_confidence, meal?.estimated ? "low" : "high") === "high")
+  const suffix = hasEstimated
+    ? " Macros include estimate-based items, so tell me if you want them adjusted."
+    : (hasVerified ? " Verified reference data was used where available." : "")
+  return `${prefix}: ${lines.join("; ")}.${suffix}`
 }
 
 function formatCoachWorkoutConfirmation(prefix, workout, action) {
@@ -638,6 +648,99 @@ function findLatestCoachRecordReference(messages) {
   ) || null
 }
 
+function hasCompleteMacroSet(value = {}) {
+  return ["calories", "protein_g", "carbs_g", "fat_g"].every((key) => Number.isFinite(Number(value?.[key])))
+}
+
+function normalizeCoachFoodDraftItems(items = [], fallbackConfidence = "medium") {
+  return Array.isArray(items)
+    ? items.map((item) => ({
+      name: String(item?.name || "").trim(),
+      quantity: String(item?.quantity || "1 serve").trim() || "1 serve",
+      category: String(item?.category || "food").trim() || "food",
+      preparation: String(item?.preparation || "").trim(),
+      confidence: normalizeMacroConfidence(item?.confidence, fallbackConfidence),
+      matched_food_name: String(item?.matched_food_name || "").trim(),
+      source: String(item?.source || "").trim(),
+      source_type: String(item?.source_type || "").trim(),
+      calories: Number.isFinite(Number(item?.calories)) ? Number(item.calories) : null,
+      protein_g: Number.isFinite(Number(item?.protein_g)) ? Number(item.protein_g) : null,
+      carbs_g: Number.isFinite(Number(item?.carbs_g)) ? Number(item.carbs_g) : null,
+      fat_g: Number.isFinite(Number(item?.fat_g)) ? Number(item.fat_g) : null,
+    })).filter((item) => item.name)
+    : []
+}
+
+function buildPhotoCoachDraft(result = {}, mealType = "snack") {
+  const macroConfidence = normalizeMacroConfidence(result?.macro_confidence, result?.needs_review ? "low" : "medium")
+  return {
+    id: uid("coach_food_draft"),
+    type: "photo",
+    meal_type: mealType || "snack",
+    food_name: String(result?.food_name || result?.summary || "").trim(),
+    quantity: String(result?.quantity || result?.portion || "1 plate").trim() || "1 plate",
+    calories: Number.isFinite(Number(result?.calories)) ? Number(result.calories) : 0,
+    protein_g: Number.isFinite(Number(result?.protein_g)) ? Number(result.protein_g) : 0,
+    carbs_g: Number.isFinite(Number(result?.carbs_g)) ? Number(result.carbs_g) : 0,
+    fat_g: Number.isFinite(Number(result?.fat_g)) ? Number(result.fat_g) : 0,
+    nutrition_source: String(result?.nutrition_source || "").trim(),
+    nutrition_source_type: String(result?.nutrition_source_type || "photo_ai_estimate").trim().toLowerCase(),
+    macro_confidence: macroConfidence,
+    can_autofill: Boolean(result?.can_autofill),
+    needs_review: Boolean(result?.needs_review) || macroConfidence !== "high",
+    clarification_question: String(result?.clarification_question || "").trim(),
+    items: normalizeCoachFoodDraftItems(result?.identified_items, macroConfidence),
+    macro_breakdown: Array.isArray(result?.macro_breakdown) ? result.macro_breakdown : [],
+    action: result?.has_trusted_macros && hasCompleteMacroSet(result)
+      ? {
+        type: "log_meal",
+        meal_type: mealType || "snack",
+        food_name: String(result?.food_name || result?.summary || "Photo meal").trim(),
+        quantity: String(result?.quantity || result?.portion || "1 plate").trim() || "1 plate",
+        calories: Number(result?.calories || 0),
+        protein_g: Number(result?.protein_g || 0),
+        carbs_g: Number(result?.carbs_g || 0),
+        fat_g: Number(result?.fat_g || 0),
+        estimated: true,
+        nutrition_source: String(result?.nutrition_source || "").trim(),
+        nutrition_source_type: String(result?.nutrition_source_type || "photo_ai_estimate").trim().toLowerCase(),
+        macro_confidence: macroConfidence,
+        macro_breakdown: Array.isArray(result?.macro_breakdown) ? result.macro_breakdown : [],
+      }
+      : null,
+  }
+}
+
+function buildCoachPhotoDraftReply(draft) {
+  if (!draft) return ""
+  if (draft.needs_review) {
+    return `${draft.food_name || "I analyzed the plate"}. ${draft.clarification_question || "I’ve mapped out what I think is on the plate."} Review the items below, adjust anything that looks off, and then log the reviewed estimate.`
+  }
+  return `${draft.food_name || "I analyzed the plate"}. The photo estimate looks solid, so you can log it below in one tap.`
+}
+
+function buildCoachBarcodeDraft(results = [], code = "", mealType = "snack") {
+  const matches = Array.isArray(results) ? results.slice(0, 5) : []
+  const preferred = matches.find((food) => ["barcode_label", "open_food_facts_label"].includes(String(food?.source_type || "").trim().toLowerCase())) || matches[0] || null
+  return {
+    id: uid("coach_food_draft"),
+    type: "barcode",
+    meal_type: mealType || "snack",
+    barcode: String(code || "").trim(),
+    matches,
+    selected_food_id: preferred?.id || "",
+  }
+}
+
+function buildCoachBarcodeDraftReply(draft) {
+  if (!draft?.matches?.length) {
+    return `I couldn't find a product label match for ${draft?.barcode || "that barcode"}. Try the brand and product name manually, or enter the macros yourself if it’s not in the catalogue yet.`
+  }
+  const selected = draft.matches.find((item) => item.id === draft.selected_food_id) || draft.matches[0]
+  const sourceText = nutritionSourceLabel(selected)
+  return `I found ${selected?.name || "that product"} from ${sourceText.toLowerCase()}. Review it below and log it when you're happy.`
+}
+
 export default function Coach() {
   const [profile, setProfile] = useLocalStorage(storageKeys.profile, defaultProfile)
   const [meals, setMeals] = useLocalStorage(storageKeys.meals, starterMeals)
@@ -656,6 +759,8 @@ export default function Coach() {
   const [listening, setListening] = useState(false)
   const [thinking, setThinking] = useState(false)
   const [quickAction, setQuickAction] = useState(null)
+  const [coachFoodDraft, setCoachFoodDraft] = useState(null)
+  const [foodToolBusy, setFoodToolBusy] = useState(false)
   const inputRef = useRef(null)
   const bottomRef = useRef(null)
   const submitGuardRef = useRef(createSubmitGuardState())
@@ -736,12 +841,195 @@ export default function Coach() {
     })
   }
 
+  const appendCoachToolAssistant = (content, auditMeta = {}, extras = {}) => {
+    const assistantMessage = appendAssistant(content, {
+      ...extras,
+      auditMeta: {
+        route_type: "tool-assisted",
+        intent: "meal_logging",
+        actions: [],
+        persisted_actions: [],
+        persistence_status: "not_requested",
+        clarification_asked: false,
+        duplicate_prevention_triggered: false,
+        draft_preserved_after_failure: null,
+        warnings: [],
+        error_summary: "",
+        ...auditMeta,
+      },
+    })
+    setMessages((current) => [...current, assistantMessage])
+    return assistantMessage
+  }
+
+  const persistCoachToolMealAction = (action, reply) => {
+    const assistantMessage = applyOpenAICoachResponse({
+      reply,
+      actions: [action],
+      warnings: [],
+      audit_meta: {
+        route_type: "tool-assisted",
+        intent: "meal_logging",
+      },
+    })
+    setMessages((current) => [...current, assistantMessage])
+    return assistantMessage
+  }
+
+  const handleCoachPhotoAnalyzed = (result) => {
+    const draft = buildPhotoCoachDraft(result, coachFoodDraft?.meal_type || "snack")
+    setCoachFoodDraft(draft)
+    setAiError("")
+    appendCoachToolAssistant(buildCoachPhotoDraftReply(draft), {
+      actions: draft.action ? [draft.action] : [],
+      clarification_asked: Boolean(draft.needs_review),
+      state_after: buildAuditStateSnapshot(mealSession, workoutSession),
+    })
+  }
+
+  const updateCoachDraftItem = (index, key, value) => {
+    setCoachFoodDraft((current) => {
+      if (!current || current.type !== "photo") return current
+      const items = current.items.map((item, itemIndex) => itemIndex === index ? { ...item, [key]: value } : item)
+      return {
+        ...current,
+        items,
+        needs_review: true,
+        can_autofill: false,
+        action: null,
+      }
+    })
+  }
+
+  const recalculateCoachPhotoDraft = async () => {
+    if (!coachFoodDraft || coachFoodDraft.type !== "photo") return
+    setFoodToolBusy(true)
+    setAiError("")
+    try {
+      const reviewed = await reviewFoodPhotoEstimate({
+        items: coachFoodDraft.items.map((item) => ({
+          name: item.name,
+          quantity: item.quantity,
+          category: item.category,
+          preparation: item.preparation,
+          confidence: item.confidence,
+        })),
+        summary: coachFoodDraft.food_name,
+        portion: coachFoodDraft.quantity,
+        mealType: coachFoodDraft.meal_type,
+      })
+      const nextDraft = buildPhotoCoachDraft(reviewed, coachFoodDraft.meal_type)
+      setCoachFoodDraft(nextDraft)
+      appendCoachToolAssistant(
+        nextDraft.action
+          ? "I recalculated the photo estimate with your edits. Review it below and log it when you're ready."
+          : "I updated the photo estimate, but it still needs manual review before it can be logged.",
+        {
+          actions: nextDraft.action ? [nextDraft.action] : [],
+          clarification_asked: Boolean(nextDraft.needs_review),
+          state_after: buildAuditStateSnapshot(mealSession, workoutSession),
+        }
+      )
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "I couldn't refresh that photo estimate just now."
+      setAiError(message)
+      appendCoachToolAssistant(message, {
+        route_type: "failed",
+        persistence_status: "failed_before_persistence",
+        error_summary: message,
+        state_after: buildAuditStateSnapshot(mealSession, workoutSession),
+      })
+    } finally {
+      setFoodToolBusy(false)
+    }
+  }
+
+  const logCoachPhotoDraft = () => {
+    if (!coachFoodDraft || coachFoodDraft.type !== "photo") return
+    if (!coachFoodDraft.action) {
+      appendCoachToolAssistant("I still need a reviewed macro estimate before I can log that photo cleanly.", {
+        clarification_asked: true,
+        state_after: buildAuditStateSnapshot(mealSession, workoutSession),
+      })
+      return
+    }
+    persistCoachToolMealAction({
+      ...coachFoodDraft.action,
+      photo_analysis_items: coachFoodDraft.items,
+    }, formatCoachMealConfirmation("Saved to today's nutrition", coachFoodDraft.action))
+    setCoachFoodDraft(null)
+  }
+
+  const handleCoachBarcodeDetected = async (code) => {
+    setFoodToolBusy(true)
+    setAiError("")
+    try {
+      const results = await searchNutritionDatabase(code)
+      const draft = buildCoachBarcodeDraft(results, code, coachFoodDraft?.meal_type || "snack")
+      setCoachFoodDraft(draft)
+      appendCoachToolAssistant(buildCoachBarcodeDraftReply(draft), {
+        clarification_asked: !draft.matches.length,
+        state_after: buildAuditStateSnapshot(mealSession, workoutSession),
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "I couldn't search that barcode just now."
+      setAiError(message)
+      appendCoachToolAssistant(message, {
+        route_type: "failed",
+        persistence_status: "failed_before_persistence",
+        error_summary: message,
+        state_after: buildAuditStateSnapshot(mealSession, workoutSession),
+      })
+    } finally {
+      setFoodToolBusy(false)
+    }
+  }
+
+  const selectCoachBarcodeMatch = (selectedFoodId) => {
+    setCoachFoodDraft((current) => current?.type === "barcode"
+      ? { ...current, selected_food_id: selectedFoodId }
+      : current)
+  }
+
+  const logCoachBarcodeDraft = () => {
+    if (!coachFoodDraft || coachFoodDraft.type !== "barcode") return
+    const selected = coachFoodDraft.matches.find((item) => item.id === coachFoodDraft.selected_food_id) || coachFoodDraft.matches[0]
+    if (!selected) {
+      appendCoachToolAssistant("I still need a matched product before I can log that barcode.", {
+        clarification_asked: true,
+        state_after: buildAuditStateSnapshot(mealSession, workoutSession),
+      })
+      return
+    }
+    const sourceType = String(selected.source_type || "").trim().toLowerCase() || "barcode_label"
+    const estimated = ["estimated_internal_profile", "manual_user_entry", "mixed_reference_and_estimate", "photo_ai_estimate"].includes(sourceType)
+    const action = {
+      type: "log_meal",
+      meal_type: coachFoodDraft.meal_type || "snack",
+      food_name: selected.name,
+      quantity: selected.quantity || "1 serve",
+      calories: numberOrZero(selected.calories),
+      protein_g: numberOrZero(selected.protein_g),
+      carbs_g: numberOrZero(selected.carbs_g),
+      fat_g: numberOrZero(selected.fat_g),
+      estimated,
+      nutrition_source: selected.source || "Barcode product match",
+      nutrition_source_type: sourceType,
+      macro_confidence: normalizeMacroConfidence(selected.macro_confidence, estimated ? "low" : "high"),
+      macro_breakdown: [],
+    }
+    persistCoachToolMealAction(action, formatCoachMealConfirmation("Saved to today's nutrition", action))
+    setCoachFoodDraft(null)
+  }
+
   const clearConversation = () => {
     setMessages([createStarterMessage()])
     setMealSession(createEmptyMealSession())
     setWorkoutSession(createEmptyWorkoutSession())
     setInput("")
     setQuickAction(null)
+    setCoachFoodDraft(null)
+    setFoodToolBusy(false)
     setAiError("")
     if (typeof window !== "undefined") {
       auditSessionIdRef.current = uid("coach_audit_session")
@@ -1313,6 +1601,7 @@ export default function Coach() {
             nutrition_source_type: nutritionSourceType,
             macro_confidence: macroConfidence,
             ...(macroBreakdown.length ? { macro_breakdown: macroBreakdown } : {}),
+            ...(Array.isArray(action.photo_analysis_items) && action.photo_analysis_items.length ? { photo_analysis_items: action.photo_analysis_items } : {}),
             notes: action.message || "Logged by OpenAI coach",
           }
           setMeals((current) => [nextMeal, ...current])
@@ -1356,6 +1645,7 @@ export default function Coach() {
           nutrition_source_type: nutritionSourceType,
           macro_confidence: macroConfidence,
           ...(macroBreakdown.length ? { macro_breakdown: macroBreakdown } : {}),
+          ...(Array.isArray(action.photo_analysis_items) && action.photo_analysis_items.length ? { photo_analysis_items: action.photo_analysis_items } : existingMeal.photo_analysis_items ? { photo_analysis_items: existingMeal.photo_analysis_items } : {}),
           notes: action.message || existingMeal.notes,
         }
         setMeals((current) => upsertMealEntry(current, nextMeal))
@@ -1732,8 +2022,12 @@ export default function Coach() {
     recognition.start()
   }
 
+  const selectedBarcodeMatch = coachFoodDraft?.type === "barcode"
+    ? (coachFoodDraft.matches.find((item) => item.id === coachFoodDraft.selected_food_id) || coachFoodDraft.matches[0] || null)
+    : null
+
   return (
-    <div className="mx-auto flex min-h-screen max-w-5xl flex-col gap-6 p-4 sm:p-6 lg:p-8">
+    <div className="mx-auto flex min-h-screen max-w-5xl flex-col gap-6 p-4 pb-28 sm:p-6 sm:pb-24 lg:p-8">
       <PageHeader
         eyebrow="Coach"
         title="Your training coach"
@@ -1772,7 +2066,7 @@ export default function Coach() {
         </div>
       </SectionCard>
 
-      <section className="flex h-[65vh] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <section className="flex h-[60vh] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm sm:h-[65vh]">
         {(thinking || aiError) && (
           <div className={`border-b px-4 py-2 text-sm ${aiError ? "border-amber-200 bg-amber-50 text-amber-800" : "border-indigo-100 bg-indigo-50 text-indigo-700"}`}>
             {thinking ? "Coach is thinking through that..." : aiError}
@@ -1898,6 +2192,171 @@ export default function Coach() {
             )}
           </div>
         )}
+
+        <div className="border-t border-slate-200 bg-white p-3">
+          <div className="flex flex-wrap gap-2">
+            <FoodPhotoPanel
+              className="min-w-[10rem] flex-1 sm:w-auto sm:flex-none"
+              locale={profile.locale || "AU"}
+              mealType={coachFoodDraft?.meal_type || "snack"}
+              buttonLabel="Photo meal"
+              helperText="Upload a plate or drink photo and I’ll identify the visible items, estimate the macros, and let you confirm before logging."
+              onAnalyzed={handleCoachPhotoAnalyzed}
+            />
+            <BarcodeScannerPanel
+              className="min-w-[10rem] flex-1 sm:w-auto sm:flex-none"
+              buttonLabel="Barcode food"
+              helperText="Scan a packet or upload a barcode photo, then I’ll match the product and let you log it here."
+              onDetected={(code) => {
+                void handleCoachBarcodeDetected(code)
+              }}
+            />
+          </div>
+
+          {(foodToolBusy || coachFoodDraft) && (
+            <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              {foodToolBusy && <p className="text-sm text-slate-500">Working through that nutrition lookup...</p>}
+
+              {coachFoodDraft?.type === "photo" && (
+                <div className="space-y-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="inline-flex items-center gap-1 rounded-full bg-slate-900 px-2.5 py-1 text-xs font-semibold text-white">
+                          <Camera size={12} /> Photo draft
+                        </span>
+                        <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold ${nutritionSourceTone(coachFoodDraft)}`}>
+                          {coachFoodDraft.macro_confidence === "high" ? <ShieldCheck size={12} /> : <PackageSearch size={12} />}
+                          {nutritionSourceLabel(coachFoodDraft)} - {macroConfidenceLabel(coachFoodDraft.macro_confidence, true)}
+                        </span>
+                      </div>
+                      <p className="mt-2 text-sm font-semibold text-slate-950">{coachFoodDraft.food_name || "Photo meal draft"}</p>
+                      <p className="mt-1 text-sm text-slate-500">
+                        {Math.round(Number(coachFoodDraft.calories) || 0)} kcal, {Math.round(Number(coachFoodDraft.protein_g) || 0)}g protein, {Math.round(Number(coachFoodDraft.carbs_g) || 0)}g carbs, {Math.round(Number(coachFoodDraft.fat_g) || 0)}g fat
+                      </p>
+                      <p className="mt-1 text-sm text-slate-500">{coachFoodDraft.nutrition_source}</p>
+                      {coachFoodDraft.clarification_question && <p className="mt-2 text-sm text-amber-700">{coachFoodDraft.clarification_question}</p>}
+                    </div>
+                    <button type="button" onClick={() => setCoachFoodDraft(null)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
+                      Clear
+                    </button>
+                  </div>
+
+                  {!!coachFoodDraft.items.length && (
+                    <div className="space-y-2">
+                      {coachFoodDraft.items.map((item, index) => (
+                        <div key={`${item.name}_${index}`} className="rounded-2xl bg-white p-3">
+                          <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_180px_auto]">
+                            <input
+                              value={item.name}
+                              onChange={(event) => updateCoachDraftItem(index, "name", event.target.value)}
+                              className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-950"
+                            />
+                            <input
+                              value={item.quantity}
+                              onChange={(event) => updateCoachDraftItem(index, "quantity", event.target.value)}
+                              className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-950"
+                            />
+                            <div className="flex items-center justify-end text-xs font-medium text-slate-500">
+                              {macroConfidenceLabel(item.confidence, false)}
+                            </div>
+                          </div>
+                          <p className="mt-2 text-xs text-slate-500">
+                            {item.matched_food_name ? `Matched to ${item.matched_food_name}. ` : ""}{item.source || "Review-based estimate"}
+                          </p>
+                          {hasCompleteMacroSet(item) && (
+                            <p className="mt-1 text-xs text-slate-500">
+                              {Math.round(Number(item.calories) || 0)} kcal, {Math.round(Number(item.protein_g) || 0)}g protein, {Math.round(Number(item.carbs_g) || 0)}g carbs, {Math.round(Number(item.fat_g) || 0)}g fat
+                            </p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void recalculateCoachPhotoDraft()}
+                      disabled={foodToolBusy}
+                      className="min-h-11 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 disabled:opacity-60"
+                    >
+                      {coachFoodDraft.needs_review ? "Recalculate estimate" : "Refresh estimate"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={logCoachPhotoDraft}
+                      disabled={foodToolBusy || !coachFoodDraft.action}
+                      className="min-h-11 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                    >
+                      {coachFoodDraft.needs_review ? "Log reviewed estimate" : "Log photo meal"}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {coachFoodDraft?.type === "barcode" && (
+                <div className="space-y-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="inline-flex items-center gap-1 rounded-full bg-slate-900 px-2.5 py-1 text-xs font-semibold text-white">
+                          <PackageSearch size={12} /> Barcode draft
+                        </span>
+                        {selectedBarcodeMatch && (
+                          <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold ${nutritionSourceTone(selectedBarcodeMatch)}`}>
+                            {normalizeMacroConfidence(selectedBarcodeMatch?.macro_confidence, "high") === "high" ? <ShieldCheck size={12} /> : <PackageSearch size={12} />}
+                            {nutritionSourceLabel(selectedBarcodeMatch)} - {macroConfidenceLabel(selectedBarcodeMatch?.macro_confidence, false)}
+                          </span>
+                        )}
+                      </div>
+                      <p className="mt-2 text-sm font-semibold text-slate-950">{selectedBarcodeMatch?.name || `Barcode ${coachFoodDraft.barcode}`}</p>
+                      {selectedBarcodeMatch && (
+                        <>
+                          <p className="mt-1 text-sm text-slate-500">
+                            {selectedBarcodeMatch.quantity} - {Math.round(Number(selectedBarcodeMatch.calories) || 0)} kcal - {Math.round(Number(selectedBarcodeMatch.protein_g) || 0)}g protein
+                          </p>
+                          <p className="mt-1 text-sm text-slate-500">{selectedBarcodeMatch.source}</p>
+                        </>
+                      )}
+                    </div>
+                    <button type="button" onClick={() => setCoachFoodDraft(null)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
+                      Clear
+                    </button>
+                  </div>
+
+                  {!!coachFoodDraft.matches.length && (
+                    <div className="space-y-2">
+                      {coachFoodDraft.matches.slice(0, 5).map((food) => (
+                        <button
+                          key={food.id}
+                          type="button"
+                          onClick={() => selectCoachBarcodeMatch(food.id)}
+                          className={`w-full rounded-2xl border p-3 text-left ${food.id === selectedBarcodeMatch?.id ? "border-indigo-400 bg-indigo-50" : "border-slate-200 bg-white"}`}
+                        >
+                          <p className="text-sm font-semibold text-slate-950">{food.name}</p>
+                          <p className="mt-1 text-xs text-slate-500">{food.quantity} - {Math.round(Number(food.calories) || 0)} kcal - {Math.round(Number(food.protein_g) || 0)}g protein</p>
+                          <p className={`mt-1 text-xs ${nutritionSourceTone(food)}`}>{nutritionSourceLabel(food)} - {food.source}</p>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={logCoachBarcodeDraft}
+                      disabled={foodToolBusy || !selectedBarcodeMatch}
+                      className="min-h-11 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                    >
+                      Log this product
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
 
         <form onSubmit={send} aria-busy={thinking} className="flex gap-3 border-t border-slate-200 bg-white p-3" style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}>
           <input ref={inputRef} value={input} onChange={(event) => setInput(event.target.value)} disabled={thinking} placeholder={activeWorkout?.id ? "Set done 6 reps at 80kg..." : "Log bench 80kg for 4 sets of 6..."} className="min-h-11 min-w-0 flex-1 rounded-xl border border-slate-200 px-3 py-3 text-sm text-slate-950 shadow-sm disabled:bg-slate-50 disabled:text-slate-400" />

@@ -3,7 +3,8 @@ import fs from "node:fs"
 import path from "node:path"
 import OpenAI from "openai"
 import { createClient } from "@supabase/supabase-js"
-import { searchPhotoReferenceFoods, searchVerifiedFoods, verifiedFoods } from "../src/lib/nutritionDatabase.js"
+import { searchBestFoodMatches, searchPhotoReferenceFoods, verifiedFoods } from "../src/lib/nutritionDatabase.js"
+import { coachMealConfidenceNote } from "../src/lib/nutritionHelpers.js"
 import { buildCoachSessionState } from "./coachSessionState.mjs"
 import {
   buildCoachAuditResponseMeta,
@@ -17,6 +18,7 @@ import {
   summarizeCoachAuditRecords,
 } from "./coachAudit.mjs"
 import {
+  buildDeterministicFoodMacroReply,
   buildDeterministicNutritionStatusReply,
   buildDeterministicMealDeletionAction,
   buildDeterministicMealActions,
@@ -24,11 +26,12 @@ import {
   buildDeterministicWorkoutDeletionAction,
   deterministicAlreadyLoggedReply,
   deterministicClarifyActionFromSession,
+  extractFoodMacroLookupTerm,
   formatDeterministicMealAnswer,
   summarizeCoachAction,
 } from "./coachLoggingRules.mjs"
 import { normalizeCoachResponse } from "./normalizeCoachResponse.mjs"
-import { buildFoodPhotoEstimate } from "./nutritionPhotoAnalysis.mjs"
+import { buildFoodPhotoEstimate, buildReviewedFoodPhotoEstimate } from "./nutritionPhotoAnalysis.mjs"
 import { normalizeVisionImageDataUrl } from "./visionImagePrep.mjs"
 
 function loadDotEnv() {
@@ -91,7 +94,7 @@ const foodLookupCacheMaxEntries = Number(process.env.FOOD_LOOKUP_CACHE_MAX_ENTRI
 const foodLookupCache = new Map()
 const auditCapabilities = coachAuditCapabilities(adminSupabase)
 const defaultRequestBodyLimitBytes = 1_000_000
-const photoRequestBodyLimitBytes = 20_000_000
+const photoRequestBodyLimitBytes = 30_000_000
 
 const coachResponseSchema = {
   type: "object",
@@ -532,6 +535,7 @@ function buildCoachConversationWindow(recentMessages = [], currentMessage = "", 
 function buildDeterministicFallbackPayload({
   offlineDeterministicActions = [],
   nutritionStatusReply = "",
+  foodMacroReply = "",
   mealClarifyHint = null,
   workoutClarifyHint = null,
   mealContext = null,
@@ -566,6 +570,19 @@ function buildDeterministicFallbackPayload({
       payload: {
         reply: combinedActions.map((action) => summarizeCoachAction(action)).filter(Boolean).join(" "),
         actions: combinedActions,
+        warnings: [],
+        meal_session: mealContext,
+        workout_session: workoutContext,
+      },
+    }
+  }
+
+  if (foodMacroReply) {
+    return {
+      routeType: "deterministic-fallback",
+      payload: {
+        reply: foodMacroReply,
+        actions: [],
         warnings: [],
         meal_session: mealContext,
         workout_session: workoutContext,
@@ -788,7 +805,7 @@ function validateNutritionChefBody(body) {
 
 function validateNutritionPhotoBody(body) {
   assertObject(body, "request body")
-  assertString(body.imageDataUrl, "imageDataUrl", 15_000_000)
+  assertString(body.imageDataUrl, "imageDataUrl", 28_000_000)
   if (!/^data:image\/[a-z0-9.+-]+;base64,/i.test(String(body.imageDataUrl || ""))) {
     const error = new Error("imageDataUrl must be a base64 image data URL")
     error.status = 400
@@ -796,6 +813,59 @@ function validateNutritionPhotoBody(body) {
   }
   if (body.locale !== undefined && typeof body.locale !== "string") {
     const error = new Error("locale must be a string")
+    error.status = 400
+    throw error
+  }
+  if (body.mealType !== undefined && typeof body.mealType !== "string") {
+    const error = new Error("mealType must be a string")
+    error.status = 400
+    throw error
+  }
+}
+
+function validateNutritionPhotoReviewBody(body) {
+  assertObject(body, "request body")
+  if (!Array.isArray(body.items) || !body.items.length) {
+    const error = new Error("items must be a non-empty array")
+    error.status = 400
+    throw error
+  }
+  if (body.items.length > 12) {
+    const error = new Error("items must contain at most 12 entries")
+    error.status = 400
+    throw error
+  }
+  for (const item of body.items) {
+    assertObject(item, "items[]")
+    assertString(item.name, "items[].name", 160)
+    if (item.quantity !== undefined && typeof item.quantity !== "string") {
+      const error = new Error("items[].quantity must be a string")
+      error.status = 400
+      throw error
+    }
+    if (item.category !== undefined && typeof item.category !== "string") {
+      const error = new Error("items[].category must be a string")
+      error.status = 400
+      throw error
+    }
+    if (item.preparation !== undefined && typeof item.preparation !== "string") {
+      const error = new Error("items[].preparation must be a string")
+      error.status = 400
+      throw error
+    }
+    if (item.confidence !== undefined && typeof item.confidence !== "string") {
+      const error = new Error("items[].confidence must be a string")
+      error.status = 400
+      throw error
+    }
+  }
+  if (body.summary !== undefined && typeof body.summary !== "string") {
+    const error = new Error("summary must be a string")
+    error.status = 400
+    throw error
+  }
+  if (body.portion !== undefined && typeof body.portion !== "string") {
+    const error = new Error("portion must be a string")
     error.status = 400
     throw error
   }
@@ -992,6 +1062,64 @@ function roundMacro(value) {
   return Math.round(safeNumber(value) * 10) / 10
 }
 
+function normalizeComparableFoodText(value = "") {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[’']/g, "'")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
+function findMatchingCanonicalMealAction(action = {}, canonicalMealActions = []) {
+  const targetFood = normalizeComparableFoodText(action?.food_name)
+  const targetMealType = normalizeComparableFoodText(action?.meal_type)
+  if (!targetFood && !targetMealType) return canonicalMealActions[0] || null
+  return canonicalMealActions.find((candidate) => {
+    const candidateFood = normalizeComparableFoodText(candidate?.food_name)
+    const candidateMealType = normalizeComparableFoodText(candidate?.meal_type)
+    return (
+      (targetFood && candidateFood && (targetFood === candidateFood || targetFood.includes(candidateFood) || candidateFood.includes(targetFood)))
+      || (targetMealType && candidateMealType && targetMealType === candidateMealType)
+    )
+  }) || canonicalMealActions[0] || null
+}
+
+function hydrateMealActionMetadata(action = {}, canonicalMealActions = []) {
+  const type = String(action?.type || "").trim()
+  if (type !== "log_meal" && type !== "update_meal_log") return action
+  const canonical = findMatchingCanonicalMealAction(action, canonicalMealActions)
+  if (!canonical) return action
+  return {
+    ...action,
+    nutrition_source: String(action?.nutrition_source || "").trim() || canonical.nutrition_source,
+    nutrition_source_type: String(action?.nutrition_source_type || "").trim() || canonical.nutrition_source_type,
+    macro_confidence: String(action?.macro_confidence || "").trim() || canonical.macro_confidence,
+    macro_breakdown: Array.isArray(action?.macro_breakdown) && action.macro_breakdown.length
+      ? action.macro_breakdown
+      : canonical.macro_breakdown,
+  }
+}
+
+function replyMentionsMacroConfidence(reply = "") {
+  return /\b(?:estimate|estimated|approx|approximate|verified|reference|label|photo)\b/i.test(String(reply || ""))
+}
+
+function finalizeCoachPayload(payload = {}, { canonicalMealActions = [] } = {}) {
+  const actions = safeArray(payload.actions, 8).map((action) => hydrateMealActionMetadata(action, canonicalMealActions))
+  const firstMealAction = actions.find((action) => action?.type === "log_meal" || action?.type === "update_meal_log")
+  let reply = String(payload.reply || "").trim()
+  if (firstMealAction && !replyMentionsMacroConfidence(reply)) {
+    const note = coachMealConfidenceNote(firstMealAction)
+    if (note) reply = reply ? `${reply} ${note}` : note
+  }
+  return {
+    ...payload,
+    reply,
+    actions,
+  }
+}
+
 function readFoodLookupCache(cacheKey) {
   const cached = foodLookupCache.get(cacheKey)
   if (!cached) return null
@@ -1048,6 +1176,9 @@ function cleanLookupText(value) {
 }
 
 function extractCoachFoodSearchTerms(message) {
+  const directMacroFoodQuery = extractFoodMacroLookupTerm(message)
+  if (directMacroFoodQuery) return [directMacroFoodQuery]
+
   const text = cleanLookupText(message)
   if (!text) return []
   if (!/\b(food|meal|ate|had|log|track|add|include|breakfast|lunch|dinner|snack|calories|protein|carbs|fat)\b/.test(text)) return []
@@ -1375,8 +1506,9 @@ async function handleCoach(request, response) {
       : null
 
     candidateFoodMatches = {}
+    const directFoodMacroQuery = extractFoodMacroLookupTerm(body.message)
     const candidateFoodTerms = mealContext
-      ? buildMealCandidateFoodTerms(mealContext)
+      ? (directFoodMacroQuery ? [directFoodMacroQuery] : buildMealCandidateFoodTerms(mealContext))
       : shouldHydrateCoachFoodMatches(body.message, body.recentMessages)
         ? buildCoachCandidateFoodTerms(body.message, body.recentMessages)
         : []
@@ -1387,49 +1519,53 @@ async function handleCoach(request, response) {
       }
     }
 
+    let canonicalMealActionsForPayload = []
     const sendCoachPayload = (payload, routeType) => {
+      const finalPayload = finalizeCoachPayload(payload, {
+        canonicalMealActions: canonicalMealActionsForPayload,
+      })
       const auditRecord = {
         ...incomingAuditMeta,
         created_at: new Date().toISOString(),
         user_id: user?.id || "",
         user_email: user?.email || "",
         user_message: body.message,
-        assistant_reply: payload.reply,
+        assistant_reply: finalPayload.reply,
         intent: detectCoachAuditIntent({
           message: body.message,
           mealContext,
           workoutContext,
           routeType,
-          actions: payload.actions || [],
+          actions: finalPayload.actions || [],
         }),
         route_type: routeType,
         state_before: stateBefore,
         state_after: sanitizeCoachStateSnapshot({
-          meal_session: payload.meal_session || mealContext,
-          workout_session: payload.workout_session || workoutContext,
+          meal_session: finalPayload.meal_session || mealContext,
+          workout_session: finalPayload.workout_session || workoutContext,
         }),
-        conversation_window: buildCoachConversationWindow(contextualRecentMessages, body.message, payload.reply),
-        actions: payload.actions || [],
+        conversation_window: buildCoachConversationWindow(contextualRecentMessages, body.message, finalPayload.reply),
+        actions: finalPayload.actions || [],
         persisted_actions: [],
-        persistence_status: (payload.actions || []).some(isPersistenceAction)
+        persistence_status: (finalPayload.actions || []).some(isPersistenceAction)
           ? "pending_client"
           : mealContext?.alreadyLogged || workoutContext?.alreadyLogged
             ? "already_logged"
             : mealContext?.suppressed || workoutContext?.suppressed
               ? "suppressed"
               : "not_requested",
-        clarification_asked: (payload.actions || []).some((action) => action?.type === "clarify"),
+        clarification_asked: (finalPayload.actions || []).some((action) => action?.type === "clarify"),
         duplicate_prevention_triggered: false,
         draft_preserved_after_failure: null,
         latency_ms: Date.now() - startedAt,
-        warnings: payload.warnings || [],
+        warnings: finalPayload.warnings || [],
         error_summary: "",
         model_used: routeType === "ai-assisted" ? model : "",
       }
 
       queueAuditRecord(auditRecord)
       sendJson(response, 200, {
-        ...payload,
+        ...finalPayload,
         ...(auditCapabilities.enabled ? { audit_meta: buildCoachAuditResponseMeta(auditRecord) } : {}),
       }, requestResponseOrigin(request))
     }
@@ -1553,6 +1689,7 @@ async function handleCoach(request, response) {
           allowLooseEstimate: true,
         })
       : []
+    canonicalMealActionsForPayload = [...mealActions, ...mixedMealEstimateActions]
     if (!client && mealContext?.readyToLog && mealContext?.answerOnly && mealActions[0] && !workoutActions.length) {
       sendCoachPayload({
         reply: formatDeterministicMealAnswer(mealActions[0]),
@@ -1582,6 +1719,9 @@ async function handleCoach(request, response) {
       profile: body.profile || {},
       recentMeals: safeArray(body.meals, 24),
     })
+    const foodMacroReply = buildDeterministicFoodMacroReply({
+      message: body.message,
+    })
     if (!mealClarifyHint && !workoutClarifyHint) {
       if (offlineDeterministicActions.length && !client) {
         sendCoachPayload({
@@ -1598,6 +1738,17 @@ async function handleCoach(request, response) {
     if (nutritionStatusReply && !client) {
       sendCoachPayload({
         reply: nutritionStatusReply,
+        actions: [],
+        warnings: [],
+        meal_session: mealContext,
+        workout_session: workoutContext,
+      }, "deterministic")
+      return
+    }
+
+    if (foodMacroReply && !client) {
+      sendCoachPayload({
+        reply: foodMacroReply,
         actions: [],
         warnings: [],
         meal_session: mealContext,
@@ -1736,6 +1887,7 @@ async function handleCoach(request, response) {
       const fallback = buildDeterministicFallbackPayload({
       offlineDeterministicActions,
       nutritionStatusReply,
+      foodMacroReply,
       mealClarifyHint,
       workoutClarifyHint,
       mealContext,
@@ -1834,7 +1986,7 @@ async function lookupFoodsBroad(query) {
   const cached = readFoodLookupCache(cacheKey)
   if (cached) return cached
 
-  const localResults = searchVerifiedFoods(query).map(verifiedNutritionResult)
+  const localResults = searchBestFoodMatches(query).map(verifiedNutritionResult)
   const barcodeResults = looksLikeBarcode(normalizedQuery) ? await searchOpenFoodFactsByBarcode(normalizedQuery) : []
   const shouldSkipExternal = localResults.length >= 4
   const auResults = shouldSkipExternal ? [] : await searchOpenFoodFacts(query, { australiaOnly: true })
@@ -1982,6 +2134,50 @@ async function handleNutritionPhoto(request, response) {
     responseBody.protein_g = Number(action.protein_g || 0)
     responseBody.carbs_g = Number(action.carbs_g || 0)
     responseBody.fat_g = Number(action.fat_g || 0)
+    responseBody.macro_breakdown = Array.isArray(action.macro_breakdown) ? action.macro_breakdown : []
+  }
+
+  sendJson(response, 200, responseBody, requestResponseOrigin(request))
+}
+
+async function handleNutritionPhotoReview(request, response) {
+  await verifyRequestAuth(request)
+  const body = await readRequestBody(request)
+  validateNutritionPhotoReviewBody(body)
+
+  const estimatedMeal = await buildReviewedFoodPhotoEstimate({
+    summary: body.summary,
+    portion: body.portion,
+    items: body.items,
+  }, {
+    mealType: String(body.mealType || "").trim(),
+    lookupFoods: async (term) => (await lookupFoodsForPhoto(term)).slice(0, 6),
+  })
+
+  const action = estimatedMeal.action
+  const responseBody = {
+    summary: estimatedMeal.analysis.summary,
+    portion: estimatedMeal.analysis.portion,
+    food_name: action?.food_name || estimatedMeal.analysis.summary,
+    quantity: action?.quantity || estimatedMeal.analysis.portion,
+    estimated: true,
+    nutrition_source: action?.nutrition_source || estimatedMeal.nutrition_source || "AI plate-photo estimate",
+    nutrition_source_type: action?.nutrition_source_type || "photo_ai_estimate",
+    identified_items: estimatedMeal.breakdown,
+    macro_confidence: estimatedMeal.macro_confidence,
+    has_trusted_macros: Boolean(action),
+    can_autofill: true,
+    needs_review: false,
+    clarification_question: "",
+    assumptions: estimatedMeal.assumptions,
+  }
+
+  if (action) {
+    responseBody.calories = Number(action.calories || 0)
+    responseBody.protein_g = Number(action.protein_g || 0)
+    responseBody.carbs_g = Number(action.carbs_g || 0)
+    responseBody.fat_g = Number(action.fat_g || 0)
+    responseBody.macro_breakdown = Array.isArray(action.macro_breakdown) ? action.macro_breakdown : []
   }
 
   sendJson(response, 200, responseBody, requestResponseOrigin(request))
@@ -2271,6 +2467,19 @@ const server = http.createServer(async (request, response) => {
       const status = error.status || 500
       logRequest(request, status, "handler=nutrition-photo")
       sendError(response, request, error, "Photo nutrition analysis is unavailable right now.")
+    }
+    return
+  }
+
+  if (request.method === "POST" && request.url === "/api/nutrition/review-photo-estimate") {
+    try {
+      checkRateLimit(request)
+      await handleNutritionPhotoReview(request, response)
+      logRequest(request, 200, "handler=nutrition-photo-review")
+    } catch (error) {
+      const status = error.status || 500
+      logRequest(request, status, "handler=nutrition-photo-review")
+      sendError(response, request, error, "Photo estimate review is unavailable right now.")
     }
     return
   }

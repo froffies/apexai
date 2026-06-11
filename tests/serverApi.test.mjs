@@ -168,6 +168,20 @@ test("local API server exposes health, local nutrition, telemetry, and sanitized
   assert.match(String(teaResults.results[0]?.name || ""), /tea/i)
   assert.doesNotMatch(String(teaResults.results[0]?.name || ""), /steak/i)
 
+  const barramundiResponse = await fetch(`http://127.0.0.1:${port}/api/nutrition/search`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Origin: "http://127.0.0.1:5173",
+    },
+    body: JSON.stringify({ query: "barramundi fillet" }),
+  })
+  const barramundiResults = await barramundiResponse.json()
+  assert.equal(barramundiResponse.status, 200)
+  assert.match(String(barramundiResults.results[0]?.name || ""), /barramundi fillet/i)
+  assert.equal(barramundiResults.results[0]?.source_type, "estimated_internal_profile")
+  assert.match(String(barramundiResults.results[0]?.source || ""), /deterministic food-class estimate/i)
+
   const nutritionPhotoResponse = await fetch(`http://127.0.0.1:${port}/api/nutrition/analyze-photo`, {
     method: "POST",
     headers: {
@@ -940,10 +954,136 @@ test("ready meal corrections outrank stray workout clarifications when OpenAI is
   })
   const coach = await coachResponse.json()
   assert.equal(coachResponse.status, 200)
-  assert.equal(coach.reply, "Updated today's nutrition entry for 18 fried eggs cooked in 100g salted butter, plus 250ml Earl Grey tea with no milk and no sugar.")
+  assert.match(coach.reply || "", /Updated today's nutrition entry for 18 fried eggs cooked in 100g salted butter, plus 250ml Earl Grey tea with no milk and no sugar\./)
+  assert.match(coach.reply || "", /verified/i)
   assert.equal(coach.actions?.[0]?.type, "update_meal_log")
   assert.equal(coach.actions?.[0]?.meal_id, "meal_fix_live")
   assert.ok(!coach.workout_session || !coach.workout_session.clarifyQuestion)
+})
+
+test("ai-assisted coach recovers a ready meal correction when the model replies with a stale workout message", async (t) => {
+  const fakeOpenAIBaseUrl = await startFakeOpenAIServer(t, async (_request, response) => {
+    response.writeHead(200, { "Content-Type": "application/json" })
+    response.end(JSON.stringify({
+      id: "chatcmpl_recover_meal",
+      object: "chat.completion",
+      created: 1,
+      model: "gpt-4o-mini",
+      choices: [
+        {
+          index: 0,
+          finish_reason: "stop",
+          message: {
+            role: "assistant",
+            content: JSON.stringify({
+              reply: "I already saved Pushups in Workouts. If you want to change it, tell me what to update.",
+              actions: [],
+              warnings: [],
+            }),
+          },
+        },
+      ],
+    }))
+  })
+
+  const port = randomPort()
+  const serverProcess = spawn(process.execPath, [serverEntry], {
+    cwd,
+    env: {
+      ...process.env,
+      OPENAI_COACH_PORT: String(port),
+      OPENAI_COACH_REQUIRE_AUTH: "false",
+      OPENAI_COACH_CORS_ORIGIN: "http://127.0.0.1:5173",
+      OPENFOODFACTS_ENABLED: "false",
+      OPENAI_API_KEY: "test-key",
+      OPENAI_BASE_URL: fakeOpenAIBaseUrl,
+      NODE_ENV: "production",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  })
+
+  t.after(async () => {
+    serverProcess.kill()
+  })
+
+  await waitForHealth(port)
+
+  const coachResponse = await fetch(`http://127.0.0.1:${port}/api/coach`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Origin: "http://127.0.0.1:5173",
+    },
+    body: JSON.stringify({
+      message: "actually it was 18 fried eggs cooked in 100g of salted butter, plus 250ml Earl Grey tea with no milk and no sugar",
+      mealSession: {
+        active: true,
+        mealConversation: true,
+        readyToLog: true,
+        clarificationAttempts: 8,
+        clarificationCounts: { "egg:quantity": 2, "earl grey tea:quantity": 1, "egg:cooking_medium": 5, "tea:additions": 4 },
+        summary: "18 fried eggs cooked in 100g salted butter, plus 250ml Earl Grey tea with no milk and no sugar",
+        clarifyQuestion: "",
+        persisted: true,
+        persistedMealId: "meal_fix_live",
+        persistedSummary: "17 fried eggs cooked in 100g salted butter, plus 250ml Earl Grey tea with no milk and no sugar",
+        correctionRequested: true,
+        items: [
+          {
+            base_name: "egg",
+            label: "Eggs",
+            category: "food",
+            quantity: { amount: 18, unit: "egg", text: "18 eggs" },
+            preparation: ["fried"],
+            exclusions: [],
+            attached_to: null,
+            relation: null,
+          },
+          {
+            base_name: "earl grey tea",
+            label: "Earl Grey tea",
+            category: "drink",
+            quantity: { amount: 250, unit: "ml", text: "250ml" },
+            preparation: [],
+            exclusions: ["no sugar", "no milk"],
+            attached_to: null,
+            relation: null,
+          },
+          {
+            base_name: "salted butter",
+            label: "Salted Butter",
+            category: "ingredient",
+            quantity: { amount: 100, unit: "g", text: "100g" },
+            preparation: ["salted"],
+            exclusions: [],
+            attached_to: "egg::fried",
+            relation: "cooked_in",
+          },
+        ],
+      },
+      workoutSession: {
+        active: false,
+        workoutConversation: true,
+        readyToLog: false,
+        persisted: true,
+        persistedWorkoutId: "workout_pushups",
+        persistedSummary: "Pushups for 1 set of 3",
+        summary: "Pushups for 1 set of 3",
+        exercise_name: "Pushups",
+        workout_type: "Pushups",
+        muscle_group: "full_body",
+        sets: 1,
+        reps: 3,
+        weight_kg: 0,
+      },
+    }),
+  })
+  const coach = await coachResponse.json()
+  assert.equal(coachResponse.status, 200)
+  assert.equal(coach.actions?.[0]?.type, "update_meal_log")
+  assert.equal(coach.actions?.[0]?.meal_id, "meal_fix_live")
+  assert.match(coach.reply, /updated today's nutrition/i)
+  assert.doesNotMatch(coach.reply, /already saved .*pushups/i)
 })
 
 test("additive meal follow-ups update the persisted meal instead of creating a duplicate", async (t) => {
@@ -1188,6 +1328,64 @@ test("deterministic coach nutrition answers still work when OpenAI is unavailabl
   assert.equal(coach.actions.length, 0)
   assert.match(coach.reply, /that comes to about/i)
   assert.match(coach.reply, /if you want it saved, tell me to log it/i)
+})
+
+test("coach food macro questions fall back to deterministic food answers when OpenAI is unreachable", async (t) => {
+  const port = randomPort()
+  const serverProcess = spawn(process.execPath, [serverEntry], {
+    cwd,
+    env: {
+      ...process.env,
+      OPENAI_COACH_PORT: String(port),
+      OPENAI_COACH_REQUIRE_AUTH: "false",
+      OPENAI_COACH_CORS_ORIGIN: "http://127.0.0.1:5173",
+      OPENFOODFACTS_ENABLED: "false",
+      OPENAI_API_KEY: "test-key",
+      OPENAI_BASE_URL: "http://127.0.0.1:9/v1",
+      NODE_ENV: "production",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  })
+
+  t.after(async () => {
+    serverProcess.kill()
+  })
+
+  await waitForHealth(port)
+
+  const coachResponse = await fetch(`http://127.0.0.1:${port}/api/coach`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Origin: "http://127.0.0.1:5173",
+    },
+    body: JSON.stringify({
+      message: "whats the macros for a standard serve of caesar salad?",
+    }),
+  })
+  const coach = await coachResponse.json()
+  assert.equal(coachResponse.status, 200)
+  assert.equal(coach.actions?.length || 0, 0)
+  assert.match(coach.reply, /caesar salad/i)
+  assert.match(coach.reply, /360 kcal/i)
+  assert.doesNotMatch(coach.reply, /couldn't reach the live coach/i)
+
+  const barramundiCoachResponse = await fetch(`http://127.0.0.1:${port}/api/coach`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Origin: "http://127.0.0.1:5173",
+    },
+    body: JSON.stringify({
+      message: "whats the macros for barramundi fillet?",
+    }),
+  })
+  const barramundiCoach = await barramundiCoachResponse.json()
+  assert.equal(barramundiCoachResponse.status, 200)
+  assert.equal(barramundiCoach.actions?.length || 0, 0)
+  assert.match(barramundiCoach.reply, /barramundi fillet/i)
+  assert.match(barramundiCoach.reply, /128 kcal/i)
+  assert.match(barramundiCoach.reply, /deterministic fallback estimate/i)
 })
 
 test("deterministic coach can combine a clarified meal and a remembered workout from the same mixed thread", async (t) => {
@@ -2419,4 +2617,52 @@ test("nutrition photo route explains shared vision exhaustion when the deploymen
   const nutritionPhoto = await nutritionPhotoResponse.json()
   assert.equal(nutritionPhotoResponse.status, 503)
   assert.match(String(nutritionPhoto.error || ""), /shared ai vision capacity is exhausted/i)
+})
+
+test("reviewed photo nutrition endpoint recalculates a loggable estimate without OpenAI vision", async (t) => {
+  const port = randomPort()
+  const serverProcess = spawn(process.execPath, [serverEntry], {
+    cwd,
+    env: {
+      ...process.env,
+      OPENAI_COACH_PORT: String(port),
+      OPENAI_COACH_REQUIRE_AUTH: "false",
+      OPENAI_COACH_CORS_ORIGIN: "http://127.0.0.1:5173",
+      OPENFOODFACTS_ENABLED: "false",
+      OPENAI_API_KEY: "",
+      NODE_ENV: "production",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  })
+
+  t.after(async () => {
+    serverProcess.kill()
+  })
+
+  await waitForHealth(port)
+
+  const response = await fetch(`http://127.0.0.1:${port}/api/nutrition/review-photo-estimate`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Origin: "http://127.0.0.1:5173",
+    },
+    body: JSON.stringify({
+      summary: "banana and milk",
+      portion: "1 serve",
+      mealType: "breakfast",
+      items: [
+        { name: "banana", quantity: "1 banana", category: "food", confidence: "high" },
+        { name: "milk", quantity: "250ml milk", category: "drink", confidence: "high" },
+      ],
+    }),
+  })
+  const reviewed = await response.json()
+  assert.equal(response.status, 200)
+  assert.equal(reviewed.nutrition_source_type, "photo_ai_estimate")
+  assert.equal(reviewed.needs_review, false)
+  assert.equal(reviewed.can_autofill, true)
+  assert.ok(Array.isArray(reviewed.identified_items))
+  assert.ok(Array.isArray(reviewed.macro_breakdown))
+  assert.ok(Number(reviewed.calories) > 150)
 })

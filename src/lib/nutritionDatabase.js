@@ -4,6 +4,7 @@ const auSource = "Australian Food Composition Database / FSANZ AFCD Release 3, c
 const auDerivedSource = "Australian Food Composition Database / FSANZ AFCD Release 3 reference values, scaled to a common serve"
 const nzSource = "New Zealand Food Composition Database / FOODfiles Concise Tables 14th Edition, curated local catalogue"
 const estimatedSource = "ApexAI internal meal profile estimate"
+const deterministicEstimateSource = "ApexAI deterministic food-class estimate"
 const photoDishSource = "ApexAI curated plate-photo dish profile"
 
 function curatedFood(food, { source, sourceType }) {
@@ -21,6 +22,16 @@ function estimatedFood(food) {
     source: estimatedSource,
     source_type: "estimated_internal_profile",
     macro_confidence: "medium",
+  }
+}
+
+function deterministicProfileFood(food, confidence = "medium") {
+  return {
+    ...food,
+    source: deterministicEstimateSource,
+    source_type: "estimated_internal_profile",
+    macro_confidence: confidence,
+    deterministic_profile: true,
   }
 }
 
@@ -195,19 +206,20 @@ const auDerivedFoods = [
   { id: "pickle_4_slices", name: "Pickle slices", aliases: ["pickles", "pickle", "gherkin", "4 slices pickle"], quantity: "4 slices", calories: 3, protein_g: 0.1, carbs_g: 0.6, fat_g: 0, category: "produce" },
   { id: "mustard_tsp", name: "Mustard", aliases: ["mustard", "1 teaspoon mustard"], quantity: "1 teaspoon", calories: 4, protein_g: 0.2, carbs_g: 0.3, fat_g: 0.2, category: "pantry" },
   { id: "basil_5g", name: "Fresh basil", aliases: ["basil", "fresh basil"], quantity: "5g", calories: 1, protein_g: 0.2, carbs_g: 0.1, fat_g: 0, category: "produce" },
-  { id: "coriander_10g", name: "Fresh coriander", aliases: ["coriander", "coriander garnish"], quantity: "10g", calories: 2, protein_g: 0.2, carbs_g: 0.4, fat_g: 0, category: "produce" },
+  { id: "coriander_10g", name: "Fresh coriander", aliases: ["coriander", "coriander garnish", "fresh coriander", "sprig of coriander"], quantity: "10g", calories: 2, protein_g: 0.2, carbs_g: 0.4, fat_g: 0, category: "produce" },
   { id: "hot_chips_small", name: "Hot chips", aliases: ["fries", "chips", "hot chips", "small fries"], quantity: "1 small serve", calories: 260, protein_g: 3.4, carbs_g: 34, fat_g: 12, category: "carbs" },
-  { id: "naan_piece", name: "Plain naan", aliases: ["naan", "naan bread", "1 piece naan bread"], quantity: "1 piece", calories: 285, protein_g: 9, carbs_g: 50, fat_g: 6, category: "carbs" },
-  { id: "pasta_cooked_200g", name: "Cooked pasta", aliases: ["pasta", "spaghetti", "fettuccine", "plain pasta"], quantity: "200g", calories: 274, protein_g: 10.6, carbs_g: 52.4, fat_g: 0.8, category: "carbs" },
+  { id: "naan_piece", name: "Plain naan", aliases: ["naan", "naan bread", "plain naan bread", "1 piece naan bread", "piece of naan bread", "grilled naan bread"], quantity: "1 piece", calories: 285, protein_g: 9, carbs_g: 50, fat_g: 6, category: "carbs" },
+  { id: "pasta_cooked_200g", name: "Cooked pasta", aliases: ["pasta", "spaghetti", "fettuccine", "penne", "farfalle", "pappardelle", "tagliatelle", "plain pasta", "penne pasta", "farfalle pasta", "pappardelle pasta", "tagliatelle pasta", "cooked penne pasta", "cooked farfalle pasta", "boiled spaghetti"], quantity: "200g", calories: 274, protein_g: 10.6, carbs_g: 52.4, fat_g: 0.8, category: "carbs" },
   { id: "tomato_pasta_sauce_125g", name: "Tomato pasta sauce", aliases: ["tomato sauce", "pasta sauce", "tomato pasta sauce"], quantity: "125g", calories: 60, protein_g: 1.8, carbs_g: 11.5, fat_g: 1.2, category: "pantry" },
-  { id: "cheese_grated_15g", name: "Grated cheese", aliases: ["grated cheese", "shredded cheese", "parmesan", "parmesan cheese", "grated parmesan"], quantity: "15g", calories: 61, protein_g: 3.7, carbs_g: 0.1, fat_g: 5, category: "dairy" },
+  { id: "cheese_grated_15g", name: "Grated cheese", aliases: ["grated cheese", "shredded cheese", "parmesan", "parmesan cheese", "grated parmesan", "grated parmesan cheese"], quantity: "15g", calories: 61, protein_g: 3.7, carbs_g: 0.1, fat_g: 5, category: "dairy" },
   { id: "cherry_tomatoes_100g", name: "Cherry tomatoes", aliases: ["cherry tomatoes", "fresh tomatoes"], quantity: "100g", calories: 18, protein_g: 0.9, carbs_g: 3.9, fat_g: 0.2, category: "produce" },
   { id: "chicken_curry_200g", name: "Cooked chicken curry", aliases: ["chicken curry", "cooked chicken curry", "butter chicken", "chicken in sauce"], quantity: "200g", calories: 360, protein_g: 28, carbs_g: 14, fat_g: 20, category: "mixed meal" },
-  { id: "rice_cooked_200g", name: "Cooked rice", aliases: ["cooked rice", "rice"], quantity: "200g", calories: 316, protein_g: 6.2, carbs_g: 69.4, fat_g: 0.4, category: "carbs" },
+  { id: "rice_cooked_200g", name: "Cooked rice", aliases: ["cooked rice", "rice", "basmati rice", "cooked basmati rice"], quantity: "200g", calories: 316, protein_g: 6.2, carbs_g: 69.4, fat_g: 0.4, category: "carbs" },
 ].map(derivedFood)
 
 const estimatedFoods = [
   { id: "protein_shake_40", name: "Protein shake", aliases: ["protein shake", "40g protein", "shake"], quantity: "40g protein serve", calories: 210, protein_g: 40, carbs_g: 5, fat_g: 3, category: "protein" },
+  { id: "caesar_salad_standard", name: "Caesar salad", aliases: ["caesar salad", "standard caesar salad", "serve of caesar salad"], quantity: "1 standard serve", calories: 360, protein_g: 10, carbs_g: 14, fat_g: 28, category: "mixed meal" },
   { id: "chicken_burrito_bowl", name: "Chicken burrito bowl", aliases: ["chicken burrito bowl", "burrito bowl"], quantity: "1 large bowl", calories: 680, protein_g: 48, carbs_g: 76, fat_g: 18, category: "mixed meal" },
   { id: "greek_yoghurt_berries_oats", name: "Greek yoghurt, berries, and oats", aliases: ["yoghurt berries oats", "greek yoghurt", "yogurt berries oats"], quantity: "1 bowl", calories: 430, protein_g: 32, carbs_g: 48, fat_g: 11, category: "breakfast" },
   { id: "chicken_rice_bowl", name: "Chicken rice bowl", aliases: ["chicken rice", "chicken rice bowl"], quantity: "1 bowl", calories: 620, protein_g: 45, carbs_g: 68, fat_g: 16, category: "mixed meal" },
@@ -215,6 +227,39 @@ const estimatedFoods = [
   { id: "lean_beef_bowl", name: "Lean beef burrito bowl", aliases: ["lean beef bowl", "beef burrito bowl"], quantity: "1 bowl", calories: 720, protein_g: 52, carbs_g: 78, fat_g: 22, category: "mixed meal" },
   { id: "tuna_rice", name: "Tuna and rice", aliases: ["tuna rice", "tuna and rice"], quantity: "1 bowl", calories: 465, protein_g: 39, carbs_g: 58, fat_g: 8, category: "protein" },
 ].map(estimatedFood)
+
+const deterministicFoods = [
+  { id: "garden_salad_generic", name: "Garden salad", aliases: ["garden salad", "green salad", "house salad", "side salad"], quantity: "1 bowl", calories: 120, protein_g: 4, carbs_g: 10, fat_g: 7, category: "mixed meal" },
+  { id: "greek_salad_generic", name: "Greek salad", aliases: ["greek salad", "feta salad"], quantity: "1 bowl", calories: 280, protein_g: 7, carbs_g: 11, fat_g: 21, category: "mixed meal" },
+  { id: "chicken_salad_generic", name: "Chicken salad", aliases: ["chicken salad", "grilled chicken salad"], quantity: "1 bowl", calories: 360, protein_g: 30, carbs_g: 13, fat_g: 20, category: "mixed meal" },
+  { id: "tuna_salad_generic", name: "Tuna salad", aliases: ["tuna salad"], quantity: "1 bowl", calories: 330, protein_g: 24, carbs_g: 12, fat_g: 18, category: "mixed meal" },
+  { id: "sandwich_generic", name: "Sandwich", aliases: ["sandwich", "mixed sandwich"], quantity: "1 sandwich", calories: 350, protein_g: 16, carbs_g: 34, fat_g: 15, category: "mixed meal" },
+  { id: "chicken_sandwich_generic", name: "Chicken sandwich", aliases: ["chicken sandwich", "chicken roll"], quantity: "1 sandwich", calories: 420, protein_g: 28, carbs_g: 35, fat_g: 18, category: "mixed meal" },
+  { id: "ham_sandwich_generic", name: "Ham sandwich", aliases: ["ham sandwich"], quantity: "1 sandwich", calories: 360, protein_g: 20, carbs_g: 35, fat_g: 14, category: "mixed meal" },
+  { id: "wrap_generic", name: "Wrap", aliases: ["wrap", "tortilla wrap"], quantity: "1 wrap", calories: 390, protein_g: 16, carbs_g: 34, fat_g: 20, category: "mixed meal" },
+  { id: "chicken_wrap_generic", name: "Chicken wrap", aliases: ["chicken wrap"], quantity: "1 wrap", calories: 480, protein_g: 30, carbs_g: 40, fat_g: 20, category: "mixed meal" },
+  { id: "beef_burger_generic", name: "Beef burger", aliases: ["beef burger", "burger"], quantity: "1 burger", calories: 650, protein_g: 32, carbs_g: 45, fat_g: 38, category: "mixed meal" },
+  { id: "chicken_burger_generic", name: "Chicken burger", aliases: ["chicken burger"], quantity: "1 burger", calories: 590, protein_g: 34, carbs_g: 43, fat_g: 31, category: "mixed meal" },
+  { id: "sushi_roll_generic", name: "Sushi roll", aliases: ["sushi roll", "sushi"], quantity: "1 roll", calories: 220, protein_g: 9, carbs_g: 33, fat_g: 5, category: "mixed meal" },
+  { id: "fried_rice_generic", name: "Fried rice", aliases: ["fried rice"], quantity: "1 plate", calories: 620, protein_g: 17, carbs_g: 86, fat_g: 21, category: "mixed meal" },
+  { id: "stir_fry_generic", name: "Stir fry", aliases: ["stir fry", "stir-fry"], quantity: "1 bowl", calories: 520, protein_g: 26, carbs_g: 32, fat_g: 28, category: "mixed meal" },
+  { id: "curry_generic", name: "Curry with rice", aliases: ["curry", "curry with rice"], quantity: "1 bowl", calories: 690, protein_g: 28, carbs_g: 70, fat_g: 30, category: "mixed meal" },
+  { id: "noodles_generic", name: "Noodles", aliases: ["noodles", "stir fried noodles", "fried noodles"], quantity: "1 bowl", calories: 520, protein_g: 15, carbs_g: 67, fat_g: 20, category: "mixed meal" },
+  { id: "smoothie_generic", name: "Smoothie", aliases: ["smoothie", "fruit smoothie"], quantity: "350ml", calories: 260, protein_g: 8, carbs_g: 45, fat_g: 6, category: "drink" },
+  { id: "milkshake_generic", name: "Milkshake", aliases: ["milkshake", "thickshake"], quantity: "350ml", calories: 420, protein_g: 11, carbs_g: 54, fat_g: 18, category: "drink" },
+  { id: "granola_generic", name: "Granola", aliases: ["granola", "granola cereal"], quantity: "60g", calories: 250, protein_g: 6, carbs_g: 35, fat_g: 9, category: "breakfast" },
+  { id: "protein_bar_generic", name: "Protein bar", aliases: ["protein bar"], quantity: "1 bar", calories: 220, protein_g: 20, carbs_g: 21, fat_g: 7, category: "snack" },
+  { id: "muffin_generic", name: "Muffin", aliases: ["muffin", "blueberry muffin"], quantity: "1 muffin", calories: 380, protein_g: 6, carbs_g: 55, fat_g: 14, category: "snack" },
+  { id: "croissant_generic", name: "Croissant", aliases: ["croissant"], quantity: "1 croissant", calories: 230, protein_g: 5, carbs_g: 26, fat_g: 12, category: "snack" },
+  { id: "doughnut_generic", name: "Doughnut", aliases: ["doughnut", "donut"], quantity: "1 doughnut", calories: 260, protein_g: 4, carbs_g: 31, fat_g: 13, category: "snack" },
+  { id: "cookie_generic", name: "Cookie", aliases: ["cookie", "biscuit"], quantity: "1 cookie", calories: 160, protein_g: 2, carbs_g: 20, fat_g: 8, category: "snack" },
+  { id: "granola_bar_generic", name: "Granola bar", aliases: ["granola bar", "muesli bar"], quantity: "1 bar", calories: 190, protein_g: 4, carbs_g: 25, fat_g: 8, category: "snack" },
+  { id: "trail_mix_generic", name: "Trail mix", aliases: ["trail mix", "mixed nuts and dried fruit"], quantity: "40g", calories: 210, protein_g: 5, carbs_g: 15, fat_g: 14, category: "snack" },
+  { id: "soft_drink_generic", name: "Soft drink", aliases: ["soft drink", "soda", "coke", "cola"], quantity: "375ml can", calories: 155, protein_g: 0, carbs_g: 39, fat_g: 0, category: "drink" },
+  { id: "diet_soft_drink_generic", name: "Diet soft drink", aliases: ["diet coke", "coke zero", "diet cola", "diet soft drink", "zero sugar soft drink"], quantity: "375ml can", calories: 1, protein_g: 0, carbs_g: 0, fat_g: 0, category: "drink" },
+  { id: "beer_generic", name: "Beer", aliases: ["beer", "lager", "ale"], quantity: "375ml", calories: 145, protein_g: 1.4, carbs_g: 11, fat_g: 0, category: "drink" },
+  { id: "wine_generic", name: "Wine", aliases: ["wine", "red wine", "white wine"], quantity: "150ml glass", calories: 125, protein_g: 0.1, carbs_g: 4, fat_g: 0, category: "drink" },
+].map((food) => deterministicProfileFood(food, "medium"))
 
 const photoDishProfiles = [
   { id: "photo_burger", name: "Burger", aliases: ["burger", "wholemeal burger", "cheeseburger", "burger with egg", "burger with bacon", "grilled burger"], quantity: "1 burger", calories: 650, protein_g: 32, carbs_g: 45, fat_g: 38, category: "mixed meal" },
@@ -230,7 +275,7 @@ const photoDishProfiles = [
   { id: "photo_pizza", name: "Pizza", aliases: ["pizza", "pepperoni pizza", "pizza slice", "slice of pizza", "slice of pepperoni pizza"], quantity: "2 slices", calories: 570, protein_g: 24, carbs_g: 60, fat_g: 25, category: "mixed meal" },
 ].map(photoDishFood)
 
-export const verifiedFoods = [...auDerivedFoods, ...auVerifiedFoods, ...nzVerifiedFoods, ...estimatedFoods]
+export const verifiedFoods = [...auDerivedFoods, ...auVerifiedFoods, ...nzVerifiedFoods, ...estimatedFoods, ...deterministicFoods]
 
 function normalize(text) {
   return String(text || "")
@@ -246,6 +291,72 @@ function compactNormalize(text) {
 
 function tokenize(text) {
   return normalize(text).split(" ").filter(Boolean)
+}
+
+function titleCase(text) {
+  return String(text || "")
+    .trim()
+    .replace(/\w\S*/g, (word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+}
+
+const SEARCH_STOPWORDS = new Set([
+  "a", "an", "and", "are", "for", "in", "is", "me", "my", "of", "or", "please", "show", "tell", "the",
+  "what", "whats", "whats", "what's", "with", "about", "around", "roughly", "nutrition", "nutritional",
+  "info", "information", "macro", "macros", "calorie", "calories", "protein", "carb", "carbs", "fat",
+])
+const SEARCH_DESCRIPTOR_TOKENS = new Set([
+  "fresh", "plain", "cooked", "serving", "serve", "standard", "typical", "usual", "piece", "pieces", "bowl",
+  "plate", "glass", "cup", "mug", "bottle", "can", "small", "medium", "large", "regular",
+])
+const TOKEN_EQUIVALENTS = new Map([
+  ["yogurt", "yoghurt"],
+  ["veggies", "vegetables"],
+  ["veggie", "vegetable"],
+  ["fries", "chips"],
+  ["lite", "light"],
+  ["skinny", "skim"],
+  ["weetbix", "weet bix"],
+])
+const PORTION_QUERY_PATTERN = /\b\d+(?:\.\d+)?\s*(?:kg|g|oz|lb|lbs|ml|l|pieces?|piece|serves?|servings?|bowls?|plates?|cups?|slices?|glasses?|mugs?|bottles?|cans?|sandwich(?:es)?|wraps?|burgers?|rolls?|bars?)\b/gi
+
+function normalizeQueryToken(token) {
+  const normalizedToken = normalize(token)
+  if (!normalizedToken) return ""
+  const swapped = TOKEN_EQUIVALENTS.get(normalizedToken) || normalizedToken
+  if (swapped.length > 4 && swapped.endsWith("ies")) return `${swapped.slice(0, -3)}y`
+  if (swapped.length > 4 && swapped.endsWith("oes")) return swapped.slice(0, -2)
+  if (swapped.length > 3 && swapped.endsWith("s") && !swapped.endsWith("ss")) return swapped.slice(0, -1)
+  return swapped
+}
+
+function stripFoodSearchNoise(query = "") {
+  return String(query || "")
+    .replace(/[?]+$/g, "")
+    .replace(PORTION_QUERY_PATTERN, " ")
+    .replace(/\b(?:how|many|much|give|show|tell)\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
+function buildFoodSearchVariants(query = "") {
+  const raw = String(query || "").trim()
+  if (!raw) return []
+
+  const stripped = stripFoodSearchNoise(raw)
+  const baseTokens = tokenize(stripped)
+    .map(normalizeQueryToken)
+    .filter(Boolean)
+  const withoutStopwords = baseTokens.filter((token) => !SEARCH_STOPWORDS.has(token))
+  const withoutDescriptors = withoutStopwords.filter((token) => !SEARCH_DESCRIPTOR_TOKENS.has(token))
+  const variants = new Set([
+    raw,
+    stripped,
+    baseTokens.join(" "),
+    withoutStopwords.join(" "),
+    withoutDescriptors.join(" "),
+  ].map((value) => normalize(value)).filter(Boolean))
+
+  return [...variants]
 }
 
 function namesForFood(food) {
@@ -295,6 +406,134 @@ function scoreFoodMatch(query, food) {
   }
 
   return bestScore ? bestScore + sourceRank(food) : 0
+}
+
+function hasAnyToken(tokens, values) {
+  return values.some((value) => tokens.includes(normalizeQueryToken(value)))
+}
+
+function hasAllTokens(tokens, values) {
+  return values.every((value) => tokens.includes(normalizeQueryToken(value)))
+}
+
+function cloneFoodProfile(food, overrides = {}) {
+  return {
+    ...food,
+    ...overrides,
+    aliases: Array.isArray(overrides.aliases) ? overrides.aliases : [...(Array.isArray(food.aliases) ? food.aliases : [])],
+  }
+}
+
+function buildDynamicFoodEstimate(query = "") {
+  const normalizedQuery = normalize(query)
+  const tokens = buildFoodSearchVariants(query)
+    .flatMap((variant) => tokenize(variant))
+    .map(normalizeQueryToken)
+    .filter(Boolean)
+    .filter((token, index, all) => all.indexOf(token) === index)
+
+  if (!normalizedQuery || !tokens.length) return null
+
+  const contains = (...values) => hasAnyToken(tokens, values)
+  const containsAll = (...values) => hasAllTokens(tokens, values)
+  const estimateName = titleCase(stripFoodSearchNoise(query) || query)
+  const makeEstimate = (profile) => deterministicProfileFood({
+    id: `dynamic_${normalize(estimateName).replace(/[^a-z0-9]+/g, "_") || "food"}`,
+    name: estimateName,
+    aliases: [normalize(query)].filter(Boolean),
+    ...profile,
+  }, "low")
+
+  if (contains("salad")) {
+    if (contains("chicken")) return makeEstimate({ quantity: "1 bowl", calories: 360, protein_g: 30, carbs_g: 13, fat_g: 20, category: "mixed meal" })
+    if (contains("tuna")) return makeEstimate({ quantity: "1 bowl", calories: 330, protein_g: 24, carbs_g: 12, fat_g: 18, category: "mixed meal" })
+    if (contains("greek", "feta", "olive")) return makeEstimate({ quantity: "1 bowl", calories: 280, protein_g: 7, carbs_g: 11, fat_g: 21, category: "mixed meal" })
+    return makeEstimate({ quantity: "1 bowl", calories: 120, protein_g: 4, carbs_g: 10, fat_g: 7, category: "mixed meal" })
+  }
+
+  if (contains("sandwich")) {
+    if (contains("chicken")) return makeEstimate({ quantity: "1 sandwich", calories: 420, protein_g: 28, carbs_g: 35, fat_g: 18, category: "mixed meal" })
+    if (contains("ham")) return makeEstimate({ quantity: "1 sandwich", calories: 360, protein_g: 20, carbs_g: 35, fat_g: 14, category: "mixed meal" })
+    return makeEstimate({ quantity: "1 sandwich", calories: 350, protein_g: 16, carbs_g: 34, fat_g: 15, category: "mixed meal" })
+  }
+
+  if (contains("wrap", "burrito")) {
+    if (contains("chicken")) return makeEstimate({ quantity: "1 wrap", calories: 480, protein_g: 30, carbs_g: 40, fat_g: 20, category: "mixed meal" })
+    if (contains("beef")) return makeEstimate({ quantity: "1 wrap", calories: 560, protein_g: 30, carbs_g: 46, fat_g: 27, category: "mixed meal" })
+    return makeEstimate({ quantity: "1 wrap", calories: 390, protein_g: 16, carbs_g: 34, fat_g: 20, category: "mixed meal" })
+  }
+
+  if (contains("burger")) {
+    if (contains("chicken")) return makeEstimate({ quantity: "1 burger", calories: 590, protein_g: 34, carbs_g: 43, fat_g: 31, category: "mixed meal" })
+    return makeEstimate({ quantity: "1 burger", calories: 650, protein_g: 32, carbs_g: 45, fat_g: 38, category: "mixed meal" })
+  }
+
+  if (contains("pizza")) return makeEstimate({ quantity: "2 slices", calories: 570, protein_g: 24, carbs_g: 60, fat_g: 25, category: "mixed meal" })
+  if (contains("sushi")) return makeEstimate({ quantity: "1 roll", calories: 220, protein_g: 9, carbs_g: 33, fat_g: 5, category: "mixed meal" })
+  if (contains("curry")) return makeEstimate({ quantity: "1 bowl", calories: 690, protein_g: 28, carbs_g: 70, fat_g: 30, category: "mixed meal" })
+  if (normalizedQuery.includes("stir fry") || normalizedQuery.includes("stir-fry")) return makeEstimate({ quantity: "1 bowl", calories: 520, protein_g: 26, carbs_g: 32, fat_g: 28, category: "mixed meal" })
+  if (containsAll("fried", "rice")) return makeEstimate({ quantity: "1 plate", calories: 620, protein_g: 17, carbs_g: 86, fat_g: 21, category: "mixed meal" })
+  if (contains("noodle", "noodles")) return makeEstimate({ quantity: "1 bowl", calories: 520, protein_g: 15, carbs_g: 67, fat_g: 20, category: "mixed meal" })
+  if (contains("soup")) return makeEstimate({ quantity: "1 bowl", calories: 180, protein_g: 7, carbs_g: 22, fat_g: 6, category: "soup" })
+  if (contains("smoothie")) return makeEstimate({ quantity: "350ml", calories: 260, protein_g: 8, carbs_g: 45, fat_g: 6, category: "drink" })
+  if (contains("milkshake", "thickshake")) return makeEstimate({ quantity: "350ml", calories: 420, protein_g: 11, carbs_g: 54, fat_g: 18, category: "drink" })
+  if (containsAll("protein", "bar")) return makeEstimate({ quantity: "1 bar", calories: 220, protein_g: 20, carbs_g: 21, fat_g: 7, category: "snack" })
+  if (contains("granola")) return makeEstimate({ quantity: "60g", calories: 250, protein_g: 6, carbs_g: 35, fat_g: 9, category: "breakfast" })
+  if (containsAll("muesli", "bar")) return makeEstimate({ quantity: "1 bar", calories: 190, protein_g: 4, carbs_g: 25, fat_g: 8, category: "snack" })
+  if (contains("cookie", "biscuit")) return makeEstimate({ quantity: "1 cookie", calories: 160, protein_g: 2, carbs_g: 20, fat_g: 8, category: "snack" })
+  if (contains("muffin")) return makeEstimate({ quantity: "1 muffin", calories: 380, protein_g: 6, carbs_g: 55, fat_g: 14, category: "snack" })
+  if (contains("croissant")) return makeEstimate({ quantity: "1 croissant", calories: 230, protein_g: 5, carbs_g: 26, fat_g: 12, category: "snack" })
+  if (contains("donut", "doughnut")) return makeEstimate({ quantity: "1 doughnut", calories: 260, protein_g: 4, carbs_g: 31, fat_g: 13, category: "snack" })
+  if (contains("beer", "lager", "ale")) return makeEstimate({ quantity: "375ml", calories: 145, protein_g: 1.4, carbs_g: 11, fat_g: 0, category: "drink" })
+  if (contains("wine")) return makeEstimate({ quantity: "150ml glass", calories: 125, protein_g: 0.1, carbs_g: 4, fat_g: 0, category: "drink" })
+  if (containsAll("energy", "drink")) return makeEstimate({ quantity: "250ml can", calories: 110, protein_g: 0, carbs_g: 27, fat_g: 0, category: "drink" })
+  if (containsAll("sports", "drink")) return makeEstimate({ quantity: "600ml bottle", calories: 140, protein_g: 0, carbs_g: 34, fat_g: 0, category: "drink" })
+  if (normalizedQuery.includes("soft drink") || contains("cola", "coke", "soda")) {
+    if (contains("diet", "zero", "sugarfree", "sugar-free")) return makeEstimate({ quantity: "375ml can", calories: 1, protein_g: 0, carbs_g: 0, fat_g: 0, category: "drink" })
+    return makeEstimate({ quantity: "375ml can", calories: 155, protein_g: 0, carbs_g: 39, fat_g: 0, category: "drink" })
+  }
+  if (contains("water")) return makeEstimate({ quantity: "250ml glass", calories: 0, protein_g: 0, carbs_g: 0, fat_g: 0, category: "drink" })
+
+  if (contains("milk")) {
+    if (contains("skim", "light", "low", "reduced")) return cloneFoodProfile(auVerifiedFoods.find((food) => food.id === "milk_cow_reduced_fat_1") || makeEstimate({ quantity: "100ml", calories: 45, protein_g: 3.5, carbs_g: 5, fat_g: 1.2, category: "dairy" }), { name: estimateName })
+    return cloneFoodProfile(auVerifiedFoods.find((food) => food.id === "milk_cow_regular") || makeEstimate({ quantity: "100ml", calories: 66, protein_g: 3.4, carbs_g: 5.5, fat_g: 3.5, category: "dairy" }), { name: estimateName })
+  }
+
+  if (/\b(?:coffee|latte|cappuccino|flat white|mocha|espresso|americano|long black)\b/.test(normalizedQuery)) {
+    if (normalizedQuery.includes("long black") || normalizedQuery.includes("americano")) return cloneFoodProfile(auVerifiedFoods.find((food) => food.id === "coffee_long_black") || makeEstimate({ quantity: "250ml", calories: 3, protein_g: 0.4, carbs_g: 0, fat_g: 0.1, category: "drink" }), { name: estimateName })
+    return makeEstimate({ quantity: "250ml", calories: 120, protein_g: 7, carbs_g: 9, fat_g: 6.5, category: "drink" })
+  }
+
+  if (contains("tea")) return cloneFoodProfile(auVerifiedFoods.find((food) => food.id === "tea_black") || makeEstimate({ quantity: "250ml", calories: 0, protein_g: 0.1, carbs_g: 0, fat_g: 0, category: "drink" }), { name: estimateName })
+
+  if (contains("yoghurt", "yogurt")) {
+    if (contains("greek")) return makeEstimate({ quantity: "170g", calories: 130, protein_g: 17, carbs_g: 6, fat_g: 3, category: "dairy" })
+    return makeEstimate({ quantity: "170g", calories: 115, protein_g: 9, carbs_g: 10, fat_g: 4, category: "dairy" })
+  }
+
+  if (contains("egg")) return makeEstimate({ quantity: "2 eggs", calories: 148, protein_g: 12.6, carbs_g: 1.1, fat_g: 10.2, category: "protein" })
+  if (contains("chicken", "turkey")) return makeEstimate({ quantity: "100g", calories: 165, protein_g: 31, carbs_g: 0, fat_g: 3.6, category: "protein" })
+  if (contains("salmon", "trout", "mackerel", "sardine")) return makeEstimate({ quantity: "100g", calories: 208, protein_g: 22, carbs_g: 0, fat_g: 13, category: "protein" })
+  if (contains("fish", "barramundi", "snapper", "cod", "hoki", "tilapia", "whiting", "dory", "sole", "flathead")) return makeEstimate({ quantity: "100g", calories: 128, protein_g: 24, carbs_g: 0, fat_g: 3, category: "protein" })
+  if (contains("prawn", "shrimp", "scallop", "mussel", "oyster")) return makeEstimate({ quantity: "100g", calories: 99, protein_g: 21, carbs_g: 1, fat_g: 1.5, category: "protein" })
+  if (contains("beef", "steak", "lamb", "venison", "kangaroo")) return makeEstimate({ quantity: "100g", calories: 185, protein_g: 28, carbs_g: 0, fat_g: 8, category: "protein" })
+  if (contains("pork", "bacon", "sausage", "ham")) return makeEstimate({ quantity: "100g", calories: 242, protein_g: 27, carbs_g: 1, fat_g: 14, category: "protein" })
+  if (contains("tofu", "tempeh")) return makeEstimate({ quantity: "100g", calories: 144, protein_g: 15, carbs_g: 4, fat_g: 8, category: "protein" })
+  if (contains("bean", "beans", "lentil", "lentils", "chickpea", "chickpeas")) return makeEstimate({ quantity: "1 cup", calories: 180, protein_g: 11, carbs_g: 30, fat_g: 1.5, category: "protein" })
+  if (contains("rice")) return makeEstimate({ quantity: "1 cup", calories: 205, protein_g: 4.3, carbs_g: 45, fat_g: 0.4, category: "carbs" })
+  if (contains("pasta", "spaghetti", "penne", "noodle", "noodles")) return makeEstimate({ quantity: "1 cup", calories: 220, protein_g: 7, carbs_g: 43, fat_g: 1.3, category: "carbs" })
+  if (contains("bread", "toast", "bagel")) return makeEstimate({ quantity: "2 slices", calories: 188, protein_g: 8, carbs_g: 31, fat_g: 2.8, category: "carbs" })
+  if (contains("potato", "chips", "fries", "sweet potato")) return makeEstimate({ quantity: "1 serve", calories: 210, protein_g: 4, carbs_g: 34, fat_g: 7, category: "carbs" })
+  if (contains("banana", "apple", "orange", "pear", "mango", "peach", "nectarine", "kiwifruit", "kiwi")) return makeEstimate({ quantity: "1 medium", calories: 95, protein_g: 1, carbs_g: 24, fat_g: 0.3, category: "produce" })
+  if (contains("berry", "berries", "blueberry", "strawberry", "raspberry", "blackberry")) return makeEstimate({ quantity: "1 cup", calories: 70, protein_g: 1.5, carbs_g: 17, fat_g: 0.5, category: "produce" })
+  if (contains("avocado")) return makeEstimate({ quantity: "1 medium", calories: 240, protein_g: 3, carbs_g: 3, fat_g: 22, category: "produce" })
+  if (contains("broccoli", "carrot", "capsicum", "zucchini", "courgette", "spinach", "salad", "lettuce", "tomato", "cucumber")) return makeEstimate({ quantity: "1 cup", calories: 35, protein_g: 2, carbs_g: 7, fat_g: 0.3, category: "produce" })
+  if (contains("cheese")) return makeEstimate({ quantity: "30g", calories: 121, protein_g: 7.4, carbs_g: 0.1, fat_g: 10, category: "dairy" })
+  if (contains("nut", "nuts", "almond", "cashew", "walnut", "peanut", "pistachio")) return makeEstimate({ quantity: "30g", calories: 180, protein_g: 6, carbs_g: 6, fat_g: 15, category: "snack" })
+  if (normalizedQuery.includes("ice cream")) return makeEstimate({ quantity: "1 scoop", calories: 140, protein_g: 2.4, carbs_g: 16, fat_g: 7.5, category: "dessert" })
+  if (contains("chocolate")) return makeEstimate({ quantity: "40g", calories: 220, protein_g: 3, carbs_g: 24, fat_g: 13, category: "dessert" })
+
+  return null
 }
 
 function summarizeSource(foods) {
@@ -352,6 +591,31 @@ function inferPhotoTargetCategories(query = "") {
 export function findVerifiedFood(query) {
   const ranked = searchVerifiedFoods(query)
   return ranked[0] || null
+}
+
+export function searchBestFoodMatches(query, { limit = 8 } = {}) {
+  const variants = buildFoodSearchVariants(query)
+  if (!variants.length) return []
+
+  const ranked = verifiedFoods
+    .map((food) => ({
+      food,
+      score: variants.reduce((best, variant) => Math.max(best, scoreFoodMatch(variant, food)), 0),
+    }))
+    .filter((entry) => entry.score > 0)
+  const fallback = buildDynamicFoodEstimate(query)
+  const dedupedRanked = ranked
+    .sort((left, right) => right.score - left.score || left.food.name.localeCompare(right.food.name))
+    .filter((entry, index, all) => all.findIndex((candidate) => candidate.food.id === entry.food.id) === index)
+  if (!dedupedRanked.length) return fallback ? [fallback] : []
+
+  const rankedFoods = dedupedRanked.map((entry) => entry.food)
+  const shouldPreferFallback = fallback && (dedupedRanked[0]?.score || 0) < 240
+  return shouldPreferFallback ? [fallback, ...rankedFoods].slice(0, limit) : rankedFoods.slice(0, limit)
+}
+
+export function findBestFoodMatch(query) {
+  return searchBestFoodMatches(query, { limit: 1 })[0] || null
 }
 
 export function searchVerifiedFoods(query) {

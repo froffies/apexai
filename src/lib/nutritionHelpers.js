@@ -47,6 +47,55 @@ export function isVerifiedFoodResult(food) {
   return VERIFIED_SOURCE_TYPES.has(normalizeNutritionSourceType(food?.source_type))
 }
 
+export function isVerifiedNutritionSourceType(value) {
+  return VERIFIED_SOURCE_TYPES.has(normalizeNutritionSourceType(value))
+}
+
+export function isLowConfidenceNutrition(mealOrFood = {}) {
+  const sourceType = normalizeNutritionSourceType(mealOrFood?.nutrition_source_type || mealOrFood?.source_type, Boolean(mealOrFood?.estimated))
+  const confidence = normalizeMacroConfidence(mealOrFood?.macro_confidence, mealOrFood?.estimated ? "low" : "high")
+  return confidence === "low" || LOW_CONFIDENCE_SOURCE_TYPES.has(sourceType)
+}
+
+export function macroConfidenceLabel(value = "", estimated = false) {
+  const confidence = normalizeMacroConfidence(value, estimated ? "low" : "high")
+  if (confidence === "high") return "High confidence"
+  if (confidence === "medium") return "Medium confidence"
+  return "Estimated macros"
+}
+
+export function coachMealConfidenceNote(mealOrFood = {}) {
+  const sourceType = normalizeNutritionSourceType(mealOrFood?.nutrition_source_type || mealOrFood?.source_type, Boolean(mealOrFood?.estimated))
+  const confidence = normalizeMacroConfidence(mealOrFood?.macro_confidence, mealOrFood?.estimated ? "low" : "high")
+  const sourceLabel = nutritionSourceLabel(mealOrFood)
+
+  if (sourceType === "photo_ai_estimate") {
+    if (confidence === "high") return "High-confidence photo estimate."
+    if (confidence === "medium") return "Photo-based estimate from the visible items."
+    return "Photo-based estimate, so adjust it if the plate looked different."
+  }
+
+  if (VERIFIED_SOURCE_TYPES.has(sourceType) && confidence === "high") {
+    return `Verified from ${sourceLabel.toLowerCase()}.`
+  }
+
+  if (confidence === "medium" || sourceType === "mixed_verified_sources") {
+    return "Macros are an estimate blended from matched references."
+  }
+
+  if (sourceType === "estimated_internal_profile" || sourceType === "mixed_reference_and_estimate") {
+    return "Macros are an estimate based on our AU/NZ reference profiles."
+  }
+
+  if (sourceType === "manual_user_entry") {
+    return "Macros are based on a manual entry."
+  }
+
+  return mealOrFood?.estimated
+    ? "Macros are an estimate, so let me know if you want them adjusted."
+    : ""
+}
+
 export function nutritionSourceLabel(mealOrFood = {}) {
   const sourceType = normalizeNutritionSourceType(mealOrFood?.nutrition_source_type || mealOrFood?.source_type, Boolean(mealOrFood?.estimated))
   if (sourceType === "barcode_label") return "Barcode label"

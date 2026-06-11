@@ -1,6 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import {
+  buildDeterministicFoodMacroReply,
   buildDeterministicNutritionStatusReply,
   buildDeterministicMealAction,
   buildDeterministicMealActions,
@@ -705,6 +706,84 @@ test("coach logging rules do not match a single-food chicken item to composite c
   assert.ok(action.calories < 450)
   assert.ok(action.protein_g > 60)
   assert.ok(action.carbs_g < 5)
+})
+
+test("coach logging rules do not undercount quantified eggs when verified matches are mass-based", () => {
+  const eggsReference = verifiedFoods.find((food) => food.id === "eggs_2")
+  const rawEggReference = verifiedFoods.find((food) => food.id === "egg_chicken_whole_raw")
+  const unsaltedButterReference = verifiedFoods.find((food) => food.id === "butter_unsalted")
+
+  const action = buildDeterministicMealAction({
+    mealSession: {
+      readyToLog: true,
+      alreadyLogged: false,
+      wantsLogging: true,
+      summary: "6 eggs cooked in 100g unsalted butter",
+      persistedMealId: "",
+      correctionRequested: false,
+      items: [
+        {
+          baseName: "egg",
+          label: "Eggs",
+          category: "food",
+          quantity: { amount: 6, unit: "egg", text: "6 eggs" },
+          preparation: [],
+          exclusions: [],
+        },
+        {
+          baseName: "unsalted butter",
+          label: "Unsalted Butter",
+          category: "ingredient",
+          quantity: { amount: 100, unit: "g", text: "100g" },
+          preparation: [],
+          exclusions: [],
+          attachedTo: "egg",
+          relation: "cooked_in",
+        },
+      ],
+    },
+    explicitActions: [],
+    reply: "",
+    prompt: "the eggs were cooked in 100g of unsalted butter",
+    candidateFoodMatches: {
+      egg: [rawEggReference, eggsReference].filter(Boolean),
+      "unsalted butter": [unsaltedButterReference].filter(Boolean),
+    },
+  })
+
+  assert.ok(action)
+  assert.equal(action.food_name, "6 eggs cooked in 100g unsalted butter")
+  assert.equal(action.calories, 1178)
+  assert.equal(action.protein_g, 38.9)
+  assert.equal(action.carbs_g, 3.9)
+  assert.equal(action.fat_g, 112.8)
+})
+
+test("coach logging rules can answer direct food macro questions without persistence wording", () => {
+  const reply = buildDeterministicFoodMacroReply({
+    message: "whats the macros for a standard serve of caesar salad?",
+  })
+
+  assert.match(reply, /caesar salad/i)
+  assert.match(reply, /360 kcal/i)
+  assert.match(reply, /10g protein/i)
+  assert.match(reply, /14g carbs/i)
+  assert.match(reply, /28g fat/i)
+  assert.doesNotMatch(reply, /\b(saved|logged|tracked)\b/i)
+})
+
+test("coach logging rules fall back to a deterministic food-class estimate for arbitrary food questions", () => {
+  const reply = buildDeterministicFoodMacroReply({
+    message: "whats the macros for barramundi fillet?",
+  })
+
+  assert.match(reply, /barramundi fillet/i)
+  assert.match(reply, /128 kcal/i)
+  assert.match(reply, /24g protein/i)
+  assert.match(reply, /0g carbs/i)
+  assert.match(reply, /3g fat/i)
+  assert.match(reply, /deterministic fallback estimate/i)
+  assert.doesNotMatch(reply, /\b(saved|logged|tracked)\b/i)
 })
 
 test("coach logging rules can answer daily calorie and target questions without persistence wording", () => {

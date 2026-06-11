@@ -1232,6 +1232,33 @@ test("persisted pushup follow-ups treat pluralized same-exercise replies as work
   assert.equal(next.workoutSession.reps, 14)
 })
 
+test("fresh cardio statements do not inherit stale pushup reps from the previous workout", () => {
+  const next = buildCoachSessionState({
+    recentMessages: [
+      user("i had 6 eggs and did 3 pushups"),
+      assistant("I've logged your 6 eggs and 3 pushups."),
+    ],
+    currentMessage: "i ran a marathon",
+    workoutSession: makePersistedWorkoutSession({
+      active: false,
+      workoutConversation: true,
+      exercise_name: "Pushups",
+      workout_type: "Pushups",
+      muscle_group: "full_body",
+      sets: 1,
+      reps: 3,
+      summary: "Pushups for 1 set of 3",
+    }, "workout_pushups"),
+  })
+
+  assert.ok(next.workoutSession)
+  assert.equal(next.workoutSession.exercise_name, "Run")
+  assert.equal(next.workoutSession.distance_km, 42.2)
+  assert.equal(next.workoutSession.reps, 0)
+  assert.equal(next.workoutSession.readyToLog, true)
+  assert.doesNotMatch(String(next.workoutSession.summary || ""), /set of 3/i)
+})
+
 test("persisted meal refinement keeps resolved milk quantity while splitting egg preparations", () => {
   const initial = replayCoachConversation([
     user("i had milk and eggs and did a pushup"),

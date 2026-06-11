@@ -1,5 +1,5 @@
 import { getCloudAccessToken } from "@/lib/cloudSync"
-import { generateLocalChefRecipe, searchVerifiedFoods } from "@/lib/nutritionDatabase"
+import { generateLocalChefRecipe, searchBestFoodMatches } from "@/lib/nutritionDatabase"
 
 function defaultNutritionUrl() {
   if (typeof window === "undefined") return "http://127.0.0.1:8787/api/nutrition/search"
@@ -40,6 +40,21 @@ function defaultNutritionPhotoUrl() {
   return `${window.location.protocol}//${host}:8787/api/nutrition/analyze-photo`
 }
 
+function defaultNutritionPhotoReviewUrl() {
+  if (typeof window === "undefined") return "http://127.0.0.1:8787/api/nutrition/review-photo-estimate"
+  const coachUrl = import.meta.env.VITE_OPENAI_COACH_URL || ""
+  if (coachUrl) {
+    try {
+      const base = new URL(coachUrl)
+      return `${base.protocol}//${base.host}/api/nutrition/review-photo-estimate`
+    } catch {
+      // malformed env var - fall through to host-based default
+    }
+  }
+  const host = window.location.hostname || "127.0.0.1"
+  return `${window.location.protocol}//${host}:8787/api/nutrition/review-photo-estimate`
+}
+
 function normalizeLocal(food) {
   return {
     ...food,
@@ -50,7 +65,7 @@ function normalizeLocal(food) {
 }
 
 export async function searchNutritionDatabase(query) {
-  const localResults = searchVerifiedFoods(query).map(normalizeLocal)
+  const localResults = searchBestFoodMatches(query).map(normalizeLocal)
   if (import.meta.env.VITE_NUTRITION_API_DISABLED === "true") return localResults
 
   const endpoint = import.meta.env.VITE_NUTRITION_API_URL || defaultNutritionUrl()
@@ -124,6 +139,30 @@ export async function analyzeFoodPhoto({ imageDataUrl, locale = "AU", mealType =
     })
     const data = await response.json().catch(() => ({}))
     if (!response.ok) throw new Error(data.error || "Food photo analysis failed")
+    return data
+  } finally {
+    window.clearTimeout(timeout)
+  }
+}
+
+export async function reviewFoodPhotoEstimate({ items = [], summary = "", portion = "", mealType = "" }) {
+  const endpoint = import.meta.env.VITE_NUTRITION_PHOTO_REVIEW_API_URL || defaultNutritionPhotoReviewUrl()
+  const controller = new AbortController()
+  const timeout = window.setTimeout(() => controller.abort(), 20000)
+
+  try {
+    const token = await getCloudAccessToken()
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ items, summary, portion, mealType }),
+      signal: controller.signal,
+    })
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok) throw new Error(data.error || "Reviewed food photo estimate failed")
     return data
   } finally {
     window.clearTimeout(timeout)

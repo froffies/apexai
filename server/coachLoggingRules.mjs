@@ -1,3 +1,5 @@
+import { findBestFoodMatch } from "../src/lib/nutritionDatabase.js"
+
 export function safeArray(value, limit = 8) {
   return Array.isArray(value) ? value.slice(0, limit) : []
 }
@@ -86,6 +88,26 @@ function scaleFromPortions(itemQuantity, servingQuantity) {
   return itemComparable.amount / servingComparable.amount
 }
 
+function compatiblePortionGroups(itemQuantity, servingQuantity) {
+  const itemComparable = toComparableAmount(itemQuantity)
+  const servingComparable = toComparableAmount(servingQuantity)
+  if (!itemComparable || !servingComparable) return null
+  return itemComparable.group === servingComparable.group
+}
+
+function quantityCompatibilityScore(itemQuantity, servingQuantity) {
+  const compatible = compatiblePortionGroups(itemQuantity, servingQuantity)
+  if (compatible === null) return 0
+  return compatible ? 10 : -2
+}
+
+function canTrustCandidatePortion(itemQuantity, servingQuantity, candidate = null) {
+  if (!itemQuantity || !servingQuantity) return true
+  if (String(candidate?.source_type || "").trim() === "photo_dish_profile") return true
+  const compatible = compatiblePortionGroups(itemQuantity, servingQuantity)
+  return compatible !== false
+}
+
 function baseNameMatches(candidate, baseName) {
   const normalizedBase = String(baseName || "").trim().toLowerCase()
   if (!normalizedBase) return 0
@@ -142,6 +164,7 @@ function chooseBestCandidate(item, candidateFoodMatches = {}) {
     String(item.baseName || "").toLowerCase(),
     String(item.label || "").toLowerCase(),
   ].filter(Boolean)
+  const itemQuantity = normalizeItemQuantity(item.quantity)
 
   const candidates = []
   for (const key of keys) {
@@ -154,7 +177,8 @@ function chooseBestCandidate(item, candidateFoodMatches = {}) {
   let bestScore = -1
   for (const candidate of candidates) {
     if (shouldSkipCompositeCandidate(item, candidate)) continue
-    const score = baseNameMatches(candidate, item.baseName || item.label)
+    const servingQuantity = parsePortion(candidate.quantity || "")
+    const score = baseNameMatches(candidate, item.baseName || item.label) + quantityCompatibilityScore(itemQuantity, servingQuantity)
     if (score > bestScore) {
       best = candidate
       bestScore = score
@@ -277,20 +301,33 @@ function fallbackProfileForItem(item, itemQuantity = null) {
 function estimateItemMacroDetails(item, candidateFoodMatches = {}) {
   const candidate = chooseBestCandidate(item, candidateFoodMatches)
   const itemQuantity = normalizeItemQuantity(item.quantity)
+  const fallback = fallbackProfileForItem(item, itemQuantity)
+  const fallbackServingQuantity = normalizeItemQuantity(fallback.serving)
 
   if (candidate) {
     const servingQuantity = parsePortion(candidate.quantity || "")
-    const ratio = itemQuantity ? scaleFromPortions(itemQuantity, servingQuantity) : 1
-    return {
-      macros: scaleNutrition(candidate, ratio || 1),
-      source: String(candidate.source || "").trim() || "Matched nutrition reference",
-      source_type: String(candidate.source_type || "reference").trim() || "reference",
-      matched_food_name: String(candidate.name || "").trim() || String(item.label || item.baseName || "").trim(),
-      estimated: false,
+    if (canTrustCandidatePortion(itemQuantity, servingQuantity, candidate)) {
+      const ratio = itemQuantity ? scaleFromPortions(itemQuantity, servingQuantity) : 1
+      return {
+        macros: scaleNutrition(candidate, ratio || 1),
+        source: String(candidate.source || "").trim() || "Matched nutrition reference",
+        source_type: String(candidate.source_type || "reference").trim() || "reference",
+        matched_food_name: String(candidate.name || "").trim() || String(item.label || item.baseName || "").trim(),
+        estimated: false,
+      }
+    }
+    if (itemQuantity && fallbackServingQuantity && compatiblePortionGroups(itemQuantity, fallbackServingQuantity) === true) {
+      const ratio = scaleFromPortions(itemQuantity, fallbackServingQuantity)
+      return {
+        macros: scaleNutrition(fallback.macros, ratio || 1),
+        source: String(candidate.source || "").trim() || "Matched nutrition reference",
+        source_type: String(candidate.source_type || "reference").trim() || "reference",
+        matched_food_name: String(candidate.name || "").trim() || String(item.label || item.baseName || "").trim(),
+        estimated: false,
+      }
     }
   }
 
-  const fallback = fallbackProfileForItem(item, itemQuantity)
   const ratio = itemQuantity ? scaleFromPortions(itemQuantity, fallback.serving) : 1
   return {
     macros: scaleNutrition(fallback.macros, ratio || 1),
@@ -567,6 +604,66 @@ export function buildDeterministicNutritionStatusReply(args = {}) {
   }
 
   return `You're at about ${formatNutritionStatusAmount(metric, current)} so far today.`
+}
+
+function cleanFoodMacroLookupTerm(value = "") {
+  return String(value || "")
+    .replace(/[?]+$/g, "")
+    .replace(/^(?:the\s+)?(?:macros?|nutrition(?:al)?(?:\s+info(?:rmation)?)?|calories?|protein|carbs?|fat)\s+(?:for|in)\s+/i, "")
+    .replace(/^how\s+many\s+calories\s+(?:are\s+)?in\s+/i, "")
+    .replace(/^how\s+much\s+(?:protein|fat)\s+(?:is\s+)?in\s+/i, "")
+    .replace(/^how\s+many\s+carbs?\s+(?:are\s+)?in\s+/i, "")
+    .replace(/^(?:a|an)\s+/i, "")
+    .replace(/^(?:standard|typical|usual)\s+serve\s+of\s+/i, "")
+    .replace(/^(?:serve|serving)\s+of\s+/i, "")
+    .replace(/^(?:standard|typical|usual)\s+/i, "")
+    .trim()
+}
+
+export function extractFoodMacroLookupTerm(message = "") {
+  const text = String(message || "").trim().replace(/[’]/g, "'")
+  if (!text) return ""
+
+  const patterns = [
+    /\bmacros?\s+for\s+(?<food>.+)$/i,
+    /\bnutrition(?:al)?(?:\s+info(?:rmation)?)?\s+for\s+(?<food>.+)$/i,
+    /\bcalories?\s+in\s+(?<food>.+)$/i,
+    /\bprotein\s+in\s+(?<food>.+)$/i,
+    /\bcarbs?\s+in\s+(?<food>.+)$/i,
+    /\bfat\s+in\s+(?<food>.+)$/i,
+    /^how\s+many\s+calories\s+(?:are\s+)?in\s+(?<food>.+)$/i,
+    /^how\s+much\s+(?:protein|fat)\s+(?:is\s+)?in\s+(?<food>.+)$/i,
+    /^how\s+many\s+carbs?\s+(?:are\s+)?in\s+(?<food>.+)$/i,
+  ]
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern)
+    const cleaned = cleanFoodMacroLookupTerm(match?.groups?.food || "")
+    if (cleaned) return cleaned
+  }
+
+  return ""
+}
+
+export function buildDeterministicFoodMacroReply({ message = "" } = {}) {
+  const foodQuery = extractFoodMacroLookupTerm(message)
+  if (!foodQuery) return ""
+
+  const food = findBestFoodMatch(foodQuery)
+  if (!food) return ""
+
+  const portion = String(food.quantity || "").trim()
+  const name = String(food.name || foodQuery).trim()
+  const label = portion ? `${portion} of ${name}` : name
+  const estimated = String(food.source_type || "").trim() === "estimated_internal_profile"
+  const deterministicFallback = String(food.source || "").trim() === "ApexAI deterministic food-class estimate"
+  const prefix = label.charAt(0).toUpperCase() + label.slice(1)
+  const qualifier = estimated ? "comes to about" : "has about"
+  const sourceTail = deterministicFallback
+    ? " That's a deterministic fallback estimate based on our AU/NZ food-class profile."
+    : (estimated ? " That's an estimate based on our AU/NZ reference profile." : "")
+
+  return `${prefix} ${qualifier} ${Math.round(Number(food.calories) || 0)} kcal, ${Math.round(Number(food.protein_g) || 0)}g protein, ${Math.round(Number(food.carbs_g) || 0)}g carbs, and ${Math.round(Number(food.fat_g) || 0)}g fat.${sourceTail}`
 }
 
 function normalizeMealType(value) {

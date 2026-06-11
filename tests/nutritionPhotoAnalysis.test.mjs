@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import { searchPhotoReferenceFoods, verifiedFoods } from "../src/lib/nutritionDatabase.js"
-import { buildFoodPhotoEstimate, normalizeFoodPhotoAnalysis } from "../server/nutritionPhotoAnalysis.mjs"
+import { buildFoodPhotoEstimate, buildReviewedFoodPhotoEstimate, normalizeFoodPhotoAnalysis } from "../server/nutritionPhotoAnalysis.mjs"
 
 test("normalizeFoodPhotoAnalysis builds clean plate-photo item labels", () => {
   const normalized = normalizeFoodPhotoAnalysis({
@@ -471,6 +471,111 @@ test("buildFoodPhotoEstimate rescues live-style indirect dish descriptions into 
   assert.equal(idliEstimate.breakdown[0]?.source_type, "photo_dish_profile")
 })
 
+test("buildFoodPhotoEstimate rescues live plated meal misses into trusted dish profiles", async () => {
+  const pastaEstimate = await buildFoodPhotoEstimate({
+    summary: "200g cooked pasta, plus 125g tomato sauce, plus 1 serve meatballs, plus 5g basil, plus 15g grated parmesan cheese",
+    items: [
+      { name: "200g cooked pasta", quantity: "200g", category: "food", confidence: "medium" },
+      { name: "125g tomato sauce", quantity: "125g", category: "ingredient", confidence: "medium" },
+      { name: "1 serve meatballs", quantity: "1 serve", category: "food", confidence: "medium" },
+      { name: "5g basil", quantity: "5g", category: "ingredient", confidence: "medium" },
+      { name: "15g grated parmesan cheese", quantity: "15g", category: "ingredient", confidence: "medium" },
+    ],
+    portion: "1 bowl",
+    overall_confidence: "medium",
+  }, {
+    mealType: "dinner",
+    lookupFoods: async (term) => searchPhotoReferenceFoods(term),
+  })
+
+  assert.ok(pastaEstimate.action)
+  assert.equal(pastaEstimate.can_autofill, true)
+  assert.equal(pastaEstimate.needs_review, false)
+  assert.equal(pastaEstimate.breakdown[0]?.source_type, "photo_dish_profile")
+
+  const dosaEstimate = await buildFoodPhotoEstimate({
+    summary: "1 grilled dosa, plus 100g mashed potatoes with spices, plus 50g peanut chutney, plus 50g coconut chutney",
+    items: [
+      { name: "1 grilled dosa", quantity: "1", category: "food", confidence: "medium" },
+      { name: "100g mashed potatoes with spices", quantity: "100g", category: "food", confidence: "medium" },
+      { name: "50g peanut chutney", quantity: "50g", category: "food", confidence: "medium" },
+      { name: "50g coconut chutney", quantity: "50g", category: "food", confidence: "medium" },
+    ],
+    portion: "1 plate",
+    overall_confidence: "medium",
+  }, {
+    mealType: "breakfast",
+    lookupFoods: async (term) => searchPhotoReferenceFoods(term),
+  })
+
+  assert.ok(dosaEstimate.action)
+  assert.equal(dosaEstimate.can_autofill, true)
+  assert.equal(dosaEstimate.needs_review, false)
+  assert.equal(dosaEstimate.breakdown[0]?.source_type, "photo_dish_profile")
+
+  const curryEstimate = await buildFoodPhotoEstimate({
+    summary: "1 serve meatballs in sauce, plus 1 piece of naan bread",
+    items: [
+      { name: "1 serve meatballs in sauce", quantity: "1 serve", category: "ingredient", confidence: "medium" },
+      { name: "1 piece of naan bread", quantity: "1 piece", category: "food", confidence: "medium" },
+    ],
+    assumptions: [
+      "The meatballs appear to be cooked in a sauce but specifics are unclear.",
+      "The naan bread is assumed to be plain without any toppings.",
+    ],
+    portion: "1 plate",
+    overall_confidence: "medium",
+  }, {
+    mealType: "dinner",
+    lookupFoods: async (term) => searchPhotoReferenceFoods(term),
+  })
+
+  assert.ok(curryEstimate.action)
+  assert.equal(curryEstimate.can_autofill, true)
+  assert.equal(curryEstimate.needs_review, false)
+  assert.ok(curryEstimate.breakdown.every((item) => item.source_type !== "estimated_internal_profile"))
+
+  const idliEstimate = await buildFoodPhotoEstimate({
+    summary: "1 serve round dumplings in curry, plus 1 serve coconut-based dip, plus 1 serve lentil dish",
+    items: [
+      { name: "1 serve round dumplings in curry", quantity: "1 serve", category: "food", confidence: "medium" },
+      { name: "1 serve coconut-based dip", quantity: "1 serve", category: "food", confidence: "medium" },
+      { name: "1 serve lentil dish", quantity: "1 serve", category: "food", confidence: "medium" },
+    ],
+    portion: "1 plate",
+    overall_confidence: "medium",
+  }, {
+    mealType: "breakfast",
+    lookupFoods: async (term) => searchPhotoReferenceFoods(term),
+  })
+
+  assert.ok(idliEstimate.action)
+  assert.equal(idliEstimate.can_autofill, true)
+  assert.equal(idliEstimate.needs_review, false)
+  assert.equal(idliEstimate.breakdown[0]?.source_type, "photo_dish_profile")
+
+  const biryaniEstimate = await buildFoodPhotoEstimate({
+    summary: "1 bowl of rice mixed with vegetables and herbs, garnished with nuts.",
+    items: [
+      { name: "1 bowl of rice mixed with vegetables and herbs, garnished with nuts.", quantity: "1 bowl", category: "food", confidence: "medium" },
+    ],
+    assumptions: [
+      "The exact composition of the rice is unclear, but it appears to include vegetables and nuts.",
+      "The type of nuts and specific herbs are assumptions based on appearance.",
+    ],
+    portion: "1 plate",
+    overall_confidence: "medium",
+  }, {
+    mealType: "dinner",
+    lookupFoods: async (term) => searchPhotoReferenceFoods(term),
+  })
+
+  assert.ok(biryaniEstimate.action)
+  assert.equal(biryaniEstimate.can_autofill, true)
+  assert.equal(biryaniEstimate.needs_review, false)
+  assert.equal(biryaniEstimate.breakdown[0]?.source_type, "photo_dish_profile")
+})
+
 test("normalizeFoodPhotoAnalysis infers high overall confidence from a single high-confidence item", () => {
   const normalized = normalizeFoodPhotoAnalysis({
     items: [
@@ -503,6 +608,36 @@ test("normalizeFoodPhotoAnalysis strips model-generated item numbering noise fro
   assert.equal(normalized.summary, "1 banana")
 })
 
+test("normalizeFoodPhotoAnalysis strips leading photo quantity noise from food names", () => {
+  const normalized = normalizeFoodPhotoAnalysis({
+    items: [
+      {
+        name: "15g grated parmesan cheese",
+        quantity: "15g",
+        category: "ingredient",
+        confidence: "high",
+      },
+      {
+        name: "1 piece of naan bread",
+        quantity: "1 piece",
+        category: "food",
+        confidence: "high",
+      },
+      {
+        name: "10g sprig of coriander",
+        quantity: "10g",
+        category: "ingredient",
+        confidence: "high",
+      },
+    ],
+  })
+
+  assert.equal(normalized.items[0].base_name, "grated parmesan cheese")
+  assert.equal(normalized.items[1].base_name, "naan bread")
+  assert.equal(normalized.items[2].base_name, "coriander")
+  assert.match(normalized.summary, /15g grated parmesan cheese/i)
+})
+
 test("normalizeFoodPhotoAnalysis recovers a real food name from assumptions when the model emits a generic item label", () => {
   const normalized = normalizeFoodPhotoAnalysis({
     assumptions: ["Banana is the only item visible."],
@@ -531,4 +666,39 @@ test("normalizeFoodPhotoAnalysis recovers a simple single-item meal from summary
   assert.equal(normalized.items[0].name, "Banana")
   assert.equal(normalized.items[0].base_name, "banana")
   assert.equal(normalized.summary, "1 banana")
+})
+
+test("buildReviewedFoodPhotoEstimate turns reviewed photo items into a loggable meal action", async () => {
+  const estimate = await buildReviewedFoodPhotoEstimate({
+    summary: "banana and milk",
+    portion: "1 serve",
+    items: [
+      {
+        name: "banana",
+        quantity: "1 banana",
+        category: "food",
+        confidence: "high",
+      },
+      {
+        name: "milk",
+        quantity: "250ml milk",
+        category: "drink",
+        confidence: "high",
+      },
+    ],
+  }, {
+    mealType: "breakfast",
+    lookupFoods: async (term) => {
+      if (term.includes("banana")) return [{ ...verifiedFoods.find((food) => food.id === "banana_medium") }]
+      if (term.includes("milk")) return [{ ...verifiedFoods.find((food) => food.id === "milk_cow_regular") }]
+      return []
+    },
+  })
+
+  assert.ok(estimate.action)
+  assert.equal(estimate.can_autofill, true)
+  assert.equal(estimate.needs_review, false)
+  assert.equal(estimate.action?.nutrition_source_type, "photo_ai_estimate")
+  assert.ok(Array.isArray(estimate.action?.macro_breakdown))
+  assert.equal(estimate.breakdown.every((item) => item.confidence), true)
 })
