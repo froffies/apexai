@@ -22,6 +22,23 @@ test("normalizeFoodPhotoAnalysis builds clean plate-photo item labels", () => {
   assert.equal(normalized.items[0].quantity, "2 eggs")
 })
 
+test("normalizeFoodPhotoAnalysis prefers item summaries when the model emits a generic food label", () => {
+  const normalized = normalizeFoodPhotoAnalysis({
+    items: [
+      {
+        name: "fried food",
+        summary: "beef sliders with lettuce",
+        quantity: "1 serve",
+        category: "food",
+        confidence: "medium",
+      },
+    ],
+  })
+
+  assert.doesNotMatch(normalized.items[0]?.name || "", /^fried food$/i)
+  assert.match(normalized.items[0]?.name || "", /slider/i)
+})
+
 test("buildFoodPhotoEstimate uses curated matches when a clear AU reference exists", async () => {
   const estimate = await buildFoodPhotoEstimate({
     items: [
@@ -61,10 +78,10 @@ test("buildFoodPhotoEstimate falls back conservatively when a plate includes unm
         confidence: "high",
       },
       {
-        name: "milk",
-        quantity: "250ml milk",
-        preparation: "",
-        category: "drink",
+        name: "mystery entree",
+        quantity: "1 serve",
+        preparation: "fried",
+        category: "food",
         confidence: "medium",
       },
     ],
@@ -78,9 +95,41 @@ test("buildFoodPhotoEstimate falls back conservatively when a plate includes unm
   assert.equal(estimate.can_autofill, false)
   assert.equal(estimate.macro_confidence, "low")
   assert.equal(estimate.breakdown.some((item) => item.source_type === "estimated_internal_profile"), true)
-  assert.equal("calories" in estimate.breakdown[0], false)
+  assert.equal(Number.isFinite(estimate.breakdown[0]?.calories), true)
+  assert.ok(Number(estimate.calories) > 0)
   assert.match(estimate.nutrition_source || "", /review before saving/i)
   assert.match(estimate.clarification_question || "", /need review/i)
+})
+
+test("buildFoodPhotoEstimate uses item-specific deterministic estimates before the generic fallback", async () => {
+  const estimate = await buildFoodPhotoEstimate({
+    items: [
+      {
+        name: "sliders",
+        quantity: "1 serve",
+        category: "food",
+        confidence: "medium",
+      },
+      {
+        name: "lettuce",
+        quantity: "1 leaf",
+        category: "food",
+        confidence: "medium",
+      },
+    ],
+    portion: "1 serve",
+  }, {
+    mealType: "lunch",
+    lookupFoods: async (term) => term.includes("lettuce")
+      ? [{ ...verifiedFoods.find((food) => food.id === "lettuce_leaf") }]
+      : [],
+  })
+
+  assert.equal(estimate.action, null)
+  assert.equal(estimate.can_autofill, false)
+  assert.ok(Number(estimate.calories) > 300)
+  assert.match(String(estimate.breakdown[0]?.matched_food_name || ""), /slider/i)
+  assert.doesNotMatch(String(estimate.breakdown[0]?.matched_food_name || ""), /fried food/i)
 })
 
 test("buildFoodPhotoEstimate treats curated NZ matches as high-confidence verified references", async () => {

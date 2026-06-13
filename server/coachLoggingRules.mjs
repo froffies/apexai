@@ -101,6 +101,10 @@ function quantityCompatibilityScore(itemQuantity, servingQuantity) {
   return compatible ? 10 : -2
 }
 
+function isEstimatedNutritionSourceType(value) {
+  return String(value || "").trim().toLowerCase() === "estimated_internal_profile"
+}
+
 function canTrustCandidatePortion(itemQuantity, servingQuantity, candidate = null) {
   if (!itemQuantity || !servingQuantity) return true
   if (String(candidate?.source_type || "").trim() === "photo_dish_profile") return true
@@ -136,9 +140,27 @@ function hasWholeFoodTerm(baseName, term) {
   return new RegExp(`\\b${escapeRegex(normalizedTerm).replace(/\s+/g, "\\s+")}\\b`, "i").test(normalizedBase)
 }
 
+function singularizeComparableToken(value = "") {
+  const normalized = String(value || "").trim().toLowerCase()
+  if (!normalized) return ""
+  if (normalized.endsWith("ies") && normalized.length > 3) return `${normalized.slice(0, -3)}y`
+  if (normalized.endsWith("sses") || normalized.endsWith("ss")) return normalized
+  if (normalized.endsWith("s") && normalized.length > 3) return normalized.slice(0, -1)
+  return normalized
+}
+
+function comparableFoodPhrase(value = "") {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((token) => singularizeComparableToken(token))
+    .join(" ")
+}
+
 function candidateLooksCompositeMeal(candidate) {
-  const category = String(candidate?.category || "").trim().toLowerCase()
-  if (category === "mixed meal") return true
   const candidateTerms = [
     String(candidate?.name || "").toLowerCase(),
     ...safeArray(candidate?.aliases, 8).map((alias) => String(alias || "").toLowerCase()),
@@ -155,7 +177,8 @@ function shouldSkipCompositeCandidate(item, candidate) {
     String(candidate?.name || "").toLowerCase(),
     ...safeArray(candidate?.aliases, 8).map((alias) => String(alias || "").toLowerCase()),
   ]
-  if (candidateTerms.some((term) => term === normalizedBase)) return false
+  const comparableBase = comparableFoodPhrase(normalizedBase)
+  if (candidateTerms.some((term) => comparableFoodPhrase(term) === comparableBase)) return false
   return true
 }
 
@@ -313,7 +336,7 @@ function estimateItemMacroDetails(item, candidateFoodMatches = {}) {
         source: String(candidate.source || "").trim() || "Matched nutrition reference",
         source_type: String(candidate.source_type || "reference").trim() || "reference",
         matched_food_name: String(candidate.name || "").trim() || String(item.label || item.baseName || "").trim(),
-        estimated: false,
+        estimated: isEstimatedNutritionSourceType(candidate.source_type),
       }
     }
     if (itemQuantity && fallbackServingQuantity && compatiblePortionGroups(itemQuantity, fallbackServingQuantity) === true) {
@@ -323,7 +346,29 @@ function estimateItemMacroDetails(item, candidateFoodMatches = {}) {
         source: String(candidate.source || "").trim() || "Matched nutrition reference",
         source_type: String(candidate.source_type || "reference").trim() || "reference",
         matched_food_name: String(candidate.name || "").trim() || String(item.label || item.baseName || "").trim(),
-        estimated: false,
+        estimated: isEstimatedNutritionSourceType(candidate.source_type),
+      }
+    }
+  }
+
+  const broadMatch = findBestFoodMatch(String(item.baseName || item.label || "").trim())
+  if (broadMatch && baseNameMatches(broadMatch, item.baseName || item.label) > 0) {
+    const broadServingQuantity = parsePortion(broadMatch.quantity || "")
+    const baseWordCount = String(item.baseName || item.label || "").trim().split(/\s+/).filter(Boolean).length
+    const broadMatchUsesNamedServe = !broadServingQuantity
+    const broadMatchCategory = String(broadMatch.category || "").trim().toLowerCase()
+    const allowBroadMatchWithoutItemQuantity = Boolean(itemQuantity)
+      || broadMatchUsesNamedServe
+      || baseWordCount >= 2
+      || broadMatchCategory === "mixed meal"
+    if (allowBroadMatchWithoutItemQuantity && canTrustCandidatePortion(itemQuantity, broadServingQuantity, broadMatch)) {
+      const ratio = itemQuantity && broadServingQuantity ? scaleFromPortions(itemQuantity, broadServingQuantity) : 1
+      return {
+        macros: scaleNutrition(broadMatch, ratio || 1),
+        source: String(broadMatch.source || "").trim() || "Deterministic nutrition estimate",
+        source_type: String(broadMatch.source_type || "estimated_internal_profile").trim() || "estimated_internal_profile",
+        matched_food_name: String(broadMatch.name || "").trim() || String(item.label || item.baseName || "").trim(),
+        estimated: isEstimatedNutritionSourceType(broadMatch.source_type),
       }
     }
   }
@@ -382,6 +427,7 @@ export function estimateMealFromSession(mealSession, candidateFoodMatches = {}) 
 
   const breakdown = items.map((item) => {
     const details = estimateItemMacroDetails(item, candidateFoodMatches)
+    const assumedServing = !normalizeItemQuantity(item.quantity)
     return {
       name: String(item.label || item.baseName || "").trim() || "Item",
       quantity: typeof item.quantity === "string"
@@ -391,7 +437,7 @@ export function estimateMealFromSession(mealSession, candidateFoodMatches = {}) 
       matched_food_name: details.matched_food_name,
       source: details.source,
       source_type: details.source_type,
-      estimated: details.estimated,
+      estimated: details.estimated || assumedServing,
       calories: details.macros.calories,
       protein_g: details.macros.protein_g,
       carbs_g: details.macros.carbs_g,
@@ -419,13 +465,15 @@ export function estimateMealFromSession(mealSession, candidateFoodMatches = {}) 
     : uniqueSourceTypes.every((type) => VERIFIED_NUTRITION_SOURCE_TYPES.has(type))
       ? "high"
       : "medium"
-  const nutrition_source_type = uniqueSourceTypes.length === 1
-    ? uniqueSourceTypes[0]
-    : estimated
-      ? "mixed_reference_and_estimate"
-      : "mixed_verified_sources"
+  const nutrition_source_type = estimated
+    ? (uniqueSourceTypes.length === 1 && !VERIFIED_NUTRITION_SOURCE_TYPES.has(uniqueSourceTypes[0])
+        ? uniqueSourceTypes[0]
+        : "mixed_reference_and_estimate")
+    : (uniqueSourceTypes.length === 1
+        ? uniqueSourceTypes[0]
+        : "mixed_verified_sources")
   const nutrition_source = uniqueSources.length
-    ? uniqueSources.join(" | ")
+    ? `${uniqueSources.join(" | ")}${estimated ? " (standard serving assumed where quantity was missing)" : ""}`
     : estimated
       ? "Coach estimate from user-described ingredients and amounts"
       : "Verified matched nutrition reference"

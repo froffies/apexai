@@ -105,8 +105,9 @@ test("coach logging rules can estimate a deterministic meal action from session 
   assert.ok(action.calories > 1900)
   assert.ok(action.protein_g > 100)
   assert.ok(action.fat_g > 150)
-  assert.equal(action.nutrition_source_type, "mixed_reference_and_estimate")
-  assert.equal(action.macro_confidence, "low")
+  assert.equal(action.estimated, false)
+  assert.equal(action.nutrition_source_type, "curated_au_catalogue")
+  assert.equal(action.macro_confidence, "high")
 })
 
 test("coach logging rules keep verified provenance when a meal resolves entirely from trusted references", () => {
@@ -228,10 +229,13 @@ test("coach logging rules do not treat steak like tea when estimating fallback m
   assert.ok(action)
   assert.equal(action.type, "log_meal")
   assert.equal(action.food_name, "300g steak")
-  assert.equal(action.calories, 750)
-  assert.equal(action.protein_g, 75)
+  assert.equal(action.estimated, false)
+  assert.equal(action.nutrition_source_type, "curated_au_catalogue")
+  assert.equal(action.macro_confidence, "high")
+  assert.equal(action.calories, 510)
+  assert.equal(action.protein_g, 96)
   assert.equal(action.carbs_g, 0)
-  assert.equal(action.fat_g, 51)
+  assert.equal(action.fat_g, 13.5)
 })
 
 test("coach logging rules can build a loose estimated meal action for mixed log-all-that turns", () => {

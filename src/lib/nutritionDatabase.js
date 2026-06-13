@@ -463,7 +463,11 @@ function buildDynamicFoodEstimate(query = "") {
     return makeEstimate({ quantity: "1 wrap", calories: 390, protein_g: 16, carbs_g: 34, fat_g: 20, category: "mixed meal" })
   }
 
-  if (contains("burger")) {
+  if (contains("burger", "slider", "sliders")) {
+    if (contains("slider", "sliders")) {
+      if (contains("chicken")) return makeEstimate({ quantity: "2 sliders", calories: 390, protein_g: 28, carbs_g: 29, fat_g: 17, category: "mixed meal" })
+      return makeEstimate({ quantity: "2 sliders", calories: 430, protein_g: 24, carbs_g: 30, fat_g: 22, category: "mixed meal" })
+    }
     if (contains("chicken")) return makeEstimate({ quantity: "1 burger", calories: 590, protein_g: 34, carbs_g: 43, fat_g: 31, category: "mixed meal" })
     return makeEstimate({ quantity: "1 burger", calories: 650, protein_g: 32, carbs_g: 45, fat_g: 38, category: "mixed meal" })
   }

@@ -2127,14 +2127,13 @@ async function handleNutritionPhoto(request, response) {
     needs_review: estimatedMeal.needs_review,
     clarification_question: estimatedMeal.clarification_question,
     assumptions: estimatedMeal.assumptions,
-  }
-
-  if (action) {
-    responseBody.calories = Number(action.calories || 0)
-    responseBody.protein_g = Number(action.protein_g || 0)
-    responseBody.carbs_g = Number(action.carbs_g || 0)
-    responseBody.fat_g = Number(action.fat_g || 0)
-    responseBody.macro_breakdown = Array.isArray(action.macro_breakdown) ? action.macro_breakdown : []
+    calories: Number(action?.calories ?? estimatedMeal.calories ?? 0),
+    protein_g: Number(action?.protein_g ?? estimatedMeal.protein_g ?? 0),
+    carbs_g: Number(action?.carbs_g ?? estimatedMeal.carbs_g ?? 0),
+    fat_g: Number(action?.fat_g ?? estimatedMeal.fat_g ?? 0),
+    macro_breakdown: Array.isArray(action?.macro_breakdown)
+      ? action.macro_breakdown
+      : (Array.isArray(estimatedMeal.breakdown) ? estimatedMeal.breakdown : []),
   }
 
   sendJson(response, 200, responseBody, requestResponseOrigin(request))
@@ -2170,14 +2169,13 @@ async function handleNutritionPhotoReview(request, response) {
     needs_review: false,
     clarification_question: "",
     assumptions: estimatedMeal.assumptions,
-  }
-
-  if (action) {
-    responseBody.calories = Number(action.calories || 0)
-    responseBody.protein_g = Number(action.protein_g || 0)
-    responseBody.carbs_g = Number(action.carbs_g || 0)
-    responseBody.fat_g = Number(action.fat_g || 0)
-    responseBody.macro_breakdown = Array.isArray(action.macro_breakdown) ? action.macro_breakdown : []
+    calories: Number(action?.calories ?? estimatedMeal.calories ?? 0),
+    protein_g: Number(action?.protein_g ?? estimatedMeal.protein_g ?? 0),
+    carbs_g: Number(action?.carbs_g ?? estimatedMeal.carbs_g ?? 0),
+    fat_g: Number(action?.fat_g ?? estimatedMeal.fat_g ?? 0),
+    macro_breakdown: Array.isArray(action?.macro_breakdown)
+      ? action.macro_breakdown
+      : (Array.isArray(estimatedMeal.breakdown) ? estimatedMeal.breakdown : []),
   }
 
   sendJson(response, 200, responseBody, requestResponseOrigin(request))

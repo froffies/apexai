@@ -4,6 +4,7 @@ import {
   safeArray,
   titleCase,
 } from "./coachLoggingRules.mjs"
+import { roundMacro } from "../src/lib/nutritionHelpers.js"
 
 const PHOTO_CONFIDENCE_LEVELS = new Set(["high", "medium", "low"])
 const PHOTO_VERIFIED_SOURCE_TYPES = new Set(["curated_au_catalogue", "nz_curated_catalogue"])
@@ -67,7 +68,11 @@ function extractCountFromText(text = "") {
 
 function isGenericPhotoFoodName(value = "") {
   const normalized = cleanText(value).toLowerCase()
-  return /^(?:\d+\s*)?item(?:\s+\d+)?$/.test(normalized) || normalized === "food" || normalized === "meal"
+  return /^(?:\d+\s*)?item(?:\s+\d+)?$/.test(normalized)
+    || normalized === "food"
+    || normalized === "meal"
+    || /^(?:food|dish|meal|snack|drink)\s+item(?:\s+\d+)?$/.test(normalized)
+    || /^(?:(?:fried|grilled|baked|cooked|prepared|mixed|assorted|main|side|visible|plated)\s+)?(?:food|dish|meal|item)s?$/.test(normalized)
 }
 
 function deriveOverallPhotoConfidence(items = [], requestedValue = "") {
@@ -567,6 +572,7 @@ async function buildPhotoDishRescueEstimate(analysis, lookupFoods, mealType) {
       ...item,
       confidence: rescueAnalysis.items[0]?.confidence || rescueAnalysis.overall_confidence || rescueMacroConfidence,
     }, true)),
+    ...summarizePhotoBreakdown(rescueBreakdownEstimate.items),
     can_autofill: true,
     macro_confidence: rescueMacroConfidence,
     nutrition_source: rescueSource,
@@ -596,6 +602,20 @@ function sanitizePhotoBreakdownItem(item = {}, includeMacros = false) {
   return safeItem
 }
 
+function summarizePhotoBreakdown(items = []) {
+  return safeArray(items, 16).reduce((totals, item) => ({
+    calories: totals.calories + Number(item?.calories || 0),
+    protein_g: roundMacro(totals.protein_g + Number(item?.protein_g || 0)),
+    carbs_g: roundMacro(totals.carbs_g + Number(item?.carbs_g || 0)),
+    fat_g: roundMacro(totals.fat_g + Number(item?.fat_g || 0)),
+  }), {
+    calories: 0,
+    protein_g: 0,
+    carbs_g: 0,
+    fat_g: 0,
+  })
+}
+
 export function normalizeFoodPhotoAnalysis(raw = {}) {
   const value = raw && typeof raw === "object" ? raw : {}
   const assumptions = safeArray(value.assumptions, 8).map((entry) => cleanText(entry)).filter(Boolean)
@@ -608,7 +628,11 @@ export function normalizeFoodPhotoAnalysis(raw = {}) {
   const items = rawItems
     .map((item, index) => {
       const rawCandidateName = item?.name || item?.label || ""
-      const candidateName = normalizePhotoFoodName(rawCandidateName || item?.summary || `Item ${index + 1}`)
+      const rawSummaryName = item?.summary || item?.description || ""
+      const preferredCandidateName = isGenericPhotoFoodName(rawCandidateName) && cleanText(rawSummaryName)
+        ? rawSummaryName
+        : rawCandidateName
+      const candidateName = normalizePhotoFoodName(preferredCandidateName || rawSummaryName || `Item ${index + 1}`)
       const normalizedName = candidateName && !isGenericPhotoFoodName(candidateName)
         ? candidateName
         : inferredFoodName || candidateName
@@ -727,13 +751,14 @@ async function estimatePreparedPhotoAnalysis(analysis = {}, options = {}, { manu
 
   const breakdownEstimate = estimateMealFromSession(mealSession, candidateFoodMatches)
   const macroConfidence = deriveMacroConfidence(breakdownEstimate.items)
+  const provisionalTotals = summarizePhotoBreakdown(breakdownEstimate.items)
   const naturalAutofill = canAutofillPhotoEstimate(analysis, breakdownEstimate.items, macroConfidence)
   let canAutofill = manualReview ? true : naturalAutofill
   let action = null
   let safeBreakdown = breakdownEstimate.items.map((item, index) => sanitizePhotoBreakdownItem({
     ...item,
     confidence: analysis.items[index]?.confidence || analysis.overall_confidence || macroConfidence,
-  }, canAutofill || manualReview))
+  }, true))
   let source = buildPhotoSourceSummary(breakdownEstimate.items, macroConfidence)
 
   if (!canAutofill && !manualReview) {
@@ -782,6 +807,7 @@ async function estimatePreparedPhotoAnalysis(analysis = {}, options = {}, { manu
         }
       : null,
     breakdown: safeBreakdown,
+    ...provisionalTotals,
     can_autofill: canAutofill || manualReview,
     macro_confidence: macroConfidence,
     nutrition_source: source,

@@ -1,5 +1,10 @@
 import { expect, test } from "@playwright/test"
 
+const tinyPng = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO0p1KsAAAAASUVORK5CYII=",
+  "base64"
+)
+
 const onboardedProfile = {
   name: "Casey",
   goal: "fat_loss",
@@ -191,6 +196,132 @@ test("core screens render without horizontal overflow and expose key UX surfaces
   await expect(page.getByText(/^Beta testing notice$/)).toBeVisible()
   await page.getByRole("button", { name: /^Schedule$/ }).click()
   await expect(page.getByText(/plan this training week/i)).toBeVisible()
+  await expectNoHorizontalOverflow(page)
+})
+
+test("coach photo review flow stays usable with tall drafts and can log a reviewed estimate", async ({ page }) => {
+  await seedOnboardedProfile(page)
+
+  const tallDraftItems = Array.from({ length: 8 }, (_, index) => ({
+    name: `Slider stack ${index + 1}`,
+    quantity: "1 serve",
+    category: "food",
+    confidence: "medium",
+    matched_food_name: `Slider stack ${index + 1}`,
+    source: "Estimated from AI-identified foods and internal AU/NZ nutrition fallbacks",
+    source_type: "estimated_internal_profile",
+    calories: 120 + index * 10,
+    protein_g: 8 + index,
+    carbs_g: 10 + index,
+    fat_g: 5 + index,
+  }))
+
+  const reviewedItems = [
+    {
+      name: "2 beef sliders",
+      quantity: "2 sliders",
+      category: "food",
+      confidence: "medium",
+      matched_food_name: "Sliders",
+      source: "ApexAI deterministic food-class estimate",
+      source_type: "estimated_internal_profile",
+      calories: 430,
+      protein_g: 24,
+      carbs_g: 30,
+      fat_g: 22,
+    },
+    {
+      name: "Side salad",
+      quantity: "1 bowl",
+      category: "food",
+      confidence: "high",
+      matched_food_name: "Garden salad",
+      source: "Australian Food Composition Database / FSANZ AFCD Release 3 reference values, scaled to a common serve",
+      source_type: "curated_au_catalogue",
+      calories: 120,
+      protein_g: 4,
+      carbs_g: 10,
+      fat_g: 7,
+    },
+  ]
+
+  await page.route("**/api/nutrition/analyze-photo", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        summary: "Plate photo draft",
+        portion: "1 plate",
+        food_name: "Plate photo draft",
+        quantity: "1 plate",
+        estimated: true,
+        nutrition_source: "AI plate-photo estimate using visible-food identification and internal AU/NZ nutrition fallbacks. Review before saving.",
+        nutrition_source_type: "photo_ai_estimate",
+        identified_items: tallDraftItems,
+        macro_confidence: "low",
+        has_trusted_macros: false,
+        can_autofill: false,
+        needs_review: true,
+        clarification_question: "Review the visible foods and confirm the quantities before logging.",
+        assumptions: [],
+        calories: 1320,
+        protein_g: 92,
+        carbs_g: 116,
+        fat_g: 72,
+        macro_breakdown: tallDraftItems,
+      }),
+    })
+  })
+
+  await page.route("**/api/nutrition/review-photo-estimate", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        summary: "Reviewed slider plate",
+        portion: "1 plate",
+        food_name: "Reviewed slider plate",
+        quantity: "1 plate",
+        estimated: true,
+        nutrition_source: "AI plate-photo estimate cross-checked against trusted nutrition references",
+        nutrition_source_type: "photo_ai_estimate",
+        identified_items: reviewedItems,
+        macro_confidence: "medium",
+        has_trusted_macros: true,
+        can_autofill: true,
+        needs_review: false,
+        clarification_question: "",
+        assumptions: [],
+        calories: 550,
+        protein_g: 28,
+        carbs_g: 40,
+        fat_g: 29,
+        macro_breakdown: reviewedItems,
+      }),
+    })
+  })
+
+  await page.goto("/Coach")
+  await page.getByRole("button", { name: /photo meal/i }).click()
+  await page.locator('input[type="file"][accept="image/*"]').first().setInputFiles({
+    name: "plate.png",
+    mimeType: "image/png",
+    buffer: tinyPng,
+  })
+
+  await expect(page.getByText("Photo draft", { exact: true })).toBeVisible()
+  const recalcButton = page.getByRole("button", { name: /recalculate estimate/i })
+  await recalcButton.scrollIntoViewIfNeeded()
+  await expect(recalcButton).toBeVisible()
+  await recalcButton.click()
+
+  const logButton = page.getByRole("button", { name: /log reviewed estimate/i })
+  await logButton.scrollIntoViewIfNeeded()
+  await expect(logButton).toBeEnabled()
+  await logButton.click()
+
+  await waitForStoredMealNames(page, ["Reviewed slider plate"])
+  await reloadAndWaitForMeals(page, ["Reviewed slider plate"])
   await expectNoHorizontalOverflow(page)
 })
 

@@ -652,6 +652,22 @@ function hasCompleteMacroSet(value = {}) {
   return ["calories", "protein_g", "carbs_g", "fat_g"].every((key) => Number.isFinite(Number(value?.[key])))
 }
 
+function sumCoachDraftMacros(items = []) {
+  return Array.isArray(items)
+    ? items.reduce((totals, item) => ({
+      calories: totals.calories + (Number(item?.calories) || 0),
+      protein_g: totals.protein_g + (Number(item?.protein_g) || 0),
+      carbs_g: totals.carbs_g + (Number(item?.carbs_g) || 0),
+      fat_g: totals.fat_g + (Number(item?.fat_g) || 0),
+    }), {
+      calories: 0,
+      protein_g: 0,
+      carbs_g: 0,
+      fat_g: 0,
+    })
+    : { calories: 0, protein_g: 0, carbs_g: 0, fat_g: 0 }
+}
+
 function normalizeCoachFoodDraftItems(items = [], fallbackConfidence = "medium") {
   return Array.isArray(items)
     ? items.map((item) => ({
@@ -673,23 +689,28 @@ function normalizeCoachFoodDraftItems(items = [], fallbackConfidence = "medium")
 
 function buildPhotoCoachDraft(result = {}, mealType = "snack") {
   const macroConfidence = normalizeMacroConfidence(result?.macro_confidence, result?.needs_review ? "low" : "medium")
+  const macroBreakdownItems = Array.isArray(result?.macro_breakdown) && result.macro_breakdown.length
+    ? result.macro_breakdown
+    : result?.identified_items
+  const breakdownItems = normalizeCoachFoodDraftItems(macroBreakdownItems, macroConfidence)
+  const fallbackTotals = sumCoachDraftMacros(breakdownItems)
   return {
     id: uid("coach_food_draft"),
     type: "photo",
     meal_type: mealType || "snack",
     food_name: String(result?.food_name || result?.summary || "").trim(),
     quantity: String(result?.quantity || result?.portion || "1 plate").trim() || "1 plate",
-    calories: Number.isFinite(Number(result?.calories)) ? Number(result.calories) : 0,
-    protein_g: Number.isFinite(Number(result?.protein_g)) ? Number(result.protein_g) : 0,
-    carbs_g: Number.isFinite(Number(result?.carbs_g)) ? Number(result.carbs_g) : 0,
-    fat_g: Number.isFinite(Number(result?.fat_g)) ? Number(result.fat_g) : 0,
+    calories: Number.isFinite(Number(result?.calories)) ? Number(result.calories) : fallbackTotals.calories,
+    protein_g: Number.isFinite(Number(result?.protein_g)) ? Number(result.protein_g) : fallbackTotals.protein_g,
+    carbs_g: Number.isFinite(Number(result?.carbs_g)) ? Number(result.carbs_g) : fallbackTotals.carbs_g,
+    fat_g: Number.isFinite(Number(result?.fat_g)) ? Number(result.fat_g) : fallbackTotals.fat_g,
     nutrition_source: String(result?.nutrition_source || "").trim(),
     nutrition_source_type: String(result?.nutrition_source_type || "photo_ai_estimate").trim().toLowerCase(),
     macro_confidence: macroConfidence,
     can_autofill: Boolean(result?.can_autofill),
     needs_review: Boolean(result?.needs_review) || macroConfidence !== "high",
     clarification_question: String(result?.clarification_question || "").trim(),
-    items: normalizeCoachFoodDraftItems(result?.identified_items, macroConfidence),
+    items: breakdownItems,
     macro_breakdown: Array.isArray(result?.macro_breakdown) ? result.macro_breakdown : [],
     action: result?.has_trusted_macros && hasCompleteMacroSet(result)
       ? {
@@ -2214,7 +2235,7 @@ export default function Coach() {
           </div>
 
           {(foodToolBusy || coachFoodDraft) && (
-            <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <div className="mt-3 max-h-[min(42vh,24rem)] overflow-y-auto overscroll-contain rounded-2xl border border-slate-200 bg-slate-50 p-4 pr-3">
               {foodToolBusy && <p className="text-sm text-slate-500">Working through that nutrition lookup...</p>}
 
               {coachFoodDraft?.type === "photo" && (
