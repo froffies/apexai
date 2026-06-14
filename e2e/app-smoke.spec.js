@@ -303,7 +303,9 @@ test("coach photo review flow stays usable with tall drafts and can log a review
 
   await page.goto("/Coach")
   await page.getByRole("button", { name: /photo meal/i }).click()
-  await page.locator('input[type="file"][accept="image/*"]').first().setInputFiles({
+  await expect(page.getByRole("button", { name: /take photo/i })).toBeVisible()
+  await expect(page.getByRole("button", { name: /upload photo/i })).toBeVisible()
+  await page.getByTestId("food-photo-upload-input").setInputFiles({
     name: "plate.png",
     mimeType: "image/png",
     buffer: tinyPng,

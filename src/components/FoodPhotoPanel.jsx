@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { useMemo, useRef, useState } from "react"
 import { Camera, LoaderCircle, Upload, X } from "lucide-react"
 import { analyzeFoodPhoto } from "@/lib/nutritionApiClient"
 
@@ -47,6 +47,8 @@ export default function FoodPhotoPanel({
   const [status, setStatus] = useState("")
   const [previewUrl, setPreviewUrl] = useState("")
   const [summary, setSummary] = useState("")
+  const cameraInputRef = useRef(null)
+  const uploadInputRef = useRef(null)
   const details = useMemo(() => summary ? `Identified: ${summary}` : "", [summary])
 
   const handleFile = async (file) => {
@@ -66,6 +68,12 @@ export default function FoodPhotoPanel({
     } finally {
       setLoading(false)
     }
+  }
+
+  const handleInputChange = (event) => {
+    const file = event.target.files?.[0]
+    void handleFile(file)
+    event.target.value = ""
   }
 
   const clearPhoto = () => {
@@ -95,22 +103,43 @@ export default function FoodPhotoPanel({
           )}
 
           <div className="mt-3 flex flex-wrap gap-2">
-            <label className="flex min-h-11 cursor-pointer items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white">
-              {loading ? <LoaderCircle size={16} className="animate-spin" /> : <Upload size={16} />}
-              {loading ? "Analyzing..." : "Take or upload photo"}
-              <input
-                type="file"
-                accept="image/*"
-                capture="environment"
-                className="hidden"
-                disabled={loading}
-                onChange={(event) => {
-                  const file = event.target.files?.[0]
-                  void handleFile(file)
-                  event.target.value = ""
-                }}
-              />
-            </label>
+            <input
+              ref={cameraInputRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              className="hidden"
+              disabled={loading}
+              data-testid="food-photo-camera-input"
+              onChange={handleInputChange}
+            />
+            <input
+              ref={uploadInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              disabled={loading}
+              data-testid="food-photo-upload-input"
+              onChange={handleInputChange}
+            />
+            <button
+              type="button"
+              onClick={() => cameraInputRef.current?.click()}
+              disabled={loading}
+              className="flex min-h-11 items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-70"
+            >
+              {loading ? <LoaderCircle size={16} className="animate-spin" /> : <Camera size={16} />}
+              {loading ? "Analyzing..." : "Take photo"}
+            </button>
+            <button
+              type="button"
+              onClick={() => uploadInputRef.current?.click()}
+              disabled={loading}
+              className="flex min-h-11 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 disabled:cursor-not-allowed disabled:opacity-70"
+            >
+              <Upload size={16} />
+              Upload photo
+            </button>
             {!!previewUrl && (
               <button
                 type="button"
@@ -121,6 +150,8 @@ export default function FoodPhotoPanel({
               </button>
             )}
           </div>
+
+          <p className="mt-2 text-xs text-slate-500">Use <span className="font-semibold text-slate-700">Upload photo</span> to pick from your library on iPhone, or <span className="font-semibold text-slate-700">Take photo</span> to open the camera.</p>
 
           {!!details && <p className="mt-3 text-sm font-semibold text-slate-800">{details}</p>}
           {!!status && <p className="mt-2 text-sm text-slate-600">{status}</p>}
