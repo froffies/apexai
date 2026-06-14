@@ -2202,7 +2202,7 @@ test("fragmented coach workout logs persist into Workouts after refresh", async 
   await expect(page.getByText(/saved to workouts: bench press for 4 sets of 6 at 80kg\./i)).toBeVisible()
 
   await page.goto("/Workouts")
-  await page.reload()
+  await page.reload({ waitUntil: "domcontentloaded" })
   await expect(page.getByText(/4 structured sets logged so far\./i).first()).toBeVisible()
   await expect(page.getByText(/1,?920kg/).first()).toBeVisible()
 })
