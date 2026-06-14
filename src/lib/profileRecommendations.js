@@ -89,16 +89,57 @@ function roundMacro(value) {
 
 function bmiCategory(bmi) {
   if (!bmi) return "Unavailable"
-  if (bmi < 18.5) return "Below the common healthy range"
-  if (bmi < 25) return "Within the common healthy range"
-  if (bmi < 30) return "Above the common healthy range"
-  return "Well above the common healthy range"
+  if (bmi < 18.5) return "Underweight range"
+  if (bmi < 25) return "Healthy-weight range"
+  if (bmi < 30) return "Overweight range"
+  if (bmi < 35) return "Obesity range (class I)"
+  if (bmi < 40) return "Obesity range (class II)"
+  return "Obesity range (class III)"
 }
 
 function buildBmi(weightKg, heightCm) {
   const heightMetres = heightCm / 100
   if (!weightKg || !heightMetres) return 0
   return Math.round((weightKg / (heightMetres * heightMetres)) * 10) / 10
+}
+
+function roundToOneDecimal(value) {
+  return Math.round((Number(value) || 0) * 10) / 10
+}
+
+function normalizeHeightCm(rawValue) {
+  const text = String(rawValue ?? "").trim()
+  const height = numberValue(text)
+  if (!height) return 0
+
+  const feetAndInches = text.match(/^(?<feet>[4-7])\.(?<inches>\d{1,2})$/)
+  if (feetAndInches?.groups) {
+    const feet = Number(feetAndInches.groups.feet || 0)
+    const inches = Math.min(11, Number(feetAndInches.groups.inches || 0))
+    return roundToOneDecimal((feet * 12 + inches) * 2.54)
+  }
+
+  if (height > 0 && height <= 3) return roundToOneDecimal(height * 100)
+  if (height >= 48 && height <= 96) return roundToOneDecimal(height * 2.54)
+  return roundToOneDecimal(height)
+}
+
+/** @param {Record<string, any>} profile */
+function normalizeProfileInputs(profile = {}) {
+  const normalizedWeight = roundToOneDecimal(numberValue(profile.weight_kg))
+  const normalizedHeight = normalizeHeightCm(profile.height_cm)
+  const normalizedAge = Math.max(0, Math.round(numberValue(profile.age)))
+  const normalizedTrainingDays = Math.max(0, Math.round(numberValue(profile.training_days_per_week)))
+  const normalizedTargetWeight = roundToOneDecimal(numberValue(profile.target_weight_kg))
+
+  return {
+    ...profile,
+    age: normalizedAge || profile.age,
+    weight_kg: normalizedWeight || profile.weight_kg,
+    height_cm: normalizedHeight || profile.height_cm,
+    training_days_per_week: normalizedTrainingDays || profile.training_days_per_week,
+    target_weight_kg: normalizedTargetWeight || profile.target_weight_kg,
+  }
 }
 
 function recommendedSplit(profile) {
@@ -312,15 +353,18 @@ function buildWorkoutOptions(profile) {
 }
 
 export function buildTargetModel(profile) {
-  const weight = numberValue(profile.weight_kg) || 80
-  const height = numberValue(profile.height_cm) || 175
-  const age = numberValue(profile.age) || 30
-  const activityMultiplier = activityMultipliers[profile.activity_level] || 1.55
-  const bmr = Math.round(10 * weight + 6.25 * height - 5 * age + sexOffset(profile.gender))
+  const normalizedProfile = /** @type {Record<string, any>} */ (normalizeProfileInputs(profile))
+  const weight = numberValue(normalizedProfile.weight_kg) || 80
+  const height = numberValue(normalizedProfile.height_cm) || 175
+  const age = numberValue(normalizedProfile.age) || 30
+  const activityMultiplier = activityMultipliers[normalizedProfile.activity_level] || 1.55
+  const bmr = Math.round(10 * weight + 6.25 * height - 5 * age + sexOffset(normalizedProfile.gender))
   const maintenanceCalories = Math.round(bmr * activityMultiplier)
-  const goalAdjustmentCalories = goalAdjustment(profile.goal)
+  const goalAdjustmentCalories = goalAdjustment(normalizedProfile.goal)
   const dailyCalories = Math.max(1400, Math.round(maintenanceCalories + goalAdjustmentCalories))
   const bmi = buildBmi(weight, height)
+  const targetWeight = numberValue(normalizedProfile.target_weight_kg)
+  const targetBmi = targetWeight > 0 ? buildBmi(targetWeight, height) : 0
 
   return {
     method: "Mifflin-St Jeor starting estimate",
@@ -330,15 +374,17 @@ export function buildTargetModel(profile) {
     dailyCalories,
     activityMultiplier,
     bmi,
+    targetBmi,
     bmiCategory: bmiCategory(bmi),
-    summary: "Calories start from a resting-energy estimate using age, height, weight, and gender setting, then get adjusted for activity and goal. BMI is shown for context only and does not directly set your macros.",
+    summary: "Calories start from a resting-energy estimate using age, height, weight, and gender setting, then get adjusted for activity and goal. Height entries in metres or common imperial shorthand are normalized automatically. BMI is shown as screening-only context and does not directly set your macros.",
   }
 }
 
 export function recommendTargets(profile) {
-  const model = buildTargetModel(profile)
-  const weight = numberValue(profile.weight_kg) || 80
-  const protein = Math.max(120, Math.round(weight * (profile.goal === "muscle_gain" ? 2.1 : 1.9)))
+  const normalizedProfile = /** @type {Record<string, any>} */ (normalizeProfileInputs(profile))
+  const model = buildTargetModel(normalizedProfile)
+  const weight = numberValue(normalizedProfile.weight_kg) || 80
+  const protein = Math.max(120, Math.round(weight * (normalizedProfile.goal === "muscle_gain" ? 2.1 : 1.9)))
   const fat = Math.max(45, Math.round(weight * 0.8))
   const carbs = Math.max(80, Math.round((model.dailyCalories - protein * 4 - fat * 9) / 4))
 
@@ -352,18 +398,20 @@ export function recommendTargets(profile) {
 }
 
 export function recommendTargetWeight(profile) {
-  const weight = numberValue(profile.weight_kg) || 80
-  if (profile.goal === "fat_loss") return Math.max(45, Math.round(weight * 0.92))
-  if (profile.goal === "muscle_gain") return Math.round(weight * 1.05)
+  const normalizedProfile = /** @type {Record<string, any>} */ (normalizeProfileInputs(profile))
+  const weight = numberValue(normalizedProfile.weight_kg) || 80
+  if (normalizedProfile.goal === "fat_loss") return Math.max(45, Math.round(weight * 0.92))
+  if (normalizedProfile.goal === "muscle_gain") return Math.round(weight * 1.05)
   return Math.round(weight)
 }
 
 export function buildStarterRecommendations(profile) {
-  const enrichedProfile = {
-    ...profile,
-    ...recommendTargets(profile),
-    target_weight_kg: numberValue(profile.target_weight_kg) || recommendTargetWeight(profile),
-  }
+  const normalizedProfile = /** @type {Record<string, any>} */ (normalizeProfileInputs(profile))
+  const enrichedProfile = /** @type {Record<string, any>} */ ({
+    ...normalizedProfile,
+    ...recommendTargets(normalizedProfile),
+    target_weight_kg: numberValue(normalizedProfile.target_weight_kg) || recommendTargetWeight(normalizedProfile),
+  })
 
   const workoutOptions = buildWorkoutOptions(enrichedProfile)
   const mealOptions = buildMealOptions(enrichedProfile)

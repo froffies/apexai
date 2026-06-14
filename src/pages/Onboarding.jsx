@@ -231,7 +231,7 @@ export default function Onboarding() {
   }
 
   const finish = () => {
-    const nextProfile = { ...recommendation.profile, name: form.name || "Athlete", onboarded: true }
+    const nextProfile = /** @type {Record<string, any>} */ ({ ...recommendation.profile, name: form.name || "Athlete", onboarded: true })
     const starterWorkoutPlan = selectedWorkoutOption?.plan ? { ...selectedWorkoutOption.plan, date: todayISO() } : null
     const starterMealPlan = selectedMealOption?.plan ? { ...selectedMealOption.plan, date: todayISO() } : null
     const nextWorkoutPlans = workoutPlans.length ? workoutPlans : starterWorkoutPlan ? [starterWorkoutPlan] : []
@@ -438,7 +438,11 @@ export default function Onboarding() {
                       <StatTile label="Estimated BMR" value={`${recommendation.targetModel.bmr} kcal`} detail="Resting burn from age, height, weight, and gender setting." />
                       <StatTile label="Maintenance" value={`${recommendation.targetModel.maintenanceCalories} kcal`} detail={`${recommendation.targetModel.activityMultiplier}x activity multiplier`} />
                       <StatTile label="Goal adjustment" value={formatSignedCalories(recommendation.targetModel.goalAdjustmentCalories)} detail="Applied after maintenance based on your goal." />
-                      <StatTile label="BMI context" value={recommendation.targetModel.bmi ? recommendation.targetModel.bmi : "-"} detail={recommendation.targetModel.bmiCategory} />
+                      <StatTile
+                        label="Current BMI"
+                        value={recommendation.targetModel.bmi ? recommendation.targetModel.bmi : "-"}
+                        detail={recommendation.targetModel.targetBmi ? `${recommendation.targetModel.bmiCategory} • target BMI ${recommendation.targetModel.targetBmi}` : recommendation.targetModel.bmiCategory}
+                      />
                     </div>
                     <div className="mt-4 rounded-2xl bg-slate-50 p-3 text-sm text-slate-600">
                       <div className="flex items-start gap-2">

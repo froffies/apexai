@@ -21,7 +21,7 @@ test("recommendTargets uses a Mifflin-St Jeor style estimate plus activity and g
   assert.equal(model.maintenanceCalories, 2724)
   assert.equal(model.goalAdjustmentCalories, -400)
   assert.equal(model.dailyCalories, 2324)
-  assert.match(model.summary, /BMI is shown for context only/i)
+  assert.match(model.summary, /BMI is shown as screening-only context/i)
 
   assert.deepEqual(targets, {
     daily_calories: 2324,
@@ -58,4 +58,67 @@ test("buildStarterRecommendations returns selectable, input-driven starter optio
   assert.ok(recommendedMeal.calorieCoverage >= 92)
   assert.ok(recommendedMeal.proteinCoverage >= 88)
   assert.ok(recommendedMeal.plan.meals.length >= 4)
+})
+
+test("buildTargetModel normalizes common height formats before calculating BMI and calories", () => {
+  const metricModel = buildTargetModel({
+    goal: "fat_loss",
+    gender: "male",
+    age: 37,
+    weight_kg: 96,
+    height_cm: 198,
+    activity_level: "lightly_active",
+    training_days_per_week: 3,
+    target_weight_kg: 88,
+  })
+
+  const metresModel = buildTargetModel({
+    goal: "fat_loss",
+    gender: "male",
+    age: 37,
+    weight_kg: 96,
+    height_cm: "1.98",
+    activity_level: "lightly_active",
+    training_days_per_week: 3,
+    target_weight_kg: 88,
+  })
+
+  const imperialModel = buildTargetModel({
+    goal: "fat_loss",
+    gender: "male",
+    age: 37,
+    weight_kg: 96,
+    height_cm: "6.6",
+    activity_level: "lightly_active",
+    training_days_per_week: 3,
+    target_weight_kg: 88,
+  })
+
+  assert.equal(metresModel.bmi, metricModel.bmi)
+  assert.equal(metresModel.dailyCalories, metricModel.dailyCalories)
+  assert.equal(imperialModel.bmi, metricModel.bmi)
+  assert.equal(imperialModel.dailyCalories, metricModel.dailyCalories)
+  assert.equal(metricModel.targetBmi, 22.4)
+})
+
+test("buildStarterRecommendations persists normalized anthropometric inputs", () => {
+  const recommendation = buildStarterRecommendations({
+    goal: "fat_loss",
+    gender: "male",
+    age: "37",
+    weight_kg: "96",
+    height_cm: "1.98",
+    activity_level: "lightly_active",
+    training_days_per_week: "3",
+    split_type: "upper_lower",
+    target_weight_kg: "88",
+  })
+
+  assert.equal(recommendation.profile.age, 37)
+  assert.equal(recommendation.profile.weight_kg, 96)
+  assert.equal(recommendation.profile.height_cm, 198)
+  assert.equal(recommendation.profile.training_days_per_week, 3)
+  assert.equal(recommendation.profile.target_weight_kg, 88)
+  assert.equal(recommendation.targetModel.bmi, 24.5)
+  assert.equal(recommendation.targetModel.targetBmi, 22.4)
 })

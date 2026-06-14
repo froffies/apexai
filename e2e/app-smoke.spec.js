@@ -127,7 +127,7 @@ test("onboarding review explains the target method and offers optional starter p
 
   await expect(page.getByRole("heading", { name: /your starting plan/i })).toBeVisible()
   await expect(page.getByRole("heading", { name: /mifflin-st jeor starting estimate/i })).toBeVisible()
-  await expect(page.getByText(/bmi is shown for context only/i)).toBeVisible()
+  await expect(page.getByText(/bmi is shown as screening-only context/i)).toBeVisible()
   await expect(page.getByRole("heading", { name: /choose how you want week one to start/i })).toBeVisible()
   await expect(page.getByRole("heading", { name: /choose the first food structure you want to follow/i })).toBeVisible()
   await expect(page.getByRole("button", { name: /decide later/i })).toHaveCount(2)
