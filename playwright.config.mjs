@@ -44,5 +44,12 @@ export default defineConfig({
         viewport: { width: 1440, height: 960 },
       },
     },
+    {
+      name: "android",
+      testMatch: /layout-cross-device\.spec\.js/,
+      use: {
+        ...devices["Pixel 5"],
+      },
+    },
   ],
 })

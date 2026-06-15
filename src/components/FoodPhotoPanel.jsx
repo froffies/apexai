@@ -98,7 +98,7 @@ export default function FoodPhotoPanel({
 
           {previewUrl && (
             <div className="mt-3 overflow-hidden rounded-lg border border-slate-200 bg-white">
-              <img src={previewUrl} alt="Food preview" className="max-h-72 w-full object-cover" />
+              <img src={previewUrl} alt="Food preview" className="max-h-56 w-full object-cover sm:max-h-72" />
             </div>
           )}
 

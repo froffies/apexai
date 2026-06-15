@@ -1233,6 +1233,19 @@ test("meal session keeps explicit breakfast and lunch groups separate inside one
   assert.equal(session.meal_groups[1].summary, "200g steak, plus 1 cup rice")
 })
 
+test("meal session keeps count-style summaries readable for simple foods", () => {
+  const pie = buildMealContext([], "i had 2 pie", emptyMealSession())
+  const fries = buildMealContext([], "i had 4 fries", emptyMealSession())
+  const tofu = buildMealContext([], "i had 2 tofu", emptyMealSession())
+
+  assert.ok(pie)
+  assert.ok(fries)
+  assert.ok(tofu)
+  assert.equal(pie.summary, "2 pies")
+  assert.equal(fries.summary, "4 fries")
+  assert.equal(tofu.summary, "2 tofu")
+})
+
 test("meal session fuzzes two hundred randomized grouped meals without corrupting relationships", () => {
   const random = createSeededRandom(426913)
   const templates = [

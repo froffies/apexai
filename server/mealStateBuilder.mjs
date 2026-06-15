@@ -25,6 +25,7 @@ const DRINK_WORDS = ["tea", "coffee", "juice", "water", "milk", "smoothie", "sha
 const INGREDIENT_WORDS = ["butter", "oil", "cheese", "sugar", "milk", "cream", "sauce", "gravy", "dressing", "vegemite", "jam", "honey", "salt", "pesto", "mayo"]
 const FOOD_HINTS = ["egg", "eggs", "chicken", "rice", "beef", "steak", "pork", "lamb", "fish", "salmon", "tuna", "toast", "bread", "tea", "coffee", "juice", "milk", "beans", "oats", "yoghurt", "yogurt", "butter", "oil", "cheese", "potato", "salad", "apple", "banana", "celery", "chocolate", "pasta", "chips", "fries", "burger", "taco", "tacos", "vegemite", "berry", "berries", "whey", "almond milk"]
 const COUNT_REQUIRED = new Set(["egg"])
+const COUNT_FRIENDLY_BASES = new Set(["egg", "pie", "pizza", "burger", "cake", "fry", "fries", "chip", "chips", "taco", "cookie", "biscuit", "slider", "sandwich", "wrap"])
 const STOPWORDS = new Set(["i", "had", "have", "ate", "drank", "also", "just", "then", "but", "the", "a", "an", "my", "for", "to", "at", "with", "and", "plus", "of", "it", "that", "this", "was", "were", "is", "are", "did", "do", "done", "log", "track", "save", "add", "include", "today", "later", "tomorrow", "tonight"])
 
 const MEAL_START_PATTERN = /^(?:please\s+)?(?:(?:i\s+)?(?:had|ate|drank)|log|track|save|add|include)\b/i
@@ -412,10 +413,38 @@ function displayName(item = {}) {
   return base
 }
 
+function pluralizeCountWord(word = "") {
+  const normalized = cleanText(word)
+  if (!normalized || normalized.endsWith("s")) return normalized
+  if (normalized === "fry") return "fries"
+  if (/[bcdfghjklmnpqrstvwxyz]y$/i.test(normalized)) return `${normalized.slice(0, -1)}ies`
+  if (/(?:s|x|z|ch|sh)$/i.test(normalized)) return `${normalized}es`
+  return `${normalized}s`
+}
+
+function pluralizeCountLabel(label = "") {
+  const normalized = cleanText(label)
+  if (!normalized || normalized.endsWith("s")) return normalized
+  const parts = normalized.split(" ").filter(Boolean)
+  if (!parts.length) return normalized
+  const tail = parts.pop() || ""
+  return [...parts, pluralizeCountWord(tail)].join(" ").trim()
+}
+
 function countDisplayName(item = {}) {
-  const base = cleanText(item.base_name || item.label || "")
+  const base = cleanText(item.label || item.base_name || "")
   if (!base) return ""
-  return base.endsWith("s") ? base : `${base}s`
+  return pluralizeCountLabel(base)
+}
+
+function shouldUseCountStyleName(item = {}, quantity = null) {
+  const base = singularize(item.base_name || item.label || "")
+  if (COUNT_REQUIRED.has(base)) return true
+  if (!quantity || quantity.unit) return false
+  const amount = Number(quantity.amount)
+  if (!Number.isFinite(amount) || amount <= 1) return false
+  const label = cleanText(item.label || item.base_name || "")
+  return label.endsWith("s") || COUNT_FRIENDLY_BASES.has(base)
 }
 
 function itemReference(item = {}) {
@@ -982,14 +1011,8 @@ function summarizeItem(state, item, attachmentOnly = false) {
     (prep) => cleanText(quantityText).includes(cleanText(prep))
   )
   const effectivePrepText = prepAlreadyInQty ? "" : prepText
-  const quantityImpliesPlural = Boolean(
-    quantity
-    && !quantity.unit
-    && Number.isFinite(Number(quantity.amount))
-    && Number(quantity.amount) > 1
-    && cleanText(item.label || "").endsWith("s")
-  )
-  const nameText = COUNT_REQUIRED.has(singularize(item.base_name)) || quantityImpliesPlural
+  const useCountStyleName = shouldUseCountStyleName(item, quantity)
+  const nameText = useCountStyleName
     ? countDisplayName(item)
     : displayName(item)
   const nameAlreadyInQty = Boolean(

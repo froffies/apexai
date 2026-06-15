@@ -1896,42 +1896,48 @@ async function runLiveSoak() {
   let failureCount = 0
   const streakSeeds = []
 
-  while (streak < requiredStreak) {
-    runIndex += 1
-    const seed = createSeed(runIndex)
-    try {
-      await resetLiveUserState(live)
-      const { runArtifact } = await runSingleSoakPass({
-        runIndex,
-        seed,
-        requestCoach: (conversationState, store, message) => requestLiveCoach(conversationState, store, message, live),
-        verifyRun: verifyLiveRun,
-      })
-      totalConversations += runArtifact.conversationsTested.length
-      streak += 1
-      streakSeeds.push(seed)
-      if (streakSeeds.length > requiredStreak) streakSeeds.shift()
-    } catch (error) {
-      failureCount += 1
-      streak = 0
-      streakSeeds.length = 0
-      throw Object.assign(error, {
-        totalRunsAttempted: runIndex,
-        totalConversations,
-        failuresBeforeExit: failureCount,
-      })
+  try {
+    while (streak < requiredStreak) {
+      runIndex += 1
+      const seed = createSeed(runIndex)
+      try {
+        await resetLiveUserState(live)
+        const { runArtifact } = await runSingleSoakPass({
+          runIndex,
+          seed,
+          requestCoach: (conversationState, store, message) => requestLiveCoach(conversationState, store, message, live),
+          verifyRun: verifyLiveRun,
+        })
+        totalConversations += runArtifact.conversationsTested.length
+        streak += 1
+        streakSeeds.push(seed)
+        if (streakSeeds.length > requiredStreak) streakSeeds.shift()
+      } catch (error) {
+        failureCount += 1
+        streak = 0
+        streakSeeds.length = 0
+        throw Object.assign(error, {
+          totalRunsAttempted: runIndex,
+          totalConversations,
+          failuresBeforeExit: failureCount,
+        })
+      }
     }
-  }
 
-  return {
-    target: "live",
-    finalCleanStreakCount: streak,
-    totalRunsAttempted: runIndex,
-    totalConversationsTested: totalConversations,
-    finalSeeds: streakSeeds,
-    failuresFoundBeforeCleanStreak: failureCount,
-    liveBaseUrl,
-    liveCoachUrl,
+    return {
+      target: "live",
+      finalCleanStreakCount: streak,
+      totalRunsAttempted: runIndex,
+      totalConversationsTested: totalConversations,
+      finalSeeds: streakSeeds,
+      failuresFoundBeforeCleanStreak: failureCount,
+      liveBaseUrl,
+      liveCoachUrl,
+    }
+  } finally {
+    await live.authClient?.auth?.signOut().catch(() => null)
+    live.authClient?.realtime?.disconnect?.()
+    live.adminClient?.realtime?.disconnect?.()
   }
 }
 
@@ -1951,6 +1957,8 @@ async function main() {
   }
   await writeJson(path.join(runRoot, "latest-summary.json"), finalSummary)
   console.log(JSON.stringify({ ok: true, ...finalSummary }, null, 2))
+  await new Promise((resolve) => setImmediate(resolve))
+  process.exit(0)
 }
 
 main().catch(async (error) => {
@@ -1966,5 +1974,6 @@ main().catch(async (error) => {
   await ensureDirectory(runRoot).catch(() => null)
   await writeJson(path.join(runRoot, "latest-summary.json"), failureSummary).catch(() => null)
   console.error(JSON.stringify(failureSummary, null, 2))
-  process.exitCode = 1
+  await new Promise((resolve) => setImmediate(resolve))
+  process.exit(1)
 })

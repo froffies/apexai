@@ -784,6 +784,7 @@ export default function Coach() {
   const [foodToolBusy, setFoodToolBusy] = useState(false)
   const inputRef = useRef(null)
   const bottomRef = useRef(null)
+  const coachDraftRef = useRef(null)
   const submitGuardRef = useRef(createSubmitGuardState())
   const auditSessionIdRef = useRef("")
   if (typeof window !== "undefined" && !auditSessionIdRef.current) {
@@ -794,6 +795,10 @@ export default function Coach() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages, thinking])
+  useEffect(() => {
+    if (!coachFoodDraft && !foodToolBusy) return
+    coachDraftRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" })
+  }, [coachFoodDraft, foodToolBusy])
   const [aiError, setAiError] = useState("")
 
   useEffect(() => {
@@ -2087,13 +2092,13 @@ export default function Coach() {
         </div>
       </SectionCard>
 
-      <section className="flex h-[60vh] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm sm:h-[65vh]">
+      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         {(thinking || aiError) && (
           <div className={`border-b px-4 py-2 text-sm ${aiError ? "border-amber-200 bg-amber-50 text-amber-800" : "border-indigo-100 bg-indigo-50 text-indigo-700"}`}>
             {thinking ? "Coach is thinking through that..." : aiError}
           </div>
         )}
-        <div className="flex-1 space-y-4 overflow-y-auto p-4">
+        <div className="h-[clamp(18rem,38vh,30rem)] space-y-4 overflow-y-auto overscroll-contain p-4">
           {messages.map((message) => {
             const isUser = message.role === "user"
             return (
@@ -2235,7 +2240,7 @@ export default function Coach() {
           </div>
 
           {(foodToolBusy || coachFoodDraft) && (
-            <div className="mt-3 max-h-[min(42vh,24rem)] overflow-y-auto overscroll-contain rounded-2xl border border-slate-200 bg-slate-50 p-4 pr-3">
+            <div ref={coachDraftRef} className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
               {foodToolBusy && <p className="text-sm text-slate-500">Working through that nutrition lookup...</p>}
 
               {coachFoodDraft?.type === "photo" && (
