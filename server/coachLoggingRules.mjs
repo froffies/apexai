@@ -1,3 +1,4 @@
+import { coachMealConfidenceNote } from "../src/lib/nutritionHelpers.js"
 import { findBestFoodMatch } from "../src/lib/nutritionDatabase.js"
 
 export function safeArray(value, limit = 8) {
@@ -708,8 +709,16 @@ export function buildDeterministicFoodMacroReply({ message = "" } = {}) {
   const prefix = label.charAt(0).toUpperCase() + label.slice(1)
   const qualifier = estimated ? "comes to about" : "has about"
   const sourceTail = deterministicFallback
-    ? " That's a deterministic fallback estimate based on our AU/NZ food-class profile."
-    : (estimated ? " That's an estimate based on our AU/NZ reference profile." : "")
+    ? " This is a deterministic fallback estimate based on our AU/NZ food-class profile."
+    : (coachMealConfidenceNote({
+      estimated,
+      nutrition_source_type: food.source_type,
+      macro_confidence: food.macro_confidence,
+    }) ? ` ${coachMealConfidenceNote({
+      estimated,
+      nutrition_source_type: food.source_type,
+      macro_confidence: food.macro_confidence,
+    })}` : "")
 
   return `${prefix} ${qualifier} ${Math.round(Number(food.calories) || 0)} kcal, ${Math.round(Number(food.protein_g) || 0)}g protein, ${Math.round(Number(food.carbs_g) || 0)}g carbs, and ${Math.round(Number(food.fat_g) || 0)}g fat.${sourceTail}`
 }
@@ -1184,5 +1193,9 @@ export function buildDeterministicWorkoutDeletionAction(workoutSession) {
 
 export function formatDeterministicMealAnswer(action) {
   if (!action) return ""
-  return `That comes to about ${Math.round(Number(action.calories) || 0)} kcal, ${Math.round(Number(action.protein_g) || 0)}g protein, ${Math.round(Number(action.carbs_g) || 0)}g carbs, and ${Math.round(Number(action.fat_g) || 0)}g fat. If you want it saved, tell me to log it.`
+  const trustNote = coachMealConfidenceNote(action)
+  const savePrompt = trustNote && /\bestimate|photo-based|manual entry|blended\b/i.test(trustNote)
+    ? "If you want it saved, tell me to log it and I'll keep it marked as an estimate."
+    : "If you want it saved, tell me to log it."
+  return `That comes to about ${Math.round(Number(action.calories) || 0)} kcal, ${Math.round(Number(action.protein_g) || 0)}g protein, ${Math.round(Number(action.carbs_g) || 0)}g carbs, and ${Math.round(Number(action.fat_g) || 0)}g fat.${trustNote ? ` ${trustNote}` : ""} ${savePrompt}`
 }

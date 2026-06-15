@@ -186,6 +186,8 @@ function sanitizeMealSession(state = {}) {
     alreadyLogged: Boolean(state.alreadyLogged),
     correctionRequested: Boolean(state.correctionRequested),
     currentMealType: String(state.currentMealType || ""),
+    processingMode: String(state.processingMode || state.processing_mode || ""),
+    fallbackReason: redactSensitiveText(state.fallbackReason || state.fallback_reason || "", 120),
     pendingClarification: state.pendingClarification && typeof state.pendingClarification === "object"
       ? {
           type: String(state.pendingClarification.type || ""),
@@ -587,7 +589,7 @@ function normalizeAuditValue(raw = {}, user = null) {
   const stateAfter = sanitizeCoachStateSnapshot(raw.state_after || {})
   const actions = safeArray(raw.actions, 12).map((action) => sanitizeAction(action)).filter(Boolean)
   const persistedActions = safeArray(raw.persisted_actions, 12).map((action) => sanitizeAction(action)).filter(Boolean)
-  const routeType = ["deterministic", "ai-assisted", "fallback", "failed"].includes(String(raw.route_type || ""))
+  const routeType = ["deterministic", "ai-assisted", "tool-assisted", "fallback", "failed"].includes(String(raw.route_type || ""))
     ? String(raw.route_type)
     : "fallback"
   const conversationWindow = sanitizeConversationWindow(raw.conversation_window || [])
@@ -758,15 +760,50 @@ export function summarizeCoachAuditRecords(records = []) {
     parser_warnings: 0,
     clarification_loops: 0,
     fake_save_blocked: 0,
+    graph_native_turns: 0,
+    legacy_fallback_turns: 0,
+    low_confidence_macro_turns: 0,
+    photo_review_turns: 0,
+    tool_assisted_turns: 0,
     by_flag: {},
+    by_route: {},
+    by_processing_mode: {},
+    by_fallback_reason: {},
     repeated_clarifications: {},
     common_unknown_inputs: {},
   }
 
   for (const record of records) {
+    summary.by_route[record.route_type] = (summary.by_route[record.route_type] || 0) + 1
+    if (record.route_type === "tool-assisted") summary.tool_assisted_turns += 1
     if (record.flags.length) summary.flagged += 1
     if (["failed", "failed_before_persistence", "failed_persistence"].includes(record.persistence_status)) summary.failures += 1
     if (record.duplicate_prevention_triggered) summary.duplicate_prevention_events += 1
+    const mealStateAfter = record.state_after?.meal_session || {}
+    const processingMode = cleanText(mealStateAfter.processingMode || mealStateAfter.processing_mode).toLowerCase()
+    const fallbackReason = cleanText(mealStateAfter.fallbackReason || mealStateAfter.fallback_reason)
+    if (processingMode) {
+      summary.by_processing_mode[processingMode] = (summary.by_processing_mode[processingMode] || 0) + 1
+      if (processingMode === "graph_native") summary.graph_native_turns += 1
+      if (processingMode === "legacy") summary.legacy_fallback_turns += 1
+    }
+    if (fallbackReason) {
+      summary.by_fallback_reason[fallbackReason] = (summary.by_fallback_reason[fallbackReason] || 0) + 1
+    }
+    const mealActions = [...record.persisted_actions, ...record.actions].filter((action) => action?.type === "log_meal" || action?.type === "update_meal_log")
+    if (mealActions.some((action) => {
+      const confidence = cleanText(action?.macro_confidence).toLowerCase()
+      const sourceType = cleanText(action?.nutrition_source_type).toLowerCase()
+      return confidence === "low" || confidence === "medium" || ["estimated_internal_profile", "mixed_reference_and_estimate", "photo_ai_estimate", "manual_user_entry"].includes(sourceType)
+    })) {
+      summary.low_confidence_macro_turns += 1
+    }
+    if (
+      mealActions.some((action) => cleanText(action?.nutrition_source_type).toLowerCase() === "photo_ai_estimate")
+      && (record.clarification_asked || mealActions.some((action) => cleanText(action?.macro_confidence).toLowerCase() !== "high"))
+    ) {
+      summary.photo_review_turns += 1
+    }
     for (const flag of record.flags) {
       summary.by_flag[flag.code] = (summary.by_flag[flag.code] || 0) + 1
       if (flag.code === "parser_warning") summary.parser_warnings += 1

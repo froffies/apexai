@@ -773,6 +773,7 @@ test("coach logging rules can answer direct food macro questions without persist
   assert.match(reply, /10g protein/i)
   assert.match(reply, /14g carbs/i)
   assert.match(reply, /28g fat/i)
+  assert.match(reply, /estimate blended from matched references/i)
   assert.doesNotMatch(reply, /\b(saved|logged|tracked)\b/i)
 })
 
@@ -788,6 +789,22 @@ test("coach logging rules fall back to a deterministic food-class estimate for a
   assert.match(reply, /3g fat/i)
   assert.match(reply, /deterministic fallback estimate/i)
   assert.doesNotMatch(reply, /\b(saved|logged|tracked)\b/i)
+})
+
+test("formatDeterministicMealAnswer marks estimate-backed replies as estimates", () => {
+  const reply = formatDeterministicMealAnswer({
+    calories: 380,
+    protein_g: 18,
+    carbs_g: 40,
+    fat_g: 12,
+    estimated: true,
+    nutrition_source_type: "estimated_internal_profile",
+    macro_confidence: "low",
+  })
+
+  assert.match(reply, /380 kcal/i)
+  assert.match(reply, /estimate based on our au\/nz reference profiles/i)
+  assert.match(reply, /keep it marked as an estimate/i)
 })
 
 test("coach logging rules can answer daily calorie and target questions without persistence wording", () => {

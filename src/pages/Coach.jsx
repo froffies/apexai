@@ -734,10 +734,14 @@ function buildPhotoCoachDraft(result = {}, mealType = "snack") {
 
 function buildCoachPhotoDraftReply(draft) {
   if (!draft) return ""
+  const trustNote = coachMealConfidenceNote({ ...draft, estimated: true })
+  const identifiedSummary = draft.items.length > 1
+    ? `I identified ${draft.items.length} items from the photo.`
+    : "I identified the visible item from the photo."
   if (draft.needs_review) {
-    return `${draft.food_name || "I analyzed the plate"}. ${draft.clarification_question || "I’ve mapped out what I think is on the plate."} Review the items below, adjust anything that looks off, and then log the reviewed estimate.`
+    return `${draft.food_name || "I analyzed the plate"}. ${identifiedSummary} ${trustNote || "Macros are still an estimate."} ${draft.clarification_question || "I’ve mapped out what I think is on the plate."} Review the items below, adjust anything that looks off, and then log the reviewed estimate.`
   }
-  return `${draft.food_name || "I analyzed the plate"}. The photo estimate looks solid, so you can log it below in one tap.`
+  return `${draft.food_name || "I analyzed the plate"}. ${identifiedSummary} ${trustNote || "The photo estimate looks solid."} You can log it below in one tap.`
 }
 
 function buildCoachBarcodeDraft(results = [], code = "", mealType = "snack") {
@@ -808,11 +812,12 @@ export default function Coach() {
   useEffect(() => {
     if (!coachFoodDraft && !foodToolBusy) return undefined
     if (typeof window === "undefined") {
-      coachDraftRef.current?.scrollIntoView({ block: "nearest", inline: "nearest" })
+      if (transcriptRef.current) transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight
       return undefined
     }
     const frame = window.requestAnimationFrame(() => {
-      coachDraftRef.current?.scrollIntoView({ block: "nearest", inline: "nearest" })
+      if (transcriptRef.current) transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight
+      coachDraftRef.current?.scrollIntoView({ block: "start", inline: "nearest" })
     })
     return () => window.cancelAnimationFrame(frame)
   }, [coachFoodDraft, foodToolBusy])
@@ -885,6 +890,8 @@ export default function Coach() {
   }
 
   const appendCoachToolAssistant = (content, auditMeta = {}, extras = {}) => {
+    const auditContent = String(auditMeta.user_message || content || "").trim() || "Coach tool interaction"
+    const stateBefore = buildAuditStateSnapshot(mealSession, workoutSession)
     const assistantMessage = appendAssistant(content, {
       ...extras,
       auditMeta: {
@@ -902,10 +909,12 @@ export default function Coach() {
       },
     })
     setMessages((current) => [...current, assistantMessage])
+    emitCoachAuditFromMessage(auditContent, { id: assistantMessage.id, content: auditContent }, assistantMessage, stateBefore)
     return assistantMessage
   }
 
   const persistCoachToolMealAction = (action, reply) => {
+    const stateBefore = buildAuditStateSnapshot(mealSession, workoutSession)
     const assistantMessage = applyOpenAICoachResponse({
       reply,
       actions: [action],
@@ -916,6 +925,12 @@ export default function Coach() {
       },
     })
     setMessages((current) => [...current, assistantMessage])
+    emitCoachAuditFromMessage(
+      String(action?.food_name || action?.quantity || "Coach tool meal"),
+      { id: assistantMessage.id, content: String(action?.food_name || action?.quantity || "Coach tool meal") },
+      assistantMessage,
+      stateBefore
+    )
     return assistantMessage
   }
 
@@ -927,6 +942,7 @@ export default function Coach() {
       actions: draft.action ? [draft.action] : [],
       clarification_asked: Boolean(draft.needs_review),
       state_after: buildAuditStateSnapshot(mealSession, workoutSession),
+      user_message: draft.food_name ? `photo analysis: ${draft.food_name}` : "photo analysis",
     })
   }
 
@@ -971,6 +987,7 @@ export default function Coach() {
           actions: nextDraft.action ? [nextDraft.action] : [],
           clarification_asked: Boolean(nextDraft.needs_review),
           state_after: buildAuditStateSnapshot(mealSession, workoutSession),
+          user_message: nextDraft.food_name ? `photo review: ${nextDraft.food_name}` : "photo review",
         }
       )
     } catch (error) {
@@ -981,6 +998,7 @@ export default function Coach() {
         persistence_status: "failed_before_persistence",
         error_summary: message,
         state_after: buildAuditStateSnapshot(mealSession, workoutSession),
+        user_message: "photo review failed",
       })
     } finally {
       setFoodToolBusy(false)
@@ -993,6 +1011,7 @@ export default function Coach() {
       appendCoachToolAssistant("I still need a reviewed macro estimate before I can log that photo cleanly.", {
         clarification_asked: true,
         state_after: buildAuditStateSnapshot(mealSession, workoutSession),
+        user_message: coachFoodDraft.food_name ? `photo log blocked: ${coachFoodDraft.food_name}` : "photo log blocked",
       })
       return
     }
@@ -1013,6 +1032,7 @@ export default function Coach() {
       appendCoachToolAssistant(buildCoachBarcodeDraftReply(draft), {
         clarification_asked: !draft.matches.length,
         state_after: buildAuditStateSnapshot(mealSession, workoutSession),
+        user_message: code ? `barcode scan: ${code}` : "barcode scan",
       })
     } catch (error) {
       const message = error instanceof Error ? error.message : "I couldn't search that barcode just now."
@@ -1022,6 +1042,7 @@ export default function Coach() {
         persistence_status: "failed_before_persistence",
         error_summary: message,
         state_after: buildAuditStateSnapshot(mealSession, workoutSession),
+        user_message: code ? `barcode lookup failed: ${code}` : "barcode lookup failed",
       })
     } finally {
       setFoodToolBusy(false)
@@ -1041,6 +1062,7 @@ export default function Coach() {
       appendCoachToolAssistant("I still need a matched product before I can log that barcode.", {
         clarification_asked: true,
         state_after: buildAuditStateSnapshot(mealSession, workoutSession),
+        user_message: coachFoodDraft.barcode ? `barcode log blocked: ${coachFoodDraft.barcode}` : "barcode log blocked",
       })
       return
     }
@@ -2278,15 +2300,40 @@ export default function Coach() {
                         {Math.round(Number(coachFoodDraft.calories) || 0)} kcal, {Math.round(Number(coachFoodDraft.protein_g) || 0)}g protein, {Math.round(Number(coachFoodDraft.carbs_g) || 0)}g carbs, {Math.round(Number(coachFoodDraft.fat_g) || 0)}g fat
                       </p>
                       <p className="mt-1 text-sm text-slate-500">{coachFoodDraft.nutrition_source}</p>
+                      {coachMealConfidenceNote({ ...coachFoodDraft, estimated: true }) && (
+                        <p className={`mt-2 text-sm ${coachFoodDraft.needs_review ? "text-amber-700" : "text-emerald-700"}`}>
+                          {coachMealConfidenceNote({ ...coachFoodDraft, estimated: true })}
+                        </p>
+                      )}
                       {coachFoodDraft.clarification_question && <p className="mt-2 text-sm text-amber-700">{coachFoodDraft.clarification_question}</p>}
                     </div>
-                    <button type="button" onClick={() => setCoachFoodDraft(null)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
-                      Clear
-                    </button>
+                    <div className="flex flex-wrap items-center justify-end gap-2">
+                      <button
+                        type="button"
+                        aria-label="Quick refresh draft"
+                        onClick={() => void recalculateCoachPhotoDraft()}
+                        disabled={foodToolBusy}
+                        className="min-h-11 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 disabled:opacity-60"
+                      >
+                        {coachFoodDraft.needs_review ? "Recalculate estimate" : "Refresh estimate"}
+                      </button>
+                      <button
+                        type="button"
+                        aria-label="Quick save photo draft"
+                        onClick={logCoachPhotoDraft}
+                        disabled={foodToolBusy || !coachFoodDraft.action}
+                        className="min-h-11 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                      >
+                        {coachFoodDraft.needs_review ? "Log reviewed estimate" : "Log photo meal"}
+                      </button>
+                      <button type="button" onClick={() => setCoachFoodDraft(null)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
+                        Clear
+                      </button>
+                    </div>
                   </div>
 
                   {!!coachFoodDraft.items.length && (
-                    <div className="space-y-2">
+                    <div className="max-h-[20rem] space-y-2 overflow-y-auto pr-1">
                       {coachFoodDraft.items.map((item, index) => (
                         <div key={`${item.name}_${index}`} className="rounded-2xl bg-white p-3">
                           <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_180px_auto]">
@@ -2310,6 +2357,11 @@ export default function Coach() {
                           {hasCompleteMacroSet(item) && (
                             <p className="mt-1 text-xs text-slate-500">
                               {Math.round(Number(item.calories) || 0)} kcal, {Math.round(Number(item.protein_g) || 0)}g protein, {Math.round(Number(item.carbs_g) || 0)}g carbs, {Math.round(Number(item.fat_g) || 0)}g fat
+                            </p>
+                          )}
+                          {!hasCompleteMacroSet(item) && (
+                            <p className="mt-1 text-xs text-amber-700">
+                              This item still needs a refreshed estimate before it can be logged confidently.
                             </p>
                           )}
                         </div>

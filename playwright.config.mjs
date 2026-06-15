@@ -21,10 +21,10 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: `VITE_OPENAI_COACH_URL=${playwrightCoachOrigin}/api/coach VITE_NUTRITION_API_URL=${playwrightCoachOrigin}/api/nutrition/search VITE_ACCOUNT_DELETE_URL=${playwrightCoachOrigin}/api/account/delete VITE_TELEMETRY_URL= VITE_ENABLE_COACH_AUDIT=true VITE_COACH_AUDIT_ADMIN_EMAILS=local@apexai.app npm run dev -- --host 127.0.0.1 --port ${playwrightAppPort}`,
+      command: `VITE_OPENAI_COACH_URL=${playwrightCoachOrigin}/api/coach VITE_NUTRITION_API_URL=${playwrightCoachOrigin}/api/nutrition/search VITE_ACCOUNT_DELETE_URL=${playwrightCoachOrigin}/api/account/delete VITE_TELEMETRY_URL= VITE_ENABLE_COACH_AUDIT=true VITE_COACH_AUDIT_ADMIN_EMAILS=local@apexai.app VITE_APEXAI_ALLOW_LOCAL_MODE=true npm run build && npm run preview -- --host 127.0.0.1 --port ${playwrightAppPort} --strictPort`,
       url: playwrightAppOrigin,
       reuseExistingServer: true,
-      timeout: 120000,
+      timeout: 240000,
     },
     {
       command: `OPENAI_API_KEY= OPENAI_COACH_HOST=127.0.0.1 OPENAI_COACH_PORT=${playwrightCoachPort} OPENAI_COACH_REQUIRE_AUTH=false OPENAI_COACH_CORS_ORIGIN=${playwrightAppOrigin},http://localhost:${playwrightAppPort} ENABLE_COACH_AUDIT=true COACH_AUDIT_ADMIN_EMAILS=local@apexai.app npm run ai:server`,

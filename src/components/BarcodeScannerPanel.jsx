@@ -189,10 +189,11 @@ export default function BarcodeScannerPanel({ onDetected, buttonLabel = "Scan ba
               <RefreshCcw size={16} /> Switch camera
             </button>
             <label className="flex min-h-11 cursor-pointer items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
-              <Upload size={16} /> Scan from photo
-              <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handleImageUpload} />
+              <Upload size={16} /> Upload barcode photo
+              <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
             </label>
           </div>
+          <p className="mt-2 text-xs text-slate-500">Use <span className="font-semibold text-slate-700">Upload barcode photo</span> to pick from your library on iPhone, or <span className="font-semibold text-slate-700">Start camera</span> for live scanning.</p>
 
           <div className="mt-3 grid gap-2 md:grid-cols-[1fr_auto]">
             <input

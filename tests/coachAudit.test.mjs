@@ -7,6 +7,7 @@ import {
   detectCoachAuditIntent,
   normalizeAuditClientPatch,
   sanitizeCoachStateSnapshot,
+  summarizeCoachAuditRecords,
 } from "../server/coachAudit.mjs"
 
 test("normalizeAuditClientPatch keeps safe state snapshots and computes flags", () => {
@@ -421,4 +422,75 @@ test("buildCoachAuditResponseMeta preserves ids for client finalisation", () => 
     route_type: "deterministic",
     intent: "meal_logging",
   })
+})
+
+test("normalizeAuditClientPatch keeps tool-assisted route types", () => {
+  const patch = normalizeAuditClientPatch({
+    log_id: "tool_1",
+    message_id: "tool_1",
+    session_id: "session_1",
+    user_message: "photo analysis: burger and chips",
+    assistant_reply: "I identified 2 items from the photo.",
+    route_type: "tool-assisted",
+  }, { id: "user_1", email: "tester@example.com" })
+
+  assert.equal(patch.route_type, "tool-assisted")
+})
+
+test("summarizeCoachAuditRecords tracks processing mode and estimate-heavy turns", () => {
+  const summary = summarizeCoachAuditRecords([
+    normalizeAuditClientPatch({
+      log_id: "graph_1",
+      message_id: "graph_1",
+      session_id: "session_1",
+      user_message: "i had 3 eggs",
+      assistant_reply: "Saved to today's nutrition: 3 eggs.",
+      route_type: "deterministic",
+      persistence_status: "succeeded",
+      state_after: {
+        meal_session: {
+          processingMode: "graph_native",
+          fallbackReason: "",
+        },
+      },
+      persisted_actions: [{
+        type: "log_meal",
+        food_name: "3 eggs",
+        nutrition_source_type: "curated_au_catalogue",
+        macro_confidence: "high",
+      }],
+    }),
+    normalizeAuditClientPatch({
+      log_id: "legacy_1",
+      message_id: "legacy_1",
+      session_id: "session_1",
+      user_message: "photo analysis: sliders and lettuce",
+      assistant_reply: "Review the items below and log the reviewed estimate.",
+      route_type: "tool-assisted",
+      clarification_asked: true,
+      persistence_status: "not_requested",
+      state_after: {
+        meal_session: {
+          processingMode: "legacy",
+          fallbackReason: "legacy_gate",
+        },
+      },
+      actions: [{
+        type: "log_meal",
+        food_name: "sliders and lettuce",
+        nutrition_source_type: "photo_ai_estimate",
+        macro_confidence: "medium",
+      }],
+    }),
+  ])
+
+  assert.equal(summary.graph_native_turns, 1)
+  assert.equal(summary.legacy_fallback_turns, 1)
+  assert.equal(summary.tool_assisted_turns, 1)
+  assert.equal(summary.low_confidence_macro_turns, 1)
+  assert.equal(summary.photo_review_turns, 1)
+  assert.equal(summary.by_processing_mode.graph_native, 1)
+  assert.equal(summary.by_processing_mode.legacy, 1)
+  assert.equal(summary.by_fallback_reason.legacy_gate, 1)
+  assert.equal(summary.by_route["tool-assisted"], 1)
 })

@@ -27,6 +27,14 @@ const flagOptions = [
   { value: "no_action_when_expected", label: "No action when expected" },
 ]
 
+function mealProcessingMode(record) {
+  return String(record?.state_after?.meal_session?.processingMode || record?.state_after?.meal_session?.processing_mode || "").trim()
+}
+
+function mealFallbackReason(record) {
+  return String(record?.state_after?.meal_session?.fallbackReason || record?.state_after?.meal_session?.fallback_reason || "").trim()
+}
+
 function prettyJson(value) {
   return JSON.stringify(value || {}, null, 2)
 }
@@ -133,6 +141,13 @@ export default function CoachAudit() {
         {statCard("Duplicate guard", summary?.duplicate_prevention_events || 0, "text-indigo-700")}
       </div>
 
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        {statCard("Graph-native", summary?.graph_native_turns || 0, "text-emerald-700")}
+        {statCard("Legacy fallback", summary?.legacy_fallback_turns || 0, "text-slate-700")}
+        {statCard("Estimated macro turns", summary?.low_confidence_macro_turns || 0, "text-amber-700")}
+        {statCard("Tool-assisted", summary?.tool_assisted_turns || 0, "text-sky-700")}
+      </div>
+
       <SectionCard
         title="Filters"
         description="Narrow down failures, parser warnings, suspicious saves, or one tester's thread."
@@ -184,6 +199,7 @@ export default function CoachAudit() {
               <option value="">All routes</option>
               <option value="deterministic">Deterministic</option>
               <option value="ai-assisted">AI-assisted</option>
+              <option value="tool-assisted">Tool-assisted</option>
               <option value="fallback">Fallback</option>
               <option value="failed">Failed</option>
             </select>
@@ -375,6 +391,8 @@ export default function CoachAudit() {
                   <p className="rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-700">Model: <span className="font-semibold text-slate-950">{selectedRecord.model_used || "deterministic / local"}</span></p>
                   <p className="rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-700">Draft preserved after failure: <span className="font-semibold text-slate-950">{String(selectedRecord.draft_preserved_after_failure)}</span></p>
                   <p className="rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-700">Duplicate prevention: <span className="font-semibold text-slate-950">{String(selectedRecord.duplicate_prevention_triggered)}</span></p>
+                  <p className="rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-700">Meal parser mode: <span className="font-semibold text-slate-950">{mealProcessingMode(selectedRecord) || "n/a"}</span></p>
+                  <p className="rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-700">Meal fallback reason: <span className="font-semibold text-slate-950">{mealFallbackReason(selectedRecord) || "none"}</span></p>
                 </div>
               </div>
 
@@ -454,4 +472,3 @@ export default function CoachAudit() {
     </div>
   )
 }
-

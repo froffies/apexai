@@ -898,7 +898,7 @@ function validateTelemetryBody(body) {
 function validateCoachAuditEventBody(body) {
   assertObject(body, "request body")
   assertString(body.log_id || body.message_id || "", "log_id", 160)
-  if (body.route_type !== undefined && !["deterministic", "ai-assisted", "fallback", "failed"].includes(String(body.route_type))) {
+  if (body.route_type !== undefined && !["deterministic", "ai-assisted", "tool-assisted", "fallback", "failed"].includes(String(body.route_type))) {
     const error = new Error("route_type is invalid")
     error.status = 400
     throw error
