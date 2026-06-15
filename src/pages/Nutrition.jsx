@@ -10,7 +10,7 @@ import SegmentedControl from "@/components/SegmentedControl"
 import { toast } from "@/components/ui/use-toast"
 import { createPageUrl } from "@/utils"
 import { defaultProfile, macroTotals, starterMeals, storageKeys } from "@/lib/fitnessDefaults"
-import { macroConfidenceLabel, nutritionSourceLabel, nutritionSourceTone } from "@/lib/nutritionHelpers"
+import { coachMealConfidenceNote, isLowConfidenceNutrition, macroConfidenceLabel, nutritionSourceLabel, nutritionSourceTone } from "@/lib/nutritionHelpers"
 import { buildNutritionMemory } from "@/lib/nutritionMemory"
 import { todayISO, useLocalStorage } from "@/lib/useLocalStorage"
 
@@ -39,16 +39,25 @@ function renderMealSourceMeta(meal) {
   const sourceType = String(meal.nutrition_source_type || "").trim().toLowerCase()
   const confidenceLabel = macroConfidenceLabel(meal.macro_confidence, Boolean(meal.estimated))
   const Icon = sourceType === "photo_ai_estimate" ? Camera : ShieldCheck
+  const confidenceNote = coachMealConfidenceNote(meal)
+  const lowConfidence = isLowConfidenceNutrition(meal)
 
   return (
-    <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
-      <span className={`inline-flex items-center gap-1 rounded-full px-2 py-1 font-semibold ${nutritionSourceTone(meal)}`}>
-        <Icon size={12} /> {nutritionSourceLabel(meal)}
-      </span>
-      <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-1 font-medium text-slate-600">
-        {confidenceLabel}
-      </span>
-      <span className={`text-sm ${nutritionSourceTone(meal)}`}>{meal.nutrition_source}</span>
+    <div className="mt-1 space-y-2 text-xs">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className={`inline-flex items-center gap-1 rounded-full px-2 py-1 font-semibold ${nutritionSourceTone(meal)}`}>
+          <Icon size={12} /> {nutritionSourceLabel(meal)}
+        </span>
+        <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-1 font-medium text-slate-600">
+          {confidenceLabel}
+        </span>
+      </div>
+      <p className={`text-sm ${nutritionSourceTone(meal)}`}>{meal.nutrition_source}</p>
+      {!!confidenceNote && (
+        <p className={`text-sm ${lowConfidence ? "text-amber-700" : "text-slate-500"}`}>
+          {confidenceNote}
+        </p>
+      )}
     </div>
   )
 }

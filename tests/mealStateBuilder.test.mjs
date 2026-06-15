@@ -1246,6 +1246,20 @@ test("meal session keeps count-style summaries readable for simple foods", () =>
   assert.equal(tofu.summary, "2 tofu")
 })
 
+test("meal session exposes whether parsing stayed graph-native or fell back to legacy", () => {
+  const graphSession = buildMealContext([], "i had 2 eggs", emptyMealSession())
+  const legacySession = buildMealContext([], "breakfast was 2 eggs and lunch was 200g steak", emptyMealSession())
+
+  assert.ok(graphSession)
+  assert.ok(legacySession)
+  assert.equal(graphSession.processingMode, "graph_native")
+  assert.equal(graphSession.graphNative, true)
+  assert.equal(graphSession.fallbackReason, "")
+  assert.equal(legacySession.processingMode, "legacy")
+  assert.equal(legacySession.graphNative, false)
+  assert.equal(legacySession.fallbackReason, "legacy_gate")
+})
+
 test("meal session fuzzes two hundred randomized grouped meals without corrupting relationships", () => {
   const random = createSeededRandom(426913)
   const templates = [

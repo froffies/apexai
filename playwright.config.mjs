@@ -4,6 +4,8 @@ const playwrightAppPort = 4173
 const playwrightCoachPort = 8791
 const playwrightAppOrigin = `http://127.0.0.1:${playwrightAppPort}`
 const playwrightCoachOrigin = `http://127.0.0.1:${playwrightCoachPort}`
+const configuredWorkers = Number(process.env.PLAYWRIGHT_WORKERS || 1)
+const stableWorkers = Number.isFinite(configuredWorkers) && configuredWorkers > 0 ? configuredWorkers : 1
 
 export default defineConfig({
   testDir: "./e2e",
@@ -11,6 +13,7 @@ export default defineConfig({
   fullyParallel: true,
   retries: 0,
   reporter: "list",
+  workers: stableWorkers,
   use: {
     baseURL: playwrightAppOrigin,
     trace: "on-first-retry",

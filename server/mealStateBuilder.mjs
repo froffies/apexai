@@ -59,6 +59,8 @@ const baseSession = () => ({
   structuralIssues: [],
   invalidStructure: false,
   graphNative: false,
+  processingMode: "idle",
+  fallbackReason: "",
   intentGraph: null,
   candidateFragments: { meal: [], workout: [], general: [] },
   nextClarificationReference: "",
@@ -300,6 +302,16 @@ function preserveExistingSessionForIgnoredTurn(conversation = [], currentMessage
       general: safeArray(intentGraph.generalFragments, 16),
     },
     graphNative: Boolean(existingSession?.graphNative),
+  }
+}
+
+function markLegacySession(session, reason = "legacy_gate") {
+  if (!session || typeof session !== "object") return session
+  return {
+    ...session,
+    graphNative: false,
+    processingMode: "legacy",
+    fallbackReason: String(reason || "legacy_gate"),
   }
 }
 
@@ -1148,7 +1160,7 @@ export function buildMealStateFromConversation(recentMessages = [], currentMessa
     return preserveExistingSessionForIgnoredTurn(conversation, resolvedMessage, existingSession)
   }
   if (shouldUseLegacy(conversation, resolvedMessage, existingSession)) {
-    return buildLegacyMealStateFromConversation(recentMessages, resolvedMessage, existingSession)
+    return markLegacySession(buildLegacyMealStateFromConversation(recentMessages, resolvedMessage, existingSession), "legacy_gate")
   }
 
   const state = baseSession()
@@ -1176,7 +1188,7 @@ export function buildMealStateFromConversation(recentMessages = [], currentMessa
     const turns = existingSession?.active ? [{ role: "user", content: String(resolvedMessage || "") }] : conversation.filter((entry) => entry.role === "user")
     for (const turn of turns) processGraphTurn(state, turn)
   } catch {
-    return buildLegacyMealStateFromConversation(recentMessages, resolvedMessage, existingSession)
+    return markLegacySession(buildLegacyMealStateFromConversation(recentMessages, resolvedMessage, existingSession), "graph_parse_error")
   }
 
   if (state.suppressed) {
@@ -1230,6 +1242,8 @@ export function buildMealStateFromConversation(recentMessages = [], currentMessa
   state.lastMainReference = itemReference(unresolvedRoots(state).slice(-1)[0] || {}) || state.lastMainReference || ""
   state.lastDrinkKey = cleanText(unresolvedRoots(state).filter((item) => item.category === "drink").slice(-1)[0]?.base_name || state.lastDrinkKey)
   state.graphNative = true
+  state.processingMode = "graph_native"
+  state.fallbackReason = ""
   return state
 }
 
@@ -1247,7 +1261,7 @@ export function buildMealContext(recentMessages = [], currentMessage = "", exist
     return preserveExistingSessionForIgnoredTurn(conversation, resolvedMessage, existingSession)
   }
   if (shouldUseLegacy(conversation, resolvedMessage, existingSession)) {
-    return buildLegacyMealContext(recentMessages, resolvedMessage, existingSession)
+    return markLegacySession(buildLegacyMealContext(recentMessages, resolvedMessage, existingSession), "legacy_gate")
   }
   const state = buildMealStateFromConversation(recentMessages, resolvedMessage, existingSession)
   if (!state.mealConversation && !state.suppressed) return null
