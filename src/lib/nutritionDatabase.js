@@ -475,6 +475,34 @@ function buildDynamicFoodEstimate(query = "") {
     return makeEstimate({ quantity: "1 bowl", calories: 420, protein_g: 19, carbs_g: 15, fat_g: 31, category: "mixed meal" })
   }
 
+  if (contains("parmi", "parma", "parmigiana") || (contains("chicken") && contains("parmigiana"))) {
+    return makeEstimate({ quantity: "1 pub serve", calories: 1050, protein_g: 62, carbs_g: 58, fat_g: 60, category: "mixed meal" })
+  }
+
+  if ((contains("bacon") && contains("egg") && contains("roll", "bun", "sandwich")) || normalizedQuery.includes("bacon and egg roll")) {
+    return makeEstimate({ quantity: "1 roll", calories: 430, protein_g: 20, carbs_g: 31, fat_g: 22, category: "mixed meal" })
+  }
+
+  if (contains("bacon") && contains("egg") && contains("muffin")) {
+    return makeEstimate({ quantity: "1 muffin", calories: 410, protein_g: 19, carbs_g: 31, fat_g: 23, category: "mixed meal" })
+  }
+
+  if ((contains("teriyaki") && contains("chicken") && contains("bowl")) || normalizedQuery.includes("teriyaki chicken bowl")) {
+    return makeEstimate({ quantity: "1 bowl", calories: 620, protein_g: 38, carbs_g: 72, fat_g: 16, category: "mixed meal" })
+  }
+
+  if (contains("satay") && contains("chicken")) {
+    return makeEstimate({ quantity: "1 plate", calories: 590, protein_g: 36, carbs_g: 18, fat_g: 32, category: "mixed meal" })
+  }
+
+  if (contains("subway") && contains("chicken") && contains("teriyaki")) {
+    return makeEstimate({ quantity: "1 regular sub", calories: 380, protein_g: 22, carbs_g: 53, fat_g: 7, category: "mixed meal" })
+  }
+
+  if (contains("kfc") && contains("original", "fillet") && contains("burger")) {
+    return makeEstimate({ quantity: "1 burger", calories: 500, protein_g: 27, carbs_g: 42, fat_g: 22, category: "mixed meal" })
+  }
+
   if ((contains("poke") && contains("bowl")) || normalizedQuery.includes("poke bowl")) {
     if (contains("salmon")) return makeEstimate({ quantity: "1 bowl", calories: 650, protein_g: 32, carbs_g: 66, fat_g: 25, category: "mixed meal" })
     if (contains("tuna")) return makeEstimate({ quantity: "1 bowl", calories: 590, protein_g: 35, carbs_g: 64, fat_g: 18, category: "mixed meal" })
@@ -511,6 +539,12 @@ function buildDynamicFoodEstimate(query = "") {
     return makeEstimate({ quantity: "1 sandwich", calories: 350, protein_g: 16, carbs_g: 34, fat_g: 15, category: "mixed meal" })
   }
 
+  if (contains("toastie", "toasties") || (contains("toast") && contains("ham", "cheese"))) {
+    if (contains("ham") && contains("cheese")) return makeEstimate({ quantity: "1 toastie", calories: 430, protein_g: 25, carbs_g: 32, fat_g: 22, category: "mixed meal" })
+    if (contains("cheese")) return makeEstimate({ quantity: "1 cheese toastie", calories: 360, protein_g: 16, carbs_g: 31, fat_g: 18, category: "mixed meal" })
+    return makeEstimate({ quantity: "1 toastie", calories: 330, protein_g: 13, carbs_g: 30, fat_g: 16, category: "mixed meal" })
+  }
+
   if (contains("kebab", "souvlaki", "gyro", "gyros")) {
     if (contains("chicken")) return makeEstimate({ quantity: "1 wrap", calories: 680, protein_g: 38, carbs_g: 55, fat_g: 28, category: "mixed meal" })
     return makeEstimate({ quantity: "1 wrap", calories: 720, protein_g: 35, carbs_g: 58, fat_g: 32, category: "mixed meal" })
@@ -522,12 +556,23 @@ function buildDynamicFoodEstimate(query = "") {
     return makeEstimate({ quantity: "1 wrap", calories: 390, protein_g: 16, carbs_g: 34, fat_g: 20, category: "mixed meal" })
   }
 
-  if (contains("burger", "slider", "sliders")) {
+  if (containsAll("big", "mac")) {
+    return makeEstimate({ quantity: "1 burger", calories: 550, protein_g: 25, carbs_g: 45, fat_g: 31, category: "mixed meal" })
+  }
+
+  if (contains("whopper")) {
+    return makeEstimate({ quantity: "1 burger", calories: 660, protein_g: 28, carbs_g: 49, fat_g: 40, category: "mixed meal" })
+  }
+
+  if (contains("burger", "cheeseburger", "slider", "sliders")) {
     if (contains("slider", "sliders")) {
       if (contains("chicken")) return makeEstimate({ quantity: "2 sliders", calories: 390, protein_g: 28, carbs_g: 29, fat_g: 17, category: "mixed meal" })
       return makeEstimate({ quantity: "2 sliders", calories: 430, protein_g: 24, carbs_g: 30, fat_g: 22, category: "mixed meal" })
     }
+    if (contains("double") && contains("cheeseburger")) return makeEstimate({ quantity: "1 burger", calories: 445, protein_g: 26, carbs_g: 34, fat_g: 23, category: "mixed meal" })
+    if (contains("fish")) return makeEstimate({ quantity: "1 burger", calories: 540, protein_g: 23, carbs_g: 47, fat_g: 28, category: "mixed meal" })
     if (contains("chicken")) return makeEstimate({ quantity: "1 burger", calories: 590, protein_g: 34, carbs_g: 43, fat_g: 31, category: "mixed meal" })
+    if (contains("cheeseburger")) return makeEstimate({ quantity: "1 cheeseburger", calories: 360, protein_g: 18, carbs_g: 32, fat_g: 18, category: "mixed meal" })
     return makeEstimate({ quantity: "1 burger", calories: 650, protein_g: 32, carbs_g: 45, fat_g: 38, category: "mixed meal" })
   }
 
@@ -550,6 +595,14 @@ function buildDynamicFoodEstimate(query = "") {
     return makeEstimate({ quantity: "1 box", calories: 980, protein_g: 45, carbs_g: 78, fat_g: 52, category: "mixed meal" })
   }
 
+  if (contains("loaded") && contains("fries", "chips")) {
+    return makeEstimate({ quantity: "1 serve", calories: 720, protein_g: 18, carbs_g: 68, fat_g: 38, category: "mixed meal" })
+  }
+
+  if (contains("nachos")) {
+    return makeEstimate({ quantity: "1 plate", calories: 780, protein_g: 24, carbs_g: 64, fat_g: 46, category: "mixed meal" })
+  }
+
   if (((contains("roast", "rotisserie") && contains("chicken")) && contains("chips", "fries", "meal")) || normalizedQuery.includes("roast chicken meal")) {
     return makeEstimate({ quantity: "1 plate", calories: 720, protein_g: 46, carbs_g: 42, fat_g: 40, category: "mixed meal" })
   }
@@ -564,6 +617,14 @@ function buildDynamicFoodEstimate(query = "") {
     return makeEstimate({ quantity: "1 hand roll", calories: 210, protein_g: 9, carbs_g: 32, fat_g: 5, category: "mixed meal" })
   }
 
+  if (contains("cevapi", "cevapcici") && contains("roll", "wrap")) {
+    return makeEstimate({ quantity: "1 roll", calories: 610, protein_g: 28, carbs_g: 45, fat_g: 32, category: "mixed meal" })
+  }
+
+  if (contains("roast") && contains("pork") && contains("roll")) {
+    return makeEstimate({ quantity: "1 roll", calories: 560, protein_g: 28, carbs_g: 58, fat_g: 23, category: "mixed meal" })
+  }
+
   if (containsAll("meat", "pie") || normalizedQuery.includes("beef pie")) {
     return makeEstimate({ quantity: "1 pie", calories: 430, protein_g: 14, carbs_g: 33, fat_g: 27, category: "snack" })
   }
@@ -572,8 +633,24 @@ function buildDynamicFoodEstimate(query = "") {
     return makeEstimate({ quantity: "1 roll", calories: 410, protein_g: 11, carbs_g: 24, fat_g: 29, category: "snack" })
   }
 
-  if (containsAll("dim", "sim")) {
+  if ((contains("potato") && contains("scallop", "scallops")) || (contains("potato") && contains("cake", "cakes"))) {
+    return makeEstimate({ quantity: "3 pieces", calories: 280, protein_g: 4, carbs_g: 34, fat_g: 14, category: "snack" })
+  }
+
+  if (containsAll("dim", "sim") || normalizedQuery.includes("dimsim")) {
     return makeEstimate({ quantity: "4 pieces", calories: 340, protein_g: 12, carbs_g: 31, fat_g: 18, category: "mixed meal" })
+  }
+
+  if (containsAll("spring", "roll")) {
+    return makeEstimate({ quantity: "3 pieces", calories: 330, protein_g: 8, carbs_g: 33, fat_g: 18, category: "snack" })
+  }
+
+  if (contains("bangers") && contains("mash")) {
+    return makeEstimate({ quantity: "1 plate", calories: 690, protein_g: 26, carbs_g: 49, fat_g: 38, category: "mixed meal" })
+  }
+
+  if (contains("sausage") && contains("sizzle")) {
+    return makeEstimate({ quantity: "1 sausage in bread", calories: 350, protein_g: 13, carbs_g: 24, fat_g: 22, category: "mixed meal" })
   }
 
   if (contains("pizza")) return makeEstimate({ quantity: "2 slices", calories: 570, protein_g: 24, carbs_g: 60, fat_g: 25, category: "mixed meal" })
@@ -591,6 +668,8 @@ function buildDynamicFoodEstimate(query = "") {
   if (containsAll("protein", "shake") || normalizedQuery.includes("protein shake")) return makeEstimate({ quantity: "350ml", calories: 180, protein_g: 30, carbs_g: 10, fat_g: 4, category: "drink" })
   if (contains("smoothie")) return makeEstimate({ quantity: "350ml", calories: 260, protein_g: 8, carbs_g: 45, fat_g: 6, category: "drink" })
   if (contains("milkshake", "thickshake")) return makeEstimate({ quantity: "350ml", calories: 420, protein_g: 11, carbs_g: 54, fat_g: 18, category: "drink" })
+  if (contains("bubble") && contains("tea")) return makeEstimate({ quantity: "500ml", calories: 290, protein_g: 2, carbs_g: 55, fat_g: 6, category: "drink" })
+  if (contains("frappe", "frappuccino")) return makeEstimate({ quantity: "400ml", calories: 380, protein_g: 7, carbs_g: 56, fat_g: 16, category: "drink" })
   if ((contains("acai") && contains("bowl")) || normalizedQuery.includes("acai bowl")) return makeEstimate({ quantity: "1 bowl", calories: 450, protein_g: 7, carbs_g: 65, fat_g: 16, category: "breakfast" })
   if (containsAll("protein", "bar")) return makeEstimate({ quantity: "1 bar", calories: 220, protein_g: 20, carbs_g: 21, fat_g: 7, category: "snack" })
   if (contains("granola")) return makeEstimate({ quantity: "60g", calories: 250, protein_g: 6, carbs_g: 35, fat_g: 9, category: "breakfast" })
@@ -599,6 +678,8 @@ function buildDynamicFoodEstimate(query = "") {
   if (contains("muffin")) return makeEstimate({ quantity: "1 muffin", calories: 380, protein_g: 6, carbs_g: 55, fat_g: 14, category: "snack" })
   if (contains("croissant")) return makeEstimate({ quantity: "1 croissant", calories: 230, protein_g: 5, carbs_g: 26, fat_g: 12, category: "snack" })
   if (contains("donut", "doughnut")) return makeEstimate({ quantity: "1 doughnut", calories: 260, protein_g: 4, carbs_g: 31, fat_g: 13, category: "snack" })
+  if (contains("lamington")) return makeEstimate({ quantity: "1 piece", calories: 250, protein_g: 3, carbs_g: 31, fat_g: 12, category: "dessert" })
+  if (contains("pavlova")) return makeEstimate({ quantity: "1 slice", calories: 320, protein_g: 4, carbs_g: 52, fat_g: 11, category: "dessert" })
   if (contains("beer", "lager", "ale")) return makeEstimate({ quantity: "375ml", calories: 145, protein_g: 1.4, carbs_g: 11, fat_g: 0, category: "drink" })
   if (contains("wine")) return makeEstimate({ quantity: "150ml glass", calories: 125, protein_g: 0.1, carbs_g: 4, fat_g: 0, category: "drink" })
   if (containsAll("energy", "drink")) return makeEstimate({ quantity: "250ml can", calories: 110, protein_g: 0, carbs_g: 27, fat_g: 0, category: "drink" })
@@ -614,8 +695,9 @@ function buildDynamicFoodEstimate(query = "") {
     return cloneFoodProfile(auVerifiedFoods.find((food) => food.id === "milk_cow_regular") || makeEstimate({ quantity: "100ml", calories: 66, protein_g: 3.4, carbs_g: 5.5, fat_g: 3.5, category: "dairy" }), { name: estimateName })
   }
 
-  if (/\b(?:coffee|latte|cappuccino|flat white|mocha|espresso|americano|long black)\b/.test(normalizedQuery)) {
+  if (/\b(?:coffee|latte|cappuccino|flat white|mocha|espresso|americano|long black|long mac)\b/.test(normalizedQuery)) {
     if (normalizedQuery.includes("long black") || normalizedQuery.includes("americano")) return cloneFoodProfile(auVerifiedFoods.find((food) => food.id === "coffee_long_black") || makeEstimate({ quantity: "250ml", calories: 3, protein_g: 0.4, carbs_g: 0, fat_g: 0.1, category: "drink" }), { name: estimateName })
+    if (normalizedQuery.includes("long mac")) return makeEstimate({ quantity: "250ml", calories: 90, protein_g: 5.5, carbs_g: 8, fat_g: 4.2, category: "drink" })
     return makeEstimate({ quantity: "250ml", calories: 120, protein_g: 7, carbs_g: 9, fat_g: 6.5, category: "drink" })
   }
 

@@ -93,6 +93,76 @@ test("findBestFoodMatch covers broader common mixed dishes and drinks with deter
   assert.ok(handRoll)
   assert.match(String(handRoll.name || ""), /hand roll/i)
   assert.equal(handRoll.category, "mixed meal")
+
+  const parmi = findBestFoodMatch("parmi")
+  assert.ok(parmi)
+  assert.match(String(parmi.name || ""), /parmi|parma|parmigiana/i)
+  assert.equal(parmi.calories, 1050)
+
+  const baconEggRoll = findBestFoodMatch("bacon and egg roll")
+  assert.ok(baconEggRoll)
+  assert.match(String(baconEggRoll.name || ""), /bacon and egg roll/i)
+  assert.equal(baconEggRoll.calories, 430)
+
+  const teriyakiChickenBowl = findBestFoodMatch("teriyaki chicken bowl")
+  assert.ok(teriyakiChickenBowl)
+  assert.match(String(teriyakiChickenBowl.name || ""), /teriyaki chicken bowl/i)
+  assert.equal(teriyakiChickenBowl.calories, 620)
+
+  const bubbleTea = findBestFoodMatch("bubble tea")
+  assert.ok(bubbleTea)
+  assert.match(String(bubbleTea.name || ""), /bubble tea/i)
+  assert.equal(bubbleTea.calories, 290)
+
+  const dimSimsNoSpace = findBestFoodMatch("dimsims")
+  assert.ok(dimSimsNoSpace)
+  assert.match(String(dimSimsNoSpace.name || ""), /dim/i)
+  assert.equal(dimSimsNoSpace.calories, 340)
+
+  const potatoScallops = findBestFoodMatch("potato scallops")
+  assert.ok(potatoScallops)
+  assert.match(String(potatoScallops.name || ""), /potato scallops/i)
+  assert.equal(potatoScallops.category, "snack")
+
+  const cheeseToastie = findBestFoodMatch("toastie with cheese")
+  assert.ok(cheeseToastie)
+  assert.match(String(cheeseToastie.name || ""), /toastie/i)
+  assert.equal(cheeseToastie.calories, 360)
+
+  const sausageSizzle = findBestFoodMatch("sausage sizzle")
+  assert.ok(sausageSizzle)
+  assert.match(String(sausageSizzle.name || ""), /sausage sizzle/i)
+  assert.equal(sausageSizzle.calories, 350)
+
+  const subwayChickenTeriyaki = findBestFoodMatch("subway chicken teriyaki")
+  assert.ok(subwayChickenTeriyaki)
+  assert.match(String(subwayChickenTeriyaki.name || ""), /subway chicken teriyaki/i)
+  assert.equal(subwayChickenTeriyaki.calories, 380)
+
+  const kfcOriginalBurger = findBestFoodMatch("kfc original burger")
+  assert.ok(kfcOriginalBurger)
+  assert.match(String(kfcOriginalBurger.name || ""), /kfc original burger/i)
+  assert.equal(kfcOriginalBurger.calories, 500)
+
+  const bigMac = findBestFoodMatch("mcdonalds big mac")
+  assert.ok(bigMac)
+  assert.match(String(bigMac.name || ""), /big mac/i)
+  assert.equal(bigMac.calories, 550)
+
+  const doubleCheeseburger = findBestFoodMatch("double cheeseburger")
+  assert.ok(doubleCheeseburger)
+  assert.match(String(doubleCheeseburger.name || ""), /double cheeseburger/i)
+  assert.equal(doubleCheeseburger.calories, 445)
+
+  const lamington = findBestFoodMatch("lamington")
+  assert.ok(lamington)
+  assert.match(String(lamington.name || ""), /lamington/i)
+  assert.equal(lamington.category, "dessert")
+
+  const pavlova = findBestFoodMatch("pavlova")
+  assert.ok(pavlova)
+  assert.match(String(pavlova.name || ""), /pavlova/i)
+  assert.equal(pavlova.calories, 320)
 })
 
 test("findBestFoodMatch falls back to a deterministic food-class estimate for unknown foods", () => {
