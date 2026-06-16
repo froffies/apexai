@@ -73,6 +73,26 @@ test("findBestFoodMatch covers broader common mixed dishes and drinks with deter
   assert.ok(banhMi)
   assert.match(String(banhMi.name || ""), /banh mi/i)
   assert.equal(banhMi.category, "mixed meal")
+
+  const hsp = findBestFoodMatch("hsp")
+  assert.ok(hsp)
+  assert.match(String(hsp.name || ""), /hsp/i)
+  assert.equal(hsp.calories, 1200)
+
+  const breakfastBurrito = findBestFoodMatch("breakfast burrito")
+  assert.ok(breakfastBurrito)
+  assert.match(String(breakfastBurrito.name || ""), /breakfast burrito/i)
+  assert.equal(breakfastBurrito.calories, 620)
+
+  const friedChickenAndChips = findBestFoodMatch("fried chicken and chips")
+  assert.ok(friedChickenAndChips)
+  assert.match(String(friedChickenAndChips.name || ""), /fried chicken and chips/i)
+  assert.equal(friedChickenAndChips.calories, 980)
+
+  const handRoll = findBestFoodMatch("salmon hand roll")
+  assert.ok(handRoll)
+  assert.match(String(handRoll.name || ""), /hand roll/i)
+  assert.equal(handRoll.category, "mixed meal")
 })
 
 test("findBestFoodMatch falls back to a deterministic food-class estimate for unknown foods", () => {

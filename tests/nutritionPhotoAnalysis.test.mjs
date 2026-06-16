@@ -378,6 +378,38 @@ test("buildFoodPhotoEstimate can auto-fill broader plated dish profiles like pok
   assert.equal(fishAndChipsEstimate.needs_review, false)
   assert.equal(fishAndChipsEstimate.breakdown[0]?.source_type, "photo_dish_profile")
   assert.match(String(fishAndChipsEstimate.action?.food_name || ""), /fish and chips/i)
+
+  const hspEstimate = await buildFoodPhotoEstimate({
+    summary: "A halal snack pack with chips, doner meat, garlic sauce and chilli sauce.",
+    items: [],
+    portion: "1 tray",
+    overall_confidence: "high",
+  }, {
+    mealType: "dinner",
+    lookupFoods: async (term) => searchPhotoReferenceFoods(term),
+  })
+
+  assert.ok(hspEstimate.action)
+  assert.equal(hspEstimate.can_autofill, true)
+  assert.equal(hspEstimate.needs_review, false)
+  assert.equal(hspEstimate.breakdown[0]?.source_type, "photo_dish_profile")
+  assert.match(String(hspEstimate.action?.food_name || ""), /hsp/i)
+
+  const friedChickenEstimate = await buildFoodPhotoEstimate({
+    summary: "Fried chicken pieces with hot chips.",
+    items: [],
+    portion: "1 box",
+    overall_confidence: "high",
+  }, {
+    mealType: "lunch",
+    lookupFoods: async (term) => searchPhotoReferenceFoods(term),
+  })
+
+  assert.ok(friedChickenEstimate.action)
+  assert.equal(friedChickenEstimate.can_autofill, true)
+  assert.equal(friedChickenEstimate.needs_review, false)
+  assert.equal(friedChickenEstimate.breakdown[0]?.source_type, "photo_dish_profile")
+  assert.match(String(friedChickenEstimate.action?.food_name || ""), /fried chicken and chips/i)
 })
 
 test("buildFoodPhotoEstimate keeps dish confidence when the model omits the item name", async () => {

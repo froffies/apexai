@@ -126,7 +126,7 @@ function inferPhotoFoodNameFromAssumptions(assumptions = []) {
 function parseSimpleSummaryItem(summary = "", assumptions = []) {
   const text = cleanText(summary).replace(/[.!?]+$/g, "")
   if (!text) return null
-  if (/\b(?:pizza|burger|cheeseburger|butter chicken|chicken curry|biryani|samosa|triangular pastries?|dosa|idli|caesar salad|poke bowl|burrito bowl|pad thai|laksa|ramen|pho|tacos?|kebab|souvlaki|gyro|dumplings?|gyoza|wontons?|schnitzel|fish and chips|fish & chips|banh mi|meat pie|sausage roll)\b/i.test(text)) {
+  if (/\b(?:pizza|burger|cheeseburger|butter chicken|chicken curry|biryani|samosa|triangular pastries?|dosa|idli|caesar salad|halloumi salad|poke bowl|burrito bowl|breakfast burrito|pad thai|laksa|ramen|pho|tacos?|kebab|souvlaki|gyro|hsp|halal snack pack|dumplings?|gyoza|wontons?|dim sims?|schnitzel|fish and chips|fish & chips|fried chicken and chips|roast chicken meal|banh mi|hand roll|meat pie|sausage roll)\b/i.test(text)) {
     return null
   }
   if (/[,:]/.test(text) || /\b(?:with|and|served|accompanied|alongside|topped|featuring|plus)\b/i.test(text)) {
@@ -163,17 +163,23 @@ function defaultQuantityForSummaryTerm(term = "", summaryText = "") {
   if (!normalized) return "1 serve"
   if (/^\d/.test(normalized)) return normalized
   if (normalized.includes("caesar salad")) return "1 bowl"
+  if (normalized.includes("halloumi salad")) return "1 bowl"
   if (normalized.includes("poke bowl")) return "1 bowl"
   if (normalized.includes("burrito bowl")) return "1 bowl"
+  if (normalized.includes("breakfast burrito")) return "1 burrito"
   if (normalized.includes("burger with fries")) return count > 1 ? `${count} burgers + fries` : "1 burger + small fries"
   if (normalized.includes("burger")) return count > 1 ? `${count} burgers` : "1 burger"
   if (normalized.includes("pad thai")) return "1 plate"
   if (normalized.includes("ramen") || normalized.includes("pho") || normalized.includes("laksa")) return "1 bowl"
   if (normalized.includes("kebab") || normalized.includes("souvlaki") || normalized.includes("gyro")) return "1 wrap"
+  if (normalized.includes("hsp") || normalized.includes("halal snack pack")) return "1 tray"
   if (normalized.includes("banh mi")) return "1 roll"
   if (normalized.includes("fish and chips") || normalized.includes("fish & chips")) return "1 plate"
+  if (normalized.includes("fried chicken and chips")) return "1 box"
+  if (normalized.includes("roast chicken meal")) return "1 plate"
   if (normalized.includes("meat pie")) return "1 pie"
   if (normalized.includes("sausage roll")) return "1 roll"
+  if (normalized.includes("sushi hand roll")) return count > 1 ? `${count} hand rolls` : "1 hand roll"
   if (normalized.includes("taco")) {
     const countMatch = summary.match(/(\d+)\s*tacos?\b/i)
     if (countMatch) return `${countMatch[1]} tacos`
@@ -183,6 +189,11 @@ function defaultQuantityForSummaryTerm(term = "", summaryText = "") {
     const countMatch = summary.match(/(\d+)\s*(?:dumplings?|gyoza|wontons?)\b/i)
     if (countMatch) return `${countMatch[1]} pieces`
     return count > 1 ? `${count} pieces` : "6 pieces"
+  }
+  if (normalized.includes("dim sim")) {
+    const countMatch = summary.match(/(\d+)\s*dim\s*sims?\b/i)
+    if (countMatch) return `${countMatch[1]} pieces`
+    return count > 1 ? `${count} pieces` : "4 pieces"
   }
   if (normalized.includes("schnitzel")) return summary.includes("chips") || summary.includes("fries") ? "1 plate" : "1 schnitzel"
   if (normalized.includes("pasta with tomato sauce")) return "1 plate"
@@ -275,12 +286,24 @@ function parseNamedPhotoDishFromSummary(summary = "", assumptions = [], confiden
       },
     },
     {
+      pattern: /\bhalloumi\b.*\bsalad\b|\bsalad\b.*\bhalloumi\b/i,
+      resolveName() {
+        return "halloumi salad"
+      },
+    },
+    {
       pattern: /\bpoke bowl\b|\bpok[eé]\s+bowl\b/i,
       resolveName() {
         if (normalized.includes("salmon")) return "salmon poke bowl"
         if (normalized.includes("tuna")) return "tuna poke bowl"
         if (normalized.includes("chicken")) return "chicken poke bowl"
         return "poke bowl"
+      },
+    },
+    {
+      pattern: /\bbreakfast burrito\b/i,
+      resolveName() {
+        return "breakfast burrito"
       },
     },
     {
@@ -337,9 +360,29 @@ function parseNamedPhotoDishFromSummary(summary = "", assumptions = [], confiden
       },
     },
     {
+      pattern: /\b(?:hsp|halal snack pack)\b/i,
+      resolveName() {
+        return "hsp"
+      },
+    },
+    {
       pattern: /\bfish\s*(?:and|&)\s*chips\b/i,
       resolveName() {
         return "fish and chips"
+      },
+    },
+    {
+      pattern: /\bfried chicken\b/i,
+      resolveName() {
+        return normalized.includes("chips") || normalized.includes("fries")
+          ? "fried chicken and chips"
+          : ""
+      },
+    },
+    {
+      pattern: /\b(?:roast|rotisserie)\s+chicken\b/i,
+      resolveName() {
+        return "roast chicken meal"
       },
     },
     {
@@ -348,6 +391,14 @@ function parseNamedPhotoDishFromSummary(summary = "", assumptions = [], confiden
         if (normalized.includes("chicken")) return "chicken banh mi"
         if (normalized.includes("pork")) return "pork banh mi"
         return "banh mi"
+      },
+    },
+    {
+      pattern: /\b(?:sushi\s+)?hand roll\b/i,
+      resolveName() {
+        if (normalized.includes("salmon")) return "salmon hand roll"
+        if (normalized.includes("tuna")) return "tuna hand roll"
+        return "sushi hand roll"
       },
     },
     {
@@ -366,6 +417,12 @@ function parseNamedPhotoDishFromSummary(summary = "", assumptions = [], confiden
       pattern: /\b(?:dumplings?|gyoza|wontons?)\b/i,
       resolveName() {
         return "dumplings"
+      },
+    },
+    {
+      pattern: /\bdim\s*sims?\b/i,
+      resolveName() {
+        return "dim sims"
       },
     },
     {
@@ -550,12 +607,20 @@ function inferPhotoDishCluster(analysis = {}, breakdown = []) {
     return "caesar salad"
   }
 
+  if (/\bhalloumi\b/.test(text) && /\bsalad\b/.test(text)) {
+    return "halloumi salad"
+  }
+
   if ((/\bpoke\b/.test(text) && /\bbowl\b/.test(text)) || (/\bsalmon\b|\btuna\b/.test(text) && /\bedamame\b|\bseaweed\b/.test(text) && /\brice\b/.test(text))) {
     return "poke bowl"
   }
 
   if (/\bburrito\b/.test(text) && /\bbowl\b/.test(text)) {
     return "burrito bowl"
+  }
+
+  if (/\bbreakfast\b/.test(text) && /\bburrito\b/.test(text)) {
+    return "breakfast burrito"
   }
 
   if ((/\bburger\b|\bhamburger\b/.test(text) && (/\bbun\b/.test(text) || /\bfries\b|\bchips\b|\bketchup\b|\bpickle\b/.test(text))) || (/\bpatty\b/.test(text) && /\bbun\b/.test(text))) {
@@ -590,12 +655,28 @@ function inferPhotoDishCluster(analysis = {}, breakdown = []) {
     return "kebab"
   }
 
+  if (/\b(?:hsp|halal snack pack)\b/.test(text) || (/\bchips\b/.test(text) && /\bgarlic sauce\b|\bchilli sauce\b/.test(text) && /\bdoner\b|\bkebab meat\b/.test(text))) {
+    return "hsp"
+  }
+
   if (/\bfish\s*(?:and|&)\s*chips\b/.test(text) || (/\bbattered fish\b/.test(text) && /\bchips\b|\bfries\b/.test(text))) {
     return "fish and chips"
   }
 
+  if (/\bfried chicken\b/.test(text) && (/\bchips\b/.test(text) || /\bfries\b/.test(text))) {
+    return "fried chicken and chips"
+  }
+
+  if (/\b(?:roast|rotisserie)\s+chicken\b/.test(text) && (/\bchips\b/.test(text) || /\bfries\b/.test(text) || /\bmeal\b/.test(text))) {
+    return "roast chicken meal"
+  }
+
   if (/\bbanh mi\b/.test(text) || (/\broll\b/.test(text) && /\bpickled vegetables?\b|\bcilantro\b|\bpat[eê]\b/.test(text))) {
     return "banh mi"
+  }
+
+  if (/\bhand roll\b/.test(text) || (/\bsushi\b/.test(text) && /\bcone\b/.test(text))) {
+    return "sushi hand roll"
   }
 
   if (/\bmeat pie\b|\bbeef pie\b/.test(text)) {
@@ -608,6 +689,10 @@ function inferPhotoDishCluster(analysis = {}, breakdown = []) {
 
   if (/\b(?:dumplings?|gyoza|wontons?)\b/.test(text)) {
     return "dumplings"
+  }
+
+  if (/\bdim\s*sims?\b/.test(text)) {
+    return "dim sims"
   }
 
   if (/\bschnitzel\b/.test(text) || ((/\bcrumbed\b|\bbreaded\b/.test(text)) && /\bcutlet\b/.test(text))) {

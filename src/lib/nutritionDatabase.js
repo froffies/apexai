@@ -266,8 +266,10 @@ const photoDishProfiles = [
   { id: "photo_burger_with_fries", name: "Burger with fries", aliases: ["burger with fries", "burger and fries", "cheeseburger with fries", "burger served with fries"], quantity: "1 burger + small fries", calories: 910, protein_g: 35, carbs_g: 82, fat_g: 50, category: "mixed meal" },
   { id: "photo_butter_chicken_rice", name: "Butter chicken with rice", aliases: ["butter chicken", "butter chicken with rice", "chicken curry with rice"], quantity: "1 bowl", calories: 760, protein_g: 34, carbs_g: 74, fat_g: 34, category: "mixed meal" },
   { id: "photo_caesar_salad", name: "Caesar salad", aliases: ["caesar salad", "chicken caesar salad"], quantity: "1 bowl", calories: 320, protein_g: 13, carbs_g: 18, fat_g: 22, category: "mixed meal" },
+  { id: "photo_halloumi_salad", name: "Halloumi salad", aliases: ["halloumi salad", "grilled halloumi salad"], quantity: "1 bowl", calories: 420, protein_g: 19, carbs_g: 15, fat_g: 31, category: "mixed meal" },
   { id: "photo_poke_bowl", name: "Poke bowl", aliases: ["poke bowl", "salmon poke bowl", "tuna poke bowl", "chicken poke bowl"], quantity: "1 bowl", calories: 610, protein_g: 32, carbs_g: 68, fat_g: 20, category: "mixed meal" },
   { id: "photo_burrito_bowl", name: "Burrito bowl", aliases: ["burrito bowl", "chicken burrito bowl", "beef burrito bowl"], quantity: "1 bowl", calories: 660, protein_g: 34, carbs_g: 72, fat_g: 24, category: "mixed meal" },
+  { id: "photo_breakfast_burrito", name: "Breakfast burrito", aliases: ["breakfast burrito", "egg burrito", "bacon and egg burrito"], quantity: "1 burrito", calories: 620, protein_g: 28, carbs_g: 48, fat_g: 34, category: "mixed meal" },
   { id: "photo_pasta_tomato", name: "Pasta with tomato sauce", aliases: ["pasta with tomato sauce", "spaghetti with tomato sauce", "pasta"], quantity: "1 plate", calories: 420, protein_g: 14, carbs_g: 70, fat_g: 9, category: "mixed meal" },
   { id: "photo_fried_rice", name: "Fried rice", aliases: ["fried rice"], quantity: "1 plate", calories: 620, protein_g: 17, carbs_g: 86, fat_g: 21, category: "mixed meal" },
   { id: "photo_biryani", name: "Biryani", aliases: ["biryani", "veg biryani", "vegetable biryani", "chicken biryani"], quantity: "1 bowl", calories: 680, protein_g: 19, carbs_g: 92, fat_g: 24, category: "mixed meal" },
@@ -277,10 +279,15 @@ const photoDishProfiles = [
   { id: "photo_laksa", name: "Laksa", aliases: ["laksa", "chicken laksa", "seafood laksa"], quantity: "1 bowl", calories: 690, protein_g: 24, carbs_g: 56, fat_g: 40, category: "mixed meal" },
   { id: "photo_tacos", name: "Tacos", aliases: ["taco", "tacos", "fish tacos", "chicken tacos", "beef tacos"], quantity: "2 tacos", calories: 420, protein_g: 20, carbs_g: 36, fat_g: 20, category: "mixed meal" },
   { id: "photo_kebab", name: "Kebab", aliases: ["kebab", "souvlaki", "gyro", "gyros", "doner kebab"], quantity: "1 wrap", calories: 720, protein_g: 35, carbs_g: 58, fat_g: 32, category: "mixed meal" },
+  { id: "photo_hsp", name: "HSP", aliases: ["hsp", "halal snack pack"], quantity: "1 tray", calories: 1200, protein_g: 45, carbs_g: 95, fat_g: 70, category: "mixed meal" },
   { id: "photo_dumplings", name: "Dumplings", aliases: ["dumpling", "dumplings", "gyoza", "wontons"], quantity: "6 pieces", calories: 330, protein_g: 15, carbs_g: 38, fat_g: 11, category: "mixed meal" },
+  { id: "photo_dim_sims", name: "Dim sims", aliases: ["dim sim", "dim sims", "fried dim sim", "steamed dim sims"], quantity: "4 pieces", calories: 340, protein_g: 12, carbs_g: 31, fat_g: 18, category: "mixed meal" },
   { id: "photo_schnitzel_chips", name: "Schnitzel with chips", aliases: ["schnitzel", "chicken schnitzel", "schnitzel with chips"], quantity: "1 plate", calories: 780, protein_g: 40, carbs_g: 52, fat_g: 44, category: "mixed meal" },
   { id: "photo_fish_and_chips", name: "Fish and chips", aliases: ["fish and chips", "fish & chips", "battered fish and chips"], quantity: "1 plate", calories: 820, protein_g: 35, carbs_g: 74, fat_g: 42, category: "mixed meal" },
+  { id: "photo_fried_chicken_chips", name: "Fried chicken and chips", aliases: ["fried chicken and chips", "fried chicken with chips", "fried chicken meal", "fried chicken and fries"], quantity: "1 box", calories: 980, protein_g: 45, carbs_g: 78, fat_g: 52, category: "mixed meal" },
+  { id: "photo_roast_chicken_meal", name: "Roast chicken meal", aliases: ["roast chicken meal", "rotisserie chicken meal", "roast chicken and chips"], quantity: "1 plate", calories: 720, protein_g: 46, carbs_g: 42, fat_g: 40, category: "mixed meal" },
   { id: "photo_banh_mi", name: "Banh mi", aliases: ["banh mi", "chicken banh mi", "pork banh mi"], quantity: "1 roll", calories: 520, protein_g: 26, carbs_g: 54, fat_g: 21, category: "mixed meal" },
+  { id: "photo_sushi_hand_roll", name: "Sushi hand roll", aliases: ["sushi hand roll", "hand roll", "salmon hand roll", "tuna hand roll"], quantity: "1 hand roll", calories: 210, protein_g: 9, carbs_g: 32, fat_g: 5, category: "mixed meal" },
   { id: "photo_meat_pie", name: "Meat pie", aliases: ["meat pie", "beef pie", "beef meat pie"], quantity: "1 pie", calories: 430, protein_g: 14, carbs_g: 33, fat_g: 27, category: "snack" },
   { id: "photo_sausage_roll", name: "Sausage roll", aliases: ["sausage roll"], quantity: "1 roll", calories: 410, protein_g: 11, carbs_g: 24, fat_g: 29, category: "snack" },
   { id: "photo_samosa", name: "Samosas", aliases: ["samosa", "samosas", "fried samosa", "fried samosas", "deep fried samosa", "deep fried samosas"], quantity: "1 serve", calories: 320, protein_g: 7, carbs_g: 36, fat_g: 16, category: "snack" },
@@ -464,6 +471,10 @@ function buildDynamicFoodEstimate(query = "") {
     return makeEstimate({ quantity: "1 standard serve", calories: 320, protein_g: 13, carbs_g: 18, fat_g: 22, category: "mixed meal" })
   }
 
+  if ((contains("halloumi") && contains("salad")) || normalizedQuery.includes("halloumi salad")) {
+    return makeEstimate({ quantity: "1 bowl", calories: 420, protein_g: 19, carbs_g: 15, fat_g: 31, category: "mixed meal" })
+  }
+
   if ((contains("poke") && contains("bowl")) || normalizedQuery.includes("poke bowl")) {
     if (contains("salmon")) return makeEstimate({ quantity: "1 bowl", calories: 650, protein_g: 32, carbs_g: 66, fat_g: 25, category: "mixed meal" })
     if (contains("tuna")) return makeEstimate({ quantity: "1 bowl", calories: 590, protein_g: 35, carbs_g: 64, fat_g: 18, category: "mixed meal" })
@@ -477,9 +488,14 @@ function buildDynamicFoodEstimate(query = "") {
   }
 
   if (contains("burrito")) {
+    if (contains("breakfast")) return makeEstimate({ quantity: "1 burrito", calories: 620, protein_g: 28, carbs_g: 48, fat_g: 34, category: "mixed meal" })
     if (contains("chicken")) return makeEstimate({ quantity: "1 burrito", calories: 690, protein_g: 35, carbs_g: 72, fat_g: 25, category: "mixed meal" })
     if (contains("beef")) return makeEstimate({ quantity: "1 burrito", calories: 760, protein_g: 33, carbs_g: 74, fat_g: 31, category: "mixed meal" })
     return makeEstimate({ quantity: "1 burrito", calories: 720, protein_g: 32, carbs_g: 74, fat_g: 27, category: "mixed meal" })
+  }
+
+  if (containsAll("hsp") || containsAll("halal", "snack", "pack")) {
+    return makeEstimate({ quantity: "1 tray", calories: 1200, protein_g: 45, carbs_g: 95, fat_g: 70, category: "mixed meal" })
   }
 
   if (contains("salad")) {
@@ -530,10 +546,22 @@ function buildDynamicFoodEstimate(query = "") {
     return makeEstimate({ quantity: "1 plate", calories: 820, protein_g: 35, carbs_g: 74, fat_g: 42, category: "mixed meal" })
   }
 
+  if ((contains("fried") && contains("chicken") && contains("chips", "fries")) || normalizedQuery.includes("fried chicken and chips")) {
+    return makeEstimate({ quantity: "1 box", calories: 980, protein_g: 45, carbs_g: 78, fat_g: 52, category: "mixed meal" })
+  }
+
+  if (((contains("roast", "rotisserie") && contains("chicken")) && contains("chips", "fries", "meal")) || normalizedQuery.includes("roast chicken meal")) {
+    return makeEstimate({ quantity: "1 plate", calories: 720, protein_g: 46, carbs_g: 42, fat_g: 40, category: "mixed meal" })
+  }
+
   if (containsAll("banh", "mi") || normalizedQuery.includes("banh mi")) {
     if (contains("chicken")) return makeEstimate({ quantity: "1 roll", calories: 500, protein_g: 28, carbs_g: 52, fat_g: 18, category: "mixed meal" })
     if (contains("pork")) return makeEstimate({ quantity: "1 roll", calories: 540, protein_g: 25, carbs_g: 54, fat_g: 23, category: "mixed meal" })
     return makeEstimate({ quantity: "1 roll", calories: 520, protein_g: 26, carbs_g: 54, fat_g: 21, category: "mixed meal" })
+  }
+
+  if ((contains("sushi") && contains("hand", "roll")) || normalizedQuery.includes("hand roll")) {
+    return makeEstimate({ quantity: "1 hand roll", calories: 210, protein_g: 9, carbs_g: 32, fat_g: 5, category: "mixed meal" })
   }
 
   if (containsAll("meat", "pie") || normalizedQuery.includes("beef pie")) {
@@ -542,6 +570,10 @@ function buildDynamicFoodEstimate(query = "") {
 
   if (containsAll("sausage", "roll")) {
     return makeEstimate({ quantity: "1 roll", calories: 410, protein_g: 11, carbs_g: 24, fat_g: 29, category: "snack" })
+  }
+
+  if (containsAll("dim", "sim")) {
+    return makeEstimate({ quantity: "4 pieces", calories: 340, protein_g: 12, carbs_g: 31, fat_g: 18, category: "mixed meal" })
   }
 
   if (contains("pizza")) return makeEstimate({ quantity: "2 slices", calories: 570, protein_g: 24, carbs_g: 60, fat_g: 25, category: "mixed meal" })
