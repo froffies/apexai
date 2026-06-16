@@ -596,6 +596,38 @@ function hasMessyPlateReviewSignals(analysis = {}, breakdown = []) {
   return substantiveCount > 1 || /\b(?:platter|shared|sampler|combo|buffet)\b/.test(text)
 }
 
+function buildPhotoReviewReasons({
+  analysis = {},
+  breakdown = [],
+  macroConfidence = "low",
+  canAutofill = false,
+  messyPlateReview = false,
+  manualReview = false,
+} = {}) {
+  if (manualReview || canAutofill) return []
+  const reasons = []
+  if (!breakdown.length) reasons.push("no_macro_matches")
+  if (Boolean(analysis?.needs_clarification)) reasons.push("ai_requested_clarification")
+  if (normalizeConfidence(analysis?.overall_confidence, "low") === "low") reasons.push("low_visual_confidence")
+  if (messyPlateReview) reasons.push("messy_or_hidden_calorie_plate")
+  if (macroConfidence === "low") reasons.push("low_macro_confidence")
+  if (breakdown.some((item) => String(item?.source_type || "").trim() === "estimated_internal_profile")) {
+    reasons.push("estimated_macro_fallback")
+  }
+  return [...new Set(reasons)]
+}
+
+function primaryPhotoReviewReason(reasons = []) {
+  const ordered = safeArray(reasons, 8)
+  if (ordered.includes("messy_or_hidden_calorie_plate")) return "messy_or_hidden_calorie_plate"
+  if (ordered.includes("low_visual_confidence")) return "low_visual_confidence"
+  if (ordered.includes("ai_requested_clarification")) return "ai_requested_clarification"
+  if (ordered.includes("estimated_macro_fallback")) return "estimated_macro_fallback"
+  if (ordered.includes("no_macro_matches")) return "no_macro_matches"
+  if (ordered.includes("low_macro_confidence")) return "low_macro_confidence"
+  return ordered[0] || ""
+}
+
 function buildPhotoDishClusterText(analysis = {}, breakdown = []) {
   return [
     cleanText(analysis.summary || ""),
@@ -859,6 +891,8 @@ async function buildPhotoDishRescueEstimate(analysis, lookupFoods, mealType) {
     macro_confidence: rescueMacroConfidence,
     nutrition_source: rescueSource,
     needs_review: false,
+    review_reason: "",
+    review_reasons: [],
   }
 }
 
@@ -999,6 +1033,8 @@ async function estimatePreparedPhotoAnalysis(analysis = {}, options = {}, { manu
       breakdown: [],
       macro_confidence: "low",
       needs_review: true,
+      review_reason: "no_items_detected",
+      review_reasons: ["no_items_detected"],
       clarification_question: analysis.clarification_question || "I couldn't confidently identify the foods in that photo yet. Try another angle or tell me what is on the plate.",
       assumptions: analysis.assumptions,
     }
@@ -1055,6 +1091,8 @@ async function estimatePreparedPhotoAnalysis(analysis = {}, options = {}, { manu
         macro_confidence: rescue.macro_confidence,
         nutrition_source: rescue.nutrition_source,
         needs_review: rescue.needs_review,
+        review_reason: rescue.review_reason,
+        review_reasons: rescue.review_reasons,
         clarification_question: analysis.clarification_question || "",
         assumptions: analysis.assumptions,
       }
@@ -1062,6 +1100,15 @@ async function estimatePreparedPhotoAnalysis(analysis = {}, options = {}, { manu
   }
 
   const needsReview = manualReview ? false : !canAutofill
+  const reviewReasons = buildPhotoReviewReasons({
+    analysis,
+    breakdown: breakdownEstimate.items,
+    macroConfidence,
+    canAutofill,
+    messyPlateReview,
+    manualReview,
+  })
+  const reviewReason = primaryPhotoReviewReason(reviewReasons)
   action = (canAutofill || manualReview)
     ? buildDeterministicMealAction({
         mealSession,
@@ -1095,6 +1142,8 @@ async function estimatePreparedPhotoAnalysis(analysis = {}, options = {}, { manu
     macro_confidence: macroConfidence,
     nutrition_source: source,
     needs_review: needsReview,
+    review_reason: needsReview ? reviewReason : "",
+    review_reasons: needsReview ? reviewReasons : [],
     clarification_question: analysis.clarification_question || (
       needsReview
         ? (messyPlateReview

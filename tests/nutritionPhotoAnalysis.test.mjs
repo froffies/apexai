@@ -424,6 +424,9 @@ test("buildFoodPhotoEstimate can auto-fill broader plated dish profiles like pok
   assert.equal(messyPlatterEstimate.action, null)
   assert.equal(messyPlatterEstimate.can_autofill, false)
   assert.equal(messyPlatterEstimate.needs_review, true)
+  assert.equal(messyPlatterEstimate.review_reason, "messy_or_hidden_calorie_plate")
+  assert.ok(Array.isArray(messyPlatterEstimate.review_reasons))
+  assert.equal(messyPlatterEstimate.review_reasons.includes("messy_or_hidden_calorie_plate"), true)
   assert.match(String(messyPlatterEstimate.clarification_question || ""), /sauces|shared-plate portions|review/i)
 })
 

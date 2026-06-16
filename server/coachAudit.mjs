@@ -727,6 +727,9 @@ function filterAuditLog(record, filters = {}) {
   if (filters.route_type && record.route_type !== filters.route_type) return false
   if (filters.date_from && String(record.created_at).slice(0, 10) < String(filters.date_from)) return false
   if (filters.date_to && String(record.created_at).slice(0, 10) > String(filters.date_to)) return false
+  if (filters.created_after && Date.parse(String(record.created_at || "")) < Date.parse(String(filters.created_after || ""))) return false
+  if (filters.created_before && Date.parse(String(record.created_at || "")) > Date.parse(String(filters.created_before || ""))) return false
+  if (filters.commit_sha && !cleanText(String(record.commit_sha || "")).startsWith(cleanText(filters.commit_sha))) return false
   if (filters.failed === "true" && !["failed", "failed_before_persistence", "failed_persistence"].includes(record.persistence_status)) return false
   if (filters.warnings === "true" && (!record.warnings.length && !record.flags.length)) return false
   if (filters.flag && !record.flags.some((flag) => flag.code === filters.flag)) return false

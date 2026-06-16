@@ -482,7 +482,7 @@ export default function IngredientMealFinder() {
             <h3 className="font-semibold text-slate-950">Build any meal</h3>
           </div>
           <p className="mt-1 text-sm text-slate-500">
-            Search any food or barcode/EAN/UPC, add as many lines as you want, then log the combined totals.
+            Search foods, brands, or barcodes, add as many lines as you want, and we will flag anything that is only an estimate before you log it.
           </p>
 
           <input

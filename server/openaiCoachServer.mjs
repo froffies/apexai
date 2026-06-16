@@ -100,6 +100,22 @@ const NUTRITION_LOOKUP_TOKEN_EQUIVALENTS = new Map([
   ["parma", "parmi"],
 ])
 const auditCapabilities = coachAuditCapabilities(adminSupabase)
+const deploymentId = String(
+  process.env.RENDER_DEPLOY_ID
+  || process.env.RENDER_DEPLOYMENT_ID
+  || process.env.VERCEL_DEPLOYMENT_ID
+  || process.env.DEPLOYMENT_ID
+  || process.env.RENDER_INSTANCE_ID
+  || ""
+).trim()
+const deployedAt = String(
+  process.env.RENDER_DEPLOYED_AT
+  || process.env.DEPLOYED_AT
+  || process.env.VERCEL_DEPLOYMENT_CREATED_AT
+  || ""
+).trim()
+const runtimeCommitSha = String(auditCapabilities.commitSha || "").trim()
+const runtimeAppVersion = String(auditCapabilities.version || "1.0.0").trim()
 const defaultRequestBodyLimitBytes = 1_000_000
 const photoRequestBodyLimitBytes = 30_000_000
 
@@ -1471,8 +1487,16 @@ function queueInternalTelemetry(type, payload = {}, level = "info") {
     created_at: new Date().toISOString(),
     type,
     level,
+    app_version: runtimeAppVersion,
+    commit_sha: runtimeCommitSha,
+    deployment_id: deploymentId,
+    deployed_at: deployedAt,
     payload: {
       origin: "server",
+      app_version: runtimeAppVersion,
+      commit_sha: runtimeCommitSha,
+      ...(deploymentId ? { deployment_id: deploymentId } : {}),
+      ...(deployedAt ? { deployed_at: deployedAt } : {}),
       ...payload,
     },
     user_id: null,
@@ -2123,6 +2147,10 @@ async function handleNutritionSearch(request, response) {
     top_source_type: String(top?.source_type || ""),
     top_macro_confidence: String(top?.macro_confidence || ""),
     top_estimated: Boolean(top?.estimated || String(top?.source_type || "").trim().toLowerCase() === "estimated_internal_profile"),
+    top_category: String(top?.category || ""),
+    lookup_path: looksLikeBarcode(query)
+      ? (top ? "barcode_lookup" : "barcode_miss")
+      : (top ? (String(top?.source_type || "").trim().toLowerCase().includes("catalogue") ? "local_catalogue" : "external_or_estimate") : "no_match"),
   }, results.length ? "info" : "warn")
   sendJson(response, 200, { results }, requestResponseOrigin(request))
 }
@@ -2223,6 +2251,8 @@ async function handleNutritionPhoto(request, response) {
     protein_g: Number(action?.protein_g ?? estimatedMeal.protein_g ?? 0),
     carbs_g: Number(action?.carbs_g ?? estimatedMeal.carbs_g ?? 0),
     fat_g: Number(action?.fat_g ?? estimatedMeal.fat_g ?? 0),
+    review_reason: String(estimatedMeal.review_reason || ""),
+    review_reasons: Array.isArray(estimatedMeal.review_reasons) ? estimatedMeal.review_reasons : [],
     macro_breakdown: Array.isArray(action?.macro_breakdown)
       ? action.macro_breakdown
       : (Array.isArray(estimatedMeal.breakdown) ? estimatedMeal.breakdown : []),
@@ -2234,6 +2264,8 @@ async function handleNutritionPhoto(request, response) {
     needs_review: Boolean(estimatedMeal.needs_review),
     macro_confidence: String(estimatedMeal.macro_confidence || ""),
     source_type: String(responseBody.nutrition_source_type || ""),
+    review_reason: String(responseBody.review_reason || ""),
+    review_reasons: Array.isArray(responseBody.review_reasons) ? responseBody.review_reasons : [],
   }, estimatedMeal.needs_review ? "warn" : "info")
   sendJson(response, 200, responseBody, requestResponseOrigin(request))
 }
@@ -2272,6 +2304,8 @@ async function handleNutritionPhotoReview(request, response) {
     protein_g: Number(action?.protein_g ?? estimatedMeal.protein_g ?? 0),
     carbs_g: Number(action?.carbs_g ?? estimatedMeal.carbs_g ?? 0),
     fat_g: Number(action?.fat_g ?? estimatedMeal.fat_g ?? 0),
+    review_reason: String(estimatedMeal.review_reason || ""),
+    review_reasons: Array.isArray(estimatedMeal.review_reasons) ? estimatedMeal.review_reasons : [],
     macro_breakdown: Array.isArray(action?.macro_breakdown)
       ? action.macro_breakdown
       : (Array.isArray(estimatedMeal.breakdown) ? estimatedMeal.breakdown : []),
@@ -2281,6 +2315,8 @@ async function handleNutritionPhotoReview(request, response) {
     item_count: Array.isArray(estimatedMeal.breakdown) ? estimatedMeal.breakdown.length : 0,
     macro_confidence: String(estimatedMeal.macro_confidence || ""),
     source_type: String(responseBody.nutrition_source_type || ""),
+    review_reason: String(responseBody.review_reason || ""),
+    review_reasons: Array.isArray(responseBody.review_reasons) ? responseBody.review_reasons : [],
   })
   sendJson(response, 200, responseBody, requestResponseOrigin(request))
 }
@@ -2410,7 +2446,21 @@ async function handleTelemetry(request, response) {
     created_at: new Date().toISOString(),
     type: body.type,
     level: body.level || "info",
-    payload: body.payload || {},
+    app_version: runtimeAppVersion,
+    commit_sha: runtimeCommitSha,
+    deployment_id: deploymentId,
+    deployed_at: deployedAt,
+    payload: {
+      ...(body.payload || {}),
+      app_version: String(body.payload?.app_version || runtimeAppVersion).trim(),
+      commit_sha: String(body.payload?.commit_sha || runtimeCommitSha).trim(),
+      ...(String(body.payload?.deployment_id || deploymentId).trim()
+        ? { deployment_id: String(body.payload?.deployment_id || deploymentId).trim() }
+        : {}),
+      ...(String(body.payload?.deployed_at || deployedAt).trim()
+        ? { deployed_at: String(body.payload?.deployed_at || deployedAt).trim() }
+        : {}),
+    },
     user_id: user?.id || null,
     ip: requestIp(request),
     user_agent: String(request.headers["user-agent"] || ""),
@@ -2461,6 +2511,9 @@ async function handleCoachAuditList(request, response) {
     route_type: url.searchParams.get("route_type") || "",
     date_from: url.searchParams.get("date_from") || "",
     date_to: url.searchParams.get("date_to") || "",
+    created_after: url.searchParams.get("created_after") || "",
+    created_before: url.searchParams.get("created_before") || "",
+    commit_sha: url.searchParams.get("commit_sha") || "",
     failed: url.searchParams.get("failed") || "",
     warnings: url.searchParams.get("warnings") || "",
     flag: url.searchParams.get("flag") || "",
@@ -2492,6 +2545,10 @@ const server = http.createServer(async (request, response) => {
   if (request.method === "GET" && request.url === "/health") {
     sendJson(response, 200, {
       ok: true,
+      appVersion: runtimeAppVersion,
+      commitSha: runtimeCommitSha,
+      deploymentId: deploymentId || null,
+      deployedAt: deployedAt || null,
       model,
       visionModel,
       openaiConfigured: Boolean(client),

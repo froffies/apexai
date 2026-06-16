@@ -325,6 +325,7 @@ const SEARCH_STOPWORDS = new Set([
   "a", "an", "and", "are", "for", "in", "is", "me", "my", "of", "or", "please", "show", "tell", "the",
   "what", "whats", "whats", "what's", "with", "about", "around", "roughly", "nutrition", "nutritional",
   "info", "information", "macro", "macros", "calorie", "calories", "protein", "carb", "carbs", "fat",
+  "n",
 ])
 const SEARCH_DESCRIPTOR_TOKENS = new Set([
   "fresh", "plain", "cooked", "serving", "serve", "standard", "typical", "usual", "piece", "pieces", "bowl",
@@ -338,7 +339,70 @@ const TOKEN_EQUIVALENTS = new Map([
   ["lite", "light"],
   ["skinny", "skim"],
   ["weetbix", "weet bix"],
+  ["parmy", "parmi"],
+  ["parmie", "parmi"],
+  ["brekky", "breakfast"],
+  ["brekkie", "breakfast"],
+  ["sanga", "sandwich"],
+  ["sammie", "sandwich"],
+  ["sarnie", "sandwich"],
+  ["dimsim", "dim sim"],
+  ["dimsims", "dim sims"],
+  ["handroll", "hand roll"],
+  ["banhmi", "banh mi"],
+  ["pokebowl", "poke bowl"],
+  ["burritobowl", "burrito bowl"],
+  ["bubbletea", "bubble tea"],
+  ["flatwhite", "flat white"],
+  ["toasty", "toastie"],
+  ["souva", "souvlaki"],
+  ["chippies", "chips"],
+  ["maccas", "mcdonalds"],
+  ["chkn", "chicken"],
+  ["chikn", "chicken"],
+  ["schnitty", "schnitzel"],
+  ["yiros", "gyro"],
 ])
+/** @type {Array<[RegExp, string]>} */
+const QUERY_PHRASE_EQUIVALENTS = [
+  [/\bbubbletea\b/gi, "bubble tea"],
+  [/\bflatwhite\b/gi, "flat white"],
+  [/\bhandroll\b/gi, "hand roll"],
+  [/\bpokebowl\b/gi, "poke bowl"],
+  [/\bburritobowl\b/gi, "burrito bowl"],
+  [/\bbanhmi\b/gi, "banh mi"],
+  [/\bsouva\b/gi, "souvlaki"],
+  [/\byiros\b/gi, "gyro"],
+  [/\bschnitty\b/gi, "schnitzel"],
+  [/\bkfc\s+original\s+fillet\s+burger\b/gi, "kfc original burger"],
+  [/\bdimsims\b/gi, "dim sims"],
+  [/\bdimsim\b/gi, "dim sim"],
+  [/\bpotato\s+scallop\b/gi, "potato scallops"],
+  [/\bpotato\s+cake\b/gi, "potato scallops"],
+  [/\bpotato\s+cakes\b/gi, "potato scallops"],
+  [/\bfish\s*(?:n|&)\s*chips\b/gi, "fish and chips"],
+  [/\bfish\s*(?:n|&)\s*chipp(?:ie|ies)\b/gi, "fish and chips"],
+  [/\bbacon\s*(?:n|&)\s*egg\s+roll\b/gi, "bacon and egg roll"],
+  [/\bbacon\s*(?:n|&)\s*egg\s+muffin\b/gi, "bacon and egg muffin"],
+  [/\bb\s*&\s*e\s+roll\b/gi, "bacon and egg roll"],
+  [/\bb\s*&\s*e\s+muffin\b/gi, "bacon and egg muffin"],
+  [/\bbrek(?:ky|kie)\s+burrito\b/gi, "breakfast burrito"],
+  [/\bcheese\s+toasty\b/gi, "cheese toastie"],
+  [/\bham\s+and\s+cheese\s+toasty\b/gi, "ham and cheese toastie"],
+  [/\bsalmon\s+handroll\b/gi, "salmon hand roll"],
+  [/\btuna\s+handroll\b/gi, "tuna hand roll"],
+  [/\bsushi\s+handroll\b/gi, "sushi hand roll"],
+  [/\bsalmon\s+pokebowl\b/gi, "salmon poke bowl"],
+  [/\btuna\s+pokebowl\b/gi, "tuna poke bowl"],
+  [/\bbeef\s+burritobowl\b/gi, "beef burrito bowl"],
+  [/\bchicken\s+burritobowl\b/gi, "chicken burrito bowl"],
+  [/\bbubble\s*tee\b/gi, "bubble tea"],
+  [/\bflatwhite\b/gi, "flat white"],
+  [/\bdim\s*sims?\b/gi, "dim sims"],
+  [/\bmaccas\s+big\s+mac\b/gi, "mcdonalds big mac"],
+  [/\bhj(?:'s|s)?\s+whopper\b/gi, "hungry jacks whopper"],
+  [/\bsubway\s+teryaki\b/gi, "subway teriyaki"],
+]
 const PORTION_QUERY_PATTERN = /\b\d+(?:\.\d+)?\s*(?:kg|g|oz|lb|lbs|ml|l|pieces?|piece|serves?|servings?|bowls?|plates?|cups?|slices?|glasses?|mugs?|bottles?|cans?|sandwich(?:es)?|wraps?|burgers?|rolls?|bars?)\b/gi
 
 function normalizeQueryToken(token) {
@@ -360,8 +424,16 @@ function stripFoodSearchNoise(query = "") {
     .trim()
 }
 
+function rewriteFoodSearchQuery(query = "") {
+  let rewritten = String(query || "")
+  for (const [pattern, replacement] of QUERY_PHRASE_EQUIVALENTS) {
+    rewritten = rewritten.replace(pattern, replacement)
+  }
+  return rewritten.replace(/\s+/g, " ").trim()
+}
+
 function buildFoodSearchVariants(query = "") {
-  const raw = String(query || "").trim()
+  const raw = rewriteFoodSearchQuery(query)
   if (!raw) return []
 
   const stripped = stripFoodSearchNoise(raw)
@@ -371,6 +443,7 @@ function buildFoodSearchVariants(query = "") {
   const withoutStopwords = baseTokens.filter((token) => !SEARCH_STOPWORDS.has(token))
   const withoutDescriptors = withoutStopwords.filter((token) => !SEARCH_DESCRIPTOR_TOKENS.has(token))
   const variants = new Set([
+    String(query || "").trim(),
     raw,
     stripped,
     baseTokens.join(" "),
@@ -447,8 +520,9 @@ function cloneFoodProfile(food, overrides = {}) {
 }
 
 function buildDynamicFoodEstimate(query = "") {
-  const normalizedQuery = normalize(query)
-  const tokens = buildFoodSearchVariants(query)
+  const searchQuery = rewriteFoodSearchQuery(query)
+  const normalizedQuery = normalize(searchQuery)
+  const tokens = buildFoodSearchVariants(searchQuery)
     .flatMap((variant) => tokenize(variant))
     .map(normalizeQueryToken)
     .filter(Boolean)
@@ -458,11 +532,11 @@ function buildDynamicFoodEstimate(query = "") {
 
   const contains = (...values) => hasAnyToken(tokens, values)
   const containsAll = (...values) => hasAllTokens(tokens, values)
-  const estimateName = titleCase(stripFoodSearchNoise(query) || query)
+  const estimateName = titleCase(stripFoodSearchNoise(searchQuery) || searchQuery)
   const makeEstimate = (profile) => deterministicProfileFood({
     id: `dynamic_${normalize(estimateName).replace(/[^a-z0-9]+/g, "_") || "food"}`,
     name: estimateName,
-    aliases: [normalize(query)].filter(Boolean),
+    aliases: [...new Set([normalize(query), normalize(searchQuery)].filter(Boolean))],
     ...profile,
   }, "low")
 
@@ -496,6 +570,10 @@ function buildDynamicFoodEstimate(query = "") {
   }
 
   if (contains("subway") && contains("chicken") && contains("teriyaki")) {
+    return makeEstimate({ quantity: "1 regular sub", calories: 380, protein_g: 22, carbs_g: 53, fat_g: 7, category: "mixed meal" })
+  }
+
+  if (contains("subway") && contains("teriyaki")) {
     return makeEstimate({ quantity: "1 regular sub", calories: 380, protein_g: 22, carbs_g: 53, fat_g: 7, category: "mixed meal" })
   }
 
@@ -827,7 +905,8 @@ export function searchVerifiedFoods(query) {
 }
 
 export function searchPhotoReferenceFoods(query) {
-  const variants = [...new Set([query, simplifyPhotoSearchQuery(query)].filter(Boolean))]
+  const rewrittenQuery = rewriteFoodSearchQuery(query)
+  const variants = [...new Set([query, rewrittenQuery, simplifyPhotoSearchQuery(rewrittenQuery)].filter(Boolean))]
   const baseMatches = variants
     .flatMap((variant) => searchVerifiedFoods(variant))
     .filter((food, index, all) => !isEstimatedSourceType(food.source_type) && all.findIndex((entry) => entry.id === food.id) === index)

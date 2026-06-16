@@ -176,3 +176,76 @@ test("findBestFoodMatch falls back to a deterministic food-class estimate for un
   assert.equal(barramundi.carbs_g, 0)
   assert.equal(barramundi.fat_g, 3)
 })
+
+test("findBestFoodMatch handles ambiguous AU/NZ slang, typos, partial names, and branded foods", () => {
+  const cases = [
+    { query: "parma", expect: /parmi|parma|parmigiana/i },
+    { query: "parmy", expect: /parmi|parmy|parmigiana/i },
+    { query: "parmie", expect: /parmi|parmie|parmigiana/i },
+    { query: "chicken parma", expect: /parmi|parma|parmigiana/i },
+    { query: "chicken parmigiana", expect: /parmigiana/i },
+    { query: "bubbletea", expect: /bubble tea/i },
+    { query: "bubble tee", expect: /bubble tea/i },
+    { query: "potato cake", expect: /potato scallops/i },
+    { query: "potato cakes", expect: /potato scallops/i },
+    { query: "potato scallop", expect: /potato scallops/i },
+    { query: "fish n chips", expect: /fish and chips/i },
+    { query: "fish & chips", expect: /fish and chips/i },
+    { query: "fish n chippies", expect: /fish and chips/i },
+    { query: "dimsim", expect: /dim/i },
+    { query: "dimsims", expect: /dim/i },
+    { query: "dim sims", expect: /dim/i },
+    { query: "bacon n egg roll", expect: /bacon and egg roll/i },
+    { query: "b&e roll", expect: /bacon and egg roll/i },
+    { query: "bacon n egg muffin", expect: /bacon and egg muffin/i },
+    { query: "brekky burrito", expect: /breakfast burrito/i },
+    { query: "cheese toasty", expect: /toast/i },
+    { query: "ham and cheese toasty", expect: /toast/i },
+    { query: "salmon handroll", expect: /hand roll/i },
+    { query: "tuna handroll", expect: /hand roll/i },
+    { query: "sushi handroll", expect: /hand roll/i },
+    { query: "salmon pokebowl", expect: /poke bowl/i },
+    { query: "tuna pokebowl", expect: /poke bowl/i },
+    { query: "chicken burritobowl", expect: /burrito bowl/i },
+    { query: "beef burritobowl", expect: /burrito bowl/i },
+    { query: "flatwhite", expect: /flat white/i },
+    { query: "subway teryaki", expect: /subway/i },
+    { query: "maccas big mac", expect: /big mac/i },
+    { query: "hj whopper", expect: /whopper/i },
+    { query: "souva", expect: /souvlaki|kebab/i },
+    { query: "yiros", expect: /gyro|kebab/i },
+    { query: "schnitty and chips", expect: /schnitzel/i },
+    { query: "chkn parmi", expect: /parmi|parmigiana/i },
+    { query: "chikn parmy", expect: /parmy|parmi|parmigiana/i },
+    { query: "banhmi", expect: /banh mi/i },
+    { query: "chicken banhmi", expect: /banh mi/i },
+    { query: "hsp", expect: /hsp/i },
+    { query: "halal snack pack", expect: /hsp|halal snack pack/i },
+    { query: "salmon hand roll", expect: /hand roll/i },
+    { query: "subway chicken teriyaki", expect: /subway chicken teriyaki/i },
+    { query: "kfc original fillet burger", expect: /kfc original burger/i },
+    { query: "tim tam original", expect: /tim tam original/i, sourceType: "nz_curated_catalogue" },
+    { query: "watties baked beans", expect: /watties baked beans/i, sourceType: "nz_curated_catalogue" },
+    { query: "lewis road light milk", expect: /lewis road/i, sourceType: "nz_curated_catalogue" },
+    { query: "pams wedges", expect: /pams.*wedges/i, sourceType: "nz_curated_catalogue" },
+    { query: "milo", expect: /milo/i, sourceType: "curated_au_catalogue" },
+    { query: "vegemite", expect: /vegemite/i, sourceType: "curated_au_catalogue" },
+    { query: "long mac", expect: /long mac/i },
+    { query: "weet bix", expect: /weet/i, sourceType: "nz_curated_catalogue" },
+    { query: "weet-bix", expect: /weet/i, sourceType: "nz_curated_catalogue" },
+    { query: "sausage sizzle", expect: /sausage sizzle/i },
+    { query: "beef burrito bowl", expect: /burrito bowl/i },
+    { query: "chicken souvlaki wrap", expect: /souvlaki|kebab/i },
+  ]
+
+  assert.ok(cases.length >= 50)
+
+  for (const testCase of cases) {
+    const match = findBestFoodMatch(testCase.query)
+    assert.ok(match, `Expected a nutrition match for "${testCase.query}"`)
+    assert.match(String(match.name || ""), testCase.expect, `Unexpected top match for "${testCase.query}": ${String(match.name || "")}`)
+    if (testCase.sourceType) {
+      assert.equal(match.source_type, testCase.sourceType, `Unexpected source type for "${testCase.query}"`)
+    }
+  }
+})

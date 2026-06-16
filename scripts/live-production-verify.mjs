@@ -28,19 +28,52 @@ function loadDotEnvIntoProcess(filePath = path.join(rootDir, ".env")) {
   }
 }
 
-async function buildAuthHeaders() {
+function buildSupabaseAuthStorageKey(supabaseUrl = "") {
+  try {
+    const hostname = new URL(String(supabaseUrl || "")).hostname
+    const projectRef = hostname.split(".")[0]
+    return projectRef ? `sb-${projectRef}-auth-token` : null
+  } catch {
+    return null
+  }
+}
+
+async function buildAuthContext() {
   const email = String(process.env.E2E_SUPABASE_EMAIL || "").trim()
   const password = String(process.env.E2E_SUPABASE_PASSWORD || "").trim()
   const supabaseUrl = String(process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "").trim()
   const supabaseAnonKey = String(process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || "").trim()
-  if (!email || !password || !supabaseUrl || !supabaseAnonKey) return {}
+  if (!email || !password || !supabaseUrl || !supabaseAnonKey) {
+    return {
+      headers: {},
+      session: null,
+      authStorageKey: null,
+    }
+  }
 
   const supabase = createClient(supabaseUrl, supabaseAnonKey, { auth: { persistSession: false } })
   const { data, error } = await supabase.auth.signInWithPassword({ email, password })
   if (error || !data?.session?.access_token) {
     throw new Error(error?.message || "Unable to obtain Supabase access token for live verification.")
   }
-  return { Authorization: `Bearer ${data.session.access_token}` }
+  return {
+    headers: {
+      Authorization: `Bearer ${data.session.access_token}`,
+    },
+    session: data.session,
+    authStorageKey: buildSupabaseAuthStorageKey(supabaseUrl),
+  }
+}
+
+async function seedBrowserAuthSession(page, authContext) {
+  if (!authContext?.session || !authContext?.authStorageKey) return false
+  await page.addInitScript(({ key, session }) => {
+    window.localStorage.setItem(key, JSON.stringify(session))
+  }, {
+    key: authContext.authStorageKey,
+    session: authContext.session,
+  })
+  return true
 }
 
 async function postJson(url, body, headers = {}) {
@@ -82,13 +115,41 @@ async function completeOnboardingIfNeeded(page) {
 
 async function ensureSignedInOnProtectedRoute(page, frontendUrl) {
   const signInHeading = page.getByRole("heading", { name: /sign in to continue/i })
+  const signInButton = page.getByRole("button", { name: /^sign in$/i })
   if (!await signInHeading.isVisible().catch(() => false)) return false
 
   assertCheck(Boolean(process.env.E2E_SUPABASE_EMAIL && process.env.E2E_SUPABASE_PASSWORD), "UI auth required but Supabase E2E credentials are missing.")
   await page.getByLabel("Email").fill(process.env.E2E_SUPABASE_EMAIL || "")
   await page.getByLabel("Password").fill(process.env.E2E_SUPABASE_PASSWORD || "")
-  await page.getByRole("button", { name: /^sign in$/i }).click()
-  await page.waitForURL(/https:\/\/apexai-bay\.vercel\.app\//, { timeout: 30000 }).catch(() => {})
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const headingStillVisible = await signInHeading.isVisible().catch(() => false)
+    if (!headingStillVisible) break
+
+    const buttonVisible = await signInButton.isVisible().catch(() => false)
+    if (!buttonVisible) {
+      await page.waitForTimeout(2000)
+      continue
+    }
+
+    await signInButton.click()
+    await Promise.race([
+      page.waitForURL(/https:\/\/apexai-bay\.vercel\.app\//, { timeout: 30000 }).catch(() => null),
+      signInHeading.waitFor({ state: "hidden", timeout: 30000 }).catch(() => null),
+    ])
+
+    const signInStillVisible = await signInHeading.isVisible().catch(() => false)
+    if (!signInStillVisible) break
+
+    const authBody = String(await page.locator("body").textContent().catch(() => ""))
+    const authError = authBody.match(/invalid login credentials|email not confirmed|too many requests|unexpected failure/i)
+    if (authError) {
+      throw new Error(`Live UI auth failed: ${authError[0]}`)
+    }
+
+    await page.waitForTimeout(2500)
+  }
+
   await page.waitForFunction(() => {
     try {
       return Object.keys(window.localStorage || {}).some((key) => key.includes("-auth-token"))
@@ -117,6 +178,28 @@ async function clearCoachChat(page) {
   if (!await clearButton.isVisible().catch(() => false)) return
   await clearButton.click()
   await page.waitForTimeout(1000)
+}
+
+async function ensureCoachComposer(page, frontendUrl) {
+  const composer = page.getByPlaceholder(/log bench 80kg for 4 sets of 6/i)
+
+  const openCoachRoute = async () => {
+    await page.goto(`${frontendUrl}/Coach`, { waitUntil: "domcontentloaded", timeout: 60000 })
+    await page.waitForLoadState("networkidle", { timeout: 30000 }).catch(() => {})
+    return composer.isVisible().catch(() => false)
+  }
+
+  if (await openCoachRoute()) return true
+
+  const coachNav = page.getByRole("link", { name: /^coach$/i }).first()
+  if (await coachNav.isVisible().catch(() => false)) {
+    await coachNav.click()
+    await page.waitForLoadState("networkidle", { timeout: 30000 }).catch(() => {})
+    if (await composer.isVisible().catch(() => false)) return true
+  }
+
+  await page.waitForTimeout(2000)
+  return openCoachRoute()
 }
 
 async function waitForBodyText(page, predicates, timeout = 30000) {
@@ -151,10 +234,15 @@ const report = {
   checks: [],
 }
 
-const authHeaders = await buildAuthHeaders().catch((error) => {
+const authContext = await buildAuthContext().catch((error) => {
   report.checks.push(latestReportLine("auth_headers", "failed", { message: error.message }))
-  return {}
+  return {
+    headers: {},
+    session: null,
+    authStorageKey: null,
+  }
 })
+const authHeaders = authContext.headers || {}
 
 try {
   const frontendResponse = await fetch(frontendUrl)
@@ -191,14 +279,16 @@ try {
     const browser = await chromium.launch({ headless: true })
     const page = await browser.newPage()
     try {
+      await seedBrowserAuthSession(page, authContext)
       await page.goto(frontendUrl, { waitUntil: "domcontentloaded", timeout: 60000 })
       await ensureSignedInOnProtectedRoute(page, frontendUrl)
 
       await completeOnboardingIfNeeded(page)
-      await page.goto(`${frontendUrl}/Coach`, { waitUntil: "domcontentloaded", timeout: 60000 })
-      await ensureSignedInOnProtectedRoute(page, frontendUrl)
-      await page.waitForLoadState("networkidle", { timeout: 30000 }).catch(() => {})
-      const composerVisible = await page.getByPlaceholder(/log bench 80kg for 4 sets of 6/i).isVisible().catch(() => false)
+      let composerVisible = await ensureCoachComposer(page, frontendUrl)
+      if (!composerVisible) {
+        await ensureSignedInOnProtectedRoute(page, frontendUrl)
+        composerVisible = await ensureCoachComposer(page, frontendUrl)
+      }
       const routeBody = await page.locator("body").textContent().catch(() => "")
       assertCheck(composerVisible, `Coach composer was not reachable on the protected route. Current URL: ${page.url()}. Body: ${String(routeBody || "").slice(0, 400)}`)
       await clearCoachChat(page)

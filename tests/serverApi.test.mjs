@@ -108,6 +108,8 @@ test("local API server exposes health, local nutrition, telemetry, and sanitized
   const healthResponse = await fetch(`http://127.0.0.1:${port}/health`)
   const health = await healthResponse.json()
   assert.equal(health.ok, true)
+  assert.ok(String(health.appVersion || "").trim().length > 0)
+  assert.ok(String(health.commitSha || "").trim().length > 0)
   assert.equal(health.authRequired, false)
   assert.equal(health.telemetrySink, "file")
   assert.equal(health.openaiVisionConfigured, false)
@@ -238,6 +240,12 @@ test("local API server exposes health, local nutrition, telemetry, and sanitized
   assert.equal(telemetry.fallbackReason, null)
   const telemetryContent = await fs.readFile(telemetryFile, "utf8")
   assert.match(telemetryContent, /test_event/)
+  const telemetryEntries = telemetryContent.trim().split(/\r?\n/).map((line) => JSON.parse(line))
+  const latestTelemetry = telemetryEntries.at(-1)
+  assert.equal(latestTelemetry.type, "test_event")
+  assert.ok(String(latestTelemetry.commit_sha || "").trim().length > 0)
+  assert.ok(String(latestTelemetry.app_version || "").trim().length > 0)
+  assert.equal(String(latestTelemetry.payload?.commit_sha || "").trim().length > 0, true)
 
   const coachResponse = await fetch(`http://127.0.0.1:${port}/api/coach`, {
     method: "POST",
@@ -2397,6 +2405,8 @@ test("nutrition photo route returns a structured photo estimate when the vision 
   assert.match(String(nutritionPhoto.food_name || ""), /egg/i)
   assert.equal(Array.isArray(nutritionPhoto.identified_items), true)
   assert.ok(nutritionPhoto.identified_items.length > 0)
+  assert.equal(nutritionPhoto.review_reason, "")
+  assert.ok(Array.isArray(nutritionPhoto.review_reasons))
 })
 
 test("nutrition photo route retries transient upstream failures before giving up", async (t) => {
@@ -2710,6 +2720,8 @@ test("reviewed photo nutrition endpoint recalculates a loggable estimate without
   assert.equal(reviewed.nutrition_source_type, "photo_ai_estimate")
   assert.equal(reviewed.needs_review, false)
   assert.equal(reviewed.can_autofill, true)
+  assert.equal(reviewed.review_reason, "")
+  assert.ok(Array.isArray(reviewed.review_reasons))
   assert.ok(Array.isArray(reviewed.identified_items))
   assert.ok(Array.isArray(reviewed.macro_breakdown))
   assert.ok(Number(reviewed.calories) > 150)
