@@ -112,6 +112,21 @@ async function sendCoachMessage(page, text) {
   await page.getByRole("button", { name: /^send$/i }).click()
 }
 
+async function clearCoachChat(page) {
+  const clearButton = page.getByRole("button", { name: /clear chat/i })
+  if (!await clearButton.isVisible().catch(() => false)) return
+  await clearButton.click()
+  await page.waitForTimeout(1000)
+}
+
+async function waitForBodyText(page, predicates, timeout = 30000) {
+  await page.waitForFunction((checks) => {
+    const text = String(document.body?.innerText || "").toLowerCase()
+    return checks.every((check) => text.includes(check))
+  }, predicates.map((value) => String(value || "").toLowerCase()), { timeout })
+  return page.locator("body").textContent().catch(() => "")
+}
+
 function latestReportLine(label, value, details = {}) {
   return {
     label,
@@ -186,18 +201,17 @@ try {
       const composerVisible = await page.getByPlaceholder(/log bench 80kg for 4 sets of 6/i).isVisible().catch(() => false)
       const routeBody = await page.locator("body").textContent().catch(() => "")
       assertCheck(composerVisible, `Coach composer was not reachable on the protected route. Current URL: ${page.url()}. Body: ${String(routeBody || "").slice(0, 400)}`)
+      await clearCoachChat(page)
 
       await sendCoachMessage(page, "whats the macros for 100g chicken breast")
-      await page.waitForTimeout(2500)
-      const chickenReply = await page.locator("[data-message-role='assistant'], .whitespace-pre-wrap").last().textContent().catch(() => "")
-      assertCheck(/chicken/i.test(String(chickenReply || "")) && /\bkcal\b/i.test(String(chickenReply || "")), "Coach chicken macro reply was not visible.")
+      const chickenReply = await waitForBodyText(page, ["chicken", "143", "protein"], 45000)
+      assertCheck(/chicken/i.test(String(chickenReply || "")) && /\b143\b/i.test(String(chickenReply || "")), "Coach chicken macro reply was not visible.")
       assertCheck(!/couldn't reach the live coach/i.test(String(chickenReply || "")), "Coach chicken macro reply hit the live-failure fallback.")
       report.checks.push(latestReportLine("ui_coach_macro_chicken", "passed", { reply: String(chickenReply || "").slice(0, 240) }))
 
       await sendCoachMessage(page, "whats the macros for a standard serve of caesar salad")
-      await page.waitForTimeout(2500)
-      const caesarReply = await page.locator("[data-message-role='assistant'], .whitespace-pre-wrap").last().textContent().catch(() => "")
-      assertCheck(/caesar/i.test(String(caesarReply || "")) && /\bkcal\b/i.test(String(caesarReply || "")), "Coach caesar macro reply was not visible.")
+      const caesarReply = await waitForBodyText(page, ["caesar", "360", "protein"], 45000)
+      assertCheck(/caesar/i.test(String(caesarReply || "")) && /\b360\b/i.test(String(caesarReply || "")), "Coach caesar macro reply was not visible.")
       assertCheck(!/couldn't reach the live coach/i.test(String(caesarReply || "")), "Coach caesar macro reply hit the live-failure fallback.")
       report.checks.push(latestReportLine("ui_coach_macro_caesar", "passed", { reply: String(caesarReply || "").slice(0, 240) }))
 
