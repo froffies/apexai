@@ -42,6 +42,39 @@ test("findBestFoodMatch widens deterministic matching for common food questions"
   assert.match(String(sandwichMatches[0]?.name || ""), /chicken sandwich/i)
 })
 
+test("findBestFoodMatch covers broader common mixed dishes and drinks with deterministic profiles", () => {
+  const poke = findBestFoodMatch("salmon poke bowl")
+  assert.ok(poke)
+  assert.match(String(poke.name || ""), /poke bowl/i)
+  assert.equal(poke.source_type, "estimated_internal_profile")
+  assert.equal(poke.calories, 650)
+
+  const padThai = findBestFoodMatch("chicken pad thai")
+  assert.ok(padThai)
+  assert.match(String(padThai.name || ""), /pad thai/i)
+  assert.equal(padThai.calories, 640)
+
+  const kebab = findBestFoodMatch("chicken souvlaki wrap")
+  assert.ok(kebab)
+  assert.match(String(kebab.name || ""), /souvlaki|kebab/i)
+  assert.equal(kebab.protein_g, 38)
+
+  const proteinShake = findBestFoodMatch("protein shake")
+  assert.ok(proteinShake)
+  assert.match(String(proteinShake.name || ""), /protein shake/i)
+  assert.ok(Number(proteinShake.protein_g) >= 30)
+
+  const fishAndChips = findBestFoodMatch("fish and chips")
+  assert.ok(fishAndChips)
+  assert.match(String(fishAndChips.name || ""), /fish and chips/i)
+  assert.equal(fishAndChips.calories, 820)
+
+  const banhMi = findBestFoodMatch("chicken banh mi")
+  assert.ok(banhMi)
+  assert.match(String(banhMi.name || ""), /banh mi/i)
+  assert.equal(banhMi.category, "mixed meal")
+})
+
 test("findBestFoodMatch falls back to a deterministic food-class estimate for unknown foods", () => {
   const barramundi = findBestFoodMatch("barramundi fillet")
   assert.ok(barramundi)

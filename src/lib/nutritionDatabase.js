@@ -265,9 +265,24 @@ const photoDishProfiles = [
   { id: "photo_burger", name: "Burger", aliases: ["burger", "wholemeal burger", "cheeseburger", "burger with egg", "burger with bacon", "grilled burger"], quantity: "1 burger", calories: 650, protein_g: 32, carbs_g: 45, fat_g: 38, category: "mixed meal" },
   { id: "photo_burger_with_fries", name: "Burger with fries", aliases: ["burger with fries", "burger and fries", "cheeseburger with fries", "burger served with fries"], quantity: "1 burger + small fries", calories: 910, protein_g: 35, carbs_g: 82, fat_g: 50, category: "mixed meal" },
   { id: "photo_butter_chicken_rice", name: "Butter chicken with rice", aliases: ["butter chicken", "butter chicken with rice", "chicken curry with rice"], quantity: "1 bowl", calories: 760, protein_g: 34, carbs_g: 74, fat_g: 34, category: "mixed meal" },
+  { id: "photo_caesar_salad", name: "Caesar salad", aliases: ["caesar salad", "chicken caesar salad"], quantity: "1 bowl", calories: 320, protein_g: 13, carbs_g: 18, fat_g: 22, category: "mixed meal" },
+  { id: "photo_poke_bowl", name: "Poke bowl", aliases: ["poke bowl", "salmon poke bowl", "tuna poke bowl", "chicken poke bowl"], quantity: "1 bowl", calories: 610, protein_g: 32, carbs_g: 68, fat_g: 20, category: "mixed meal" },
+  { id: "photo_burrito_bowl", name: "Burrito bowl", aliases: ["burrito bowl", "chicken burrito bowl", "beef burrito bowl"], quantity: "1 bowl", calories: 660, protein_g: 34, carbs_g: 72, fat_g: 24, category: "mixed meal" },
   { id: "photo_pasta_tomato", name: "Pasta with tomato sauce", aliases: ["pasta with tomato sauce", "spaghetti with tomato sauce", "pasta"], quantity: "1 plate", calories: 420, protein_g: 14, carbs_g: 70, fat_g: 9, category: "mixed meal" },
   { id: "photo_fried_rice", name: "Fried rice", aliases: ["fried rice"], quantity: "1 plate", calories: 620, protein_g: 17, carbs_g: 86, fat_g: 21, category: "mixed meal" },
   { id: "photo_biryani", name: "Biryani", aliases: ["biryani", "veg biryani", "vegetable biryani", "chicken biryani"], quantity: "1 bowl", calories: 680, protein_g: 19, carbs_g: 92, fat_g: 24, category: "mixed meal" },
+  { id: "photo_pad_thai", name: "Pad Thai", aliases: ["pad thai", "prawn pad thai", "chicken pad thai"], quantity: "1 plate", calories: 640, protein_g: 24, carbs_g: 72, fat_g: 22, category: "mixed meal" },
+  { id: "photo_ramen", name: "Ramen", aliases: ["ramen", "tonkotsu ramen", "shoyu ramen"], quantity: "1 bowl", calories: 550, protein_g: 24, carbs_g: 63, fat_g: 21, category: "mixed meal" },
+  { id: "photo_pho", name: "Pho", aliases: ["pho", "beef pho", "chicken pho"], quantity: "1 bowl", calories: 410, protein_g: 26, carbs_g: 45, fat_g: 12, category: "mixed meal" },
+  { id: "photo_laksa", name: "Laksa", aliases: ["laksa", "chicken laksa", "seafood laksa"], quantity: "1 bowl", calories: 690, protein_g: 24, carbs_g: 56, fat_g: 40, category: "mixed meal" },
+  { id: "photo_tacos", name: "Tacos", aliases: ["taco", "tacos", "fish tacos", "chicken tacos", "beef tacos"], quantity: "2 tacos", calories: 420, protein_g: 20, carbs_g: 36, fat_g: 20, category: "mixed meal" },
+  { id: "photo_kebab", name: "Kebab", aliases: ["kebab", "souvlaki", "gyro", "gyros", "doner kebab"], quantity: "1 wrap", calories: 720, protein_g: 35, carbs_g: 58, fat_g: 32, category: "mixed meal" },
+  { id: "photo_dumplings", name: "Dumplings", aliases: ["dumpling", "dumplings", "gyoza", "wontons"], quantity: "6 pieces", calories: 330, protein_g: 15, carbs_g: 38, fat_g: 11, category: "mixed meal" },
+  { id: "photo_schnitzel_chips", name: "Schnitzel with chips", aliases: ["schnitzel", "chicken schnitzel", "schnitzel with chips"], quantity: "1 plate", calories: 780, protein_g: 40, carbs_g: 52, fat_g: 44, category: "mixed meal" },
+  { id: "photo_fish_and_chips", name: "Fish and chips", aliases: ["fish and chips", "fish & chips", "battered fish and chips"], quantity: "1 plate", calories: 820, protein_g: 35, carbs_g: 74, fat_g: 42, category: "mixed meal" },
+  { id: "photo_banh_mi", name: "Banh mi", aliases: ["banh mi", "chicken banh mi", "pork banh mi"], quantity: "1 roll", calories: 520, protein_g: 26, carbs_g: 54, fat_g: 21, category: "mixed meal" },
+  { id: "photo_meat_pie", name: "Meat pie", aliases: ["meat pie", "beef pie", "beef meat pie"], quantity: "1 pie", calories: 430, protein_g: 14, carbs_g: 33, fat_g: 27, category: "snack" },
+  { id: "photo_sausage_roll", name: "Sausage roll", aliases: ["sausage roll"], quantity: "1 roll", calories: 410, protein_g: 11, carbs_g: 24, fat_g: 29, category: "snack" },
   { id: "photo_samosa", name: "Samosas", aliases: ["samosa", "samosas", "fried samosa", "fried samosas", "deep fried samosa", "deep fried samosas"], quantity: "1 serve", calories: 320, protein_g: 7, carbs_g: 36, fat_g: 16, category: "snack" },
   { id: "photo_dosa", name: "Dosa", aliases: ["dosa", "dosas"], quantity: "1 serve", calories: 340, protein_g: 8, carbs_g: 52, fat_g: 11, category: "mixed meal" },
   { id: "photo_idli_sambar", name: "Idli with sambar", aliases: ["idli", "idly", "idli with sambar"], quantity: "1 serve", calories: 330, protein_g: 10, carbs_g: 58, fat_g: 6, category: "mixed meal" },
@@ -444,6 +459,29 @@ function buildDynamicFoodEstimate(query = "") {
     ...profile,
   }, "low")
 
+  if (containsAll("caesar", "salad")) {
+    if (contains("chicken")) return makeEstimate({ quantity: "1 bowl", calories: 430, protein_g: 30, carbs_g: 19, fat_g: 25, category: "mixed meal" })
+    return makeEstimate({ quantity: "1 standard serve", calories: 320, protein_g: 13, carbs_g: 18, fat_g: 22, category: "mixed meal" })
+  }
+
+  if ((contains("poke") && contains("bowl")) || normalizedQuery.includes("poke bowl")) {
+    if (contains("salmon")) return makeEstimate({ quantity: "1 bowl", calories: 650, protein_g: 32, carbs_g: 66, fat_g: 25, category: "mixed meal" })
+    if (contains("tuna")) return makeEstimate({ quantity: "1 bowl", calories: 590, protein_g: 35, carbs_g: 64, fat_g: 18, category: "mixed meal" })
+    return makeEstimate({ quantity: "1 bowl", calories: 610, protein_g: 32, carbs_g: 68, fat_g: 20, category: "mixed meal" })
+  }
+
+  if ((contains("burrito") && contains("bowl")) || normalizedQuery.includes("burrito bowl")) {
+    if (contains("chicken")) return makeEstimate({ quantity: "1 bowl", calories: 640, protein_g: 36, carbs_g: 70, fat_g: 22, category: "mixed meal" })
+    if (contains("beef")) return makeEstimate({ quantity: "1 bowl", calories: 700, protein_g: 34, carbs_g: 72, fat_g: 28, category: "mixed meal" })
+    return makeEstimate({ quantity: "1 bowl", calories: 660, protein_g: 34, carbs_g: 72, fat_g: 24, category: "mixed meal" })
+  }
+
+  if (contains("burrito")) {
+    if (contains("chicken")) return makeEstimate({ quantity: "1 burrito", calories: 690, protein_g: 35, carbs_g: 72, fat_g: 25, category: "mixed meal" })
+    if (contains("beef")) return makeEstimate({ quantity: "1 burrito", calories: 760, protein_g: 33, carbs_g: 74, fat_g: 31, category: "mixed meal" })
+    return makeEstimate({ quantity: "1 burrito", calories: 720, protein_g: 32, carbs_g: 74, fat_g: 27, category: "mixed meal" })
+  }
+
   if (contains("salad")) {
     if (contains("chicken")) return makeEstimate({ quantity: "1 bowl", calories: 360, protein_g: 30, carbs_g: 13, fat_g: 20, category: "mixed meal" })
     if (contains("tuna")) return makeEstimate({ quantity: "1 bowl", calories: 330, protein_g: 24, carbs_g: 12, fat_g: 18, category: "mixed meal" })
@@ -455,6 +493,11 @@ function buildDynamicFoodEstimate(query = "") {
     if (contains("chicken")) return makeEstimate({ quantity: "1 sandwich", calories: 420, protein_g: 28, carbs_g: 35, fat_g: 18, category: "mixed meal" })
     if (contains("ham")) return makeEstimate({ quantity: "1 sandwich", calories: 360, protein_g: 20, carbs_g: 35, fat_g: 14, category: "mixed meal" })
     return makeEstimate({ quantity: "1 sandwich", calories: 350, protein_g: 16, carbs_g: 34, fat_g: 15, category: "mixed meal" })
+  }
+
+  if (contains("kebab", "souvlaki", "gyro", "gyros")) {
+    if (contains("chicken")) return makeEstimate({ quantity: "1 wrap", calories: 680, protein_g: 38, carbs_g: 55, fat_g: 28, category: "mixed meal" })
+    return makeEstimate({ quantity: "1 wrap", calories: 720, protein_g: 35, carbs_g: 58, fat_g: 32, category: "mixed meal" })
   }
 
   if (contains("wrap", "burrito")) {
@@ -472,15 +515,51 @@ function buildDynamicFoodEstimate(query = "") {
     return makeEstimate({ quantity: "1 burger", calories: 650, protein_g: 32, carbs_g: 45, fat_g: 38, category: "mixed meal" })
   }
 
+  if (contains("taco", "tacos")) {
+    if (contains("fish")) return makeEstimate({ quantity: "2 tacos", calories: 390, protein_g: 24, carbs_g: 34, fat_g: 17, category: "mixed meal" })
+    if (contains("chicken")) return makeEstimate({ quantity: "2 tacos", calories: 410, protein_g: 24, carbs_g: 35, fat_g: 18, category: "mixed meal" })
+    return makeEstimate({ quantity: "2 tacos", calories: 420, protein_g: 20, carbs_g: 36, fat_g: 20, category: "mixed meal" })
+  }
+
+  if (contains("schnitzel")) {
+    if (contains("chips", "fries")) return makeEstimate({ quantity: "1 plate", calories: 780, protein_g: 40, carbs_g: 52, fat_g: 44, category: "mixed meal" })
+    return makeEstimate({ quantity: "1 schnitzel", calories: 480, protein_g: 36, carbs_g: 22, fat_g: 24, category: "protein" })
+  }
+
+  if ((contains("fish") && contains("chips")) || normalizedQuery.includes("fish and chips") || normalizedQuery.includes("fish & chips")) {
+    return makeEstimate({ quantity: "1 plate", calories: 820, protein_g: 35, carbs_g: 74, fat_g: 42, category: "mixed meal" })
+  }
+
+  if (containsAll("banh", "mi") || normalizedQuery.includes("banh mi")) {
+    if (contains("chicken")) return makeEstimate({ quantity: "1 roll", calories: 500, protein_g: 28, carbs_g: 52, fat_g: 18, category: "mixed meal" })
+    if (contains("pork")) return makeEstimate({ quantity: "1 roll", calories: 540, protein_g: 25, carbs_g: 54, fat_g: 23, category: "mixed meal" })
+    return makeEstimate({ quantity: "1 roll", calories: 520, protein_g: 26, carbs_g: 54, fat_g: 21, category: "mixed meal" })
+  }
+
+  if (containsAll("meat", "pie") || normalizedQuery.includes("beef pie")) {
+    return makeEstimate({ quantity: "1 pie", calories: 430, protein_g: 14, carbs_g: 33, fat_g: 27, category: "snack" })
+  }
+
+  if (containsAll("sausage", "roll")) {
+    return makeEstimate({ quantity: "1 roll", calories: 410, protein_g: 11, carbs_g: 24, fat_g: 29, category: "snack" })
+  }
+
   if (contains("pizza")) return makeEstimate({ quantity: "2 slices", calories: 570, protein_g: 24, carbs_g: 60, fat_g: 25, category: "mixed meal" })
   if (contains("sushi")) return makeEstimate({ quantity: "1 roll", calories: 220, protein_g: 9, carbs_g: 33, fat_g: 5, category: "mixed meal" })
   if (contains("curry")) return makeEstimate({ quantity: "1 bowl", calories: 690, protein_g: 28, carbs_g: 70, fat_g: 30, category: "mixed meal" })
   if (normalizedQuery.includes("stir fry") || normalizedQuery.includes("stir-fry")) return makeEstimate({ quantity: "1 bowl", calories: 520, protein_g: 26, carbs_g: 32, fat_g: 28, category: "mixed meal" })
   if (containsAll("fried", "rice")) return makeEstimate({ quantity: "1 plate", calories: 620, protein_g: 17, carbs_g: 86, fat_g: 21, category: "mixed meal" })
+  if (containsAll("pad", "thai") || normalizedQuery.includes("pad thai")) return makeEstimate({ quantity: "1 plate", calories: 640, protein_g: 24, carbs_g: 72, fat_g: 22, category: "mixed meal" })
+  if (contains("laksa")) return makeEstimate({ quantity: "1 bowl", calories: 690, protein_g: 24, carbs_g: 56, fat_g: 40, category: "mixed meal" })
+  if (contains("ramen")) return makeEstimate({ quantity: "1 bowl", calories: 550, protein_g: 24, carbs_g: 63, fat_g: 21, category: "mixed meal" })
+  if (contains("pho")) return makeEstimate({ quantity: "1 bowl", calories: 410, protein_g: 26, carbs_g: 45, fat_g: 12, category: "mixed meal" })
+  if (contains("dumpling", "dumplings", "gyoza", "wonton", "wontons")) return makeEstimate({ quantity: "6 pieces", calories: 330, protein_g: 15, carbs_g: 38, fat_g: 11, category: "mixed meal" })
   if (contains("noodle", "noodles")) return makeEstimate({ quantity: "1 bowl", calories: 520, protein_g: 15, carbs_g: 67, fat_g: 20, category: "mixed meal" })
   if (contains("soup")) return makeEstimate({ quantity: "1 bowl", calories: 180, protein_g: 7, carbs_g: 22, fat_g: 6, category: "soup" })
+  if (containsAll("protein", "shake") || normalizedQuery.includes("protein shake")) return makeEstimate({ quantity: "350ml", calories: 180, protein_g: 30, carbs_g: 10, fat_g: 4, category: "drink" })
   if (contains("smoothie")) return makeEstimate({ quantity: "350ml", calories: 260, protein_g: 8, carbs_g: 45, fat_g: 6, category: "drink" })
   if (contains("milkshake", "thickshake")) return makeEstimate({ quantity: "350ml", calories: 420, protein_g: 11, carbs_g: 54, fat_g: 18, category: "drink" })
+  if ((contains("acai") && contains("bowl")) || normalizedQuery.includes("acai bowl")) return makeEstimate({ quantity: "1 bowl", calories: 450, protein_g: 7, carbs_g: 65, fat_g: 16, category: "breakfast" })
   if (containsAll("protein", "bar")) return makeEstimate({ quantity: "1 bar", calories: 220, protein_g: 20, carbs_g: 21, fat_g: 7, category: "snack" })
   if (contains("granola")) return makeEstimate({ quantity: "60g", calories: 250, protein_g: 6, carbs_g: 35, fat_g: 9, category: "breakfast" })
   if (containsAll("muesli", "bar")) return makeEstimate({ quantity: "1 bar", calories: 190, protein_g: 4, carbs_g: 25, fat_g: 8, category: "snack" })
@@ -557,7 +636,7 @@ function isEstimatedSourceType(value) {
 
 function looksLikeCompositePhotoQuery(query = "") {
   const normalizedQuery = normalize(query)
-  return /\b(?:and|with|bowl|plate|salad|burrito|sandwich|wrap|taco|burger|pizza|biryani|curry|fried rice|stir fry|pasta bake|dessert)\b/.test(normalizedQuery)
+  return /\b(?:and|with|bowl|plate|salad|burrito|sandwich|wrap|taco|burger|pizza|biryani|curry|fried rice|stir fry|pasta bake|dessert|poke|kebab|souvlaki|gyro|pho|ramen|laksa|pad thai|dumplings?|schnitzel)\b/.test(normalizedQuery)
 }
 
 function simplifyPhotoSearchQuery(query = "") {
@@ -574,7 +653,7 @@ function simplifyPhotoSearchQuery(query = "") {
 }
 
 function foodLooksCompositeForPhoto(food = {}) {
-  return namesForFood(food).some((name) => /\b(?:and|with|bowl|plate|salad|burrito|sandwich|wrap|taco|burger|pizza|biryani|curry|fried rice|stir fry|dessert)\b/.test(normalize(name)))
+  return namesForFood(food).some((name) => /\b(?:and|with|bowl|plate|salad|burrito|sandwich|wrap|taco|burger|pizza|biryani|curry|fried rice|stir fry|dessert|poke|kebab|souvlaki|gyro|pho|ramen|laksa|pad thai|dumplings?|schnitzel)\b/.test(normalize(name)))
 }
 
 function inferPhotoTargetCategories(query = "") {

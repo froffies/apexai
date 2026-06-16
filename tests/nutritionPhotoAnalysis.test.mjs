@@ -330,6 +330,56 @@ test("buildFoodPhotoEstimate can auto-fill obvious pizza and samosa photo dishes
   assert.equal(pizzaEstimate.breakdown[0]?.source_type, "photo_dish_profile")
 })
 
+test("buildFoodPhotoEstimate can auto-fill broader plated dish profiles like poke bowls and tacos", async () => {
+  const pokeEstimate = await buildFoodPhotoEstimate({
+    summary: "A salmon poke bowl with rice, edamame and seaweed.",
+    items: [],
+    portion: "1 bowl",
+    overall_confidence: "high",
+  }, {
+    mealType: "lunch",
+    lookupFoods: async (term) => searchPhotoReferenceFoods(term),
+  })
+
+  assert.ok(pokeEstimate.action)
+  assert.equal(pokeEstimate.can_autofill, true)
+  assert.equal(pokeEstimate.needs_review, false)
+  assert.equal(pokeEstimate.breakdown[0]?.source_type, "photo_dish_profile")
+  assert.match(String(pokeEstimate.action?.food_name || ""), /poke/i)
+
+  const tacoEstimate = await buildFoodPhotoEstimate({
+    summary: "Two fish tacos with salsa and guacamole.",
+    items: [],
+    portion: "1 plate",
+    overall_confidence: "high",
+  }, {
+    mealType: "dinner",
+    lookupFoods: async (term) => searchPhotoReferenceFoods(term),
+  })
+
+  assert.ok(tacoEstimate.action)
+  assert.equal(tacoEstimate.can_autofill, true)
+  assert.equal(tacoEstimate.needs_review, false)
+  assert.equal(tacoEstimate.breakdown[0]?.source_type, "photo_dish_profile")
+  assert.match(String(tacoEstimate.action?.food_name || ""), /taco/i)
+
+  const fishAndChipsEstimate = await buildFoodPhotoEstimate({
+    summary: "Battered fish and chips with lemon.",
+    items: [],
+    portion: "1 plate",
+    overall_confidence: "high",
+  }, {
+    mealType: "dinner",
+    lookupFoods: async (term) => searchPhotoReferenceFoods(term),
+  })
+
+  assert.ok(fishAndChipsEstimate.action)
+  assert.equal(fishAndChipsEstimate.can_autofill, true)
+  assert.equal(fishAndChipsEstimate.needs_review, false)
+  assert.equal(fishAndChipsEstimate.breakdown[0]?.source_type, "photo_dish_profile")
+  assert.match(String(fishAndChipsEstimate.action?.food_name || ""), /fish and chips/i)
+})
+
 test("buildFoodPhotoEstimate keeps dish confidence when the model omits the item name", async () => {
   const samosaEstimate = await buildFoodPhotoEstimate({
     summary: "Five fried samosas.",

@@ -6,12 +6,25 @@ function defaultCoachUrl() {
   return `${window.location.protocol}//${host}:8787/api/coach`
 }
 
+function normalizeSessionPayload(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {}
+}
+
 export async function requestOpenAICoach(payload) {
   if (import.meta.env.VITE_OPENAI_COACH_DISABLED === "true") return null
 
   const endpoint = import.meta.env.VITE_OPENAI_COACH_URL || defaultCoachUrl()
   const controller = new AbortController()
   const timeout = window.setTimeout(() => controller.abort(), 25000)
+  const normalizedPayload = {
+    ...(payload && typeof payload === "object" ? payload : {}),
+    ...(payload && Object.prototype.hasOwnProperty.call(payload, "mealSession")
+      ? { mealSession: normalizeSessionPayload(payload.mealSession) }
+      : {}),
+    ...(payload && Object.prototype.hasOwnProperty.call(payload, "workoutSession")
+      ? { workoutSession: normalizeSessionPayload(payload.workoutSession) }
+      : {}),
+  }
 
   try {
     const token = await getCloudAccessToken()
@@ -21,7 +34,7 @@ export async function requestOpenAICoach(payload) {
         "Content-Type": "application/json",
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(normalizedPayload),
       signal: controller.signal,
     })
 

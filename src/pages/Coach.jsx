@@ -7,6 +7,7 @@ import SectionCard from "@/components/SectionCard"
 import WorkoutPlanCard from "@/components/WorkoutPlanCard"
 import { coachAuditEnabled, coachAuditNotice, sendCoachAuditEvent } from "@/lib/coachAuditClient"
 import { reviewFoodPhotoEstimate, searchNutritionDatabase } from "@/lib/nutritionApiClient"
+import { recordTelemetry } from "@/lib/telemetry"
 import { requestOpenAICoach } from "@/lib/openaiCoachClient"
 import {
   applyWorkoutPlanEdit,
@@ -757,12 +758,32 @@ function buildCoachBarcodeDraft(results = [], code = "", mealType = "snack") {
   }
 }
 
+function barcodeMatchKind(food = {}) {
+  const sourceType = String(food?.source_type || "").trim().toLowerCase()
+  if (sourceType === "barcode_label" || sourceType === "open_food_facts_label") return "label_match"
+  if (sourceType === "curated_au_catalogue" || sourceType === "nz_curated_catalogue") return "catalogue_fallback"
+  if (sourceType === "estimated_internal_profile" || sourceType === "mixed_reference_and_estimate" || sourceType === "manual_user_entry") return "estimated_fallback"
+  return sourceType || "unknown"
+}
+
+function barcodeTail(code = "") {
+  const digits = String(code || "").replace(/\D/g, "")
+  return digits ? digits.slice(-4) : ""
+}
+
 function buildCoachBarcodeDraftReply(draft) {
   if (!draft?.matches?.length) {
     return `I couldn't find a product label match for ${draft?.barcode || "that barcode"}. Try the brand and product name manually, or enter the macros yourself if it’s not in the catalogue yet.`
   }
   const selected = draft.matches.find((item) => item.id === draft.selected_food_id) || draft.matches[0]
   const sourceText = nutritionSourceLabel(selected)
+  const sourceKind = barcodeMatchKind(selected)
+  if (sourceKind === "catalogue_fallback") {
+    return `I couldn't verify an exact product label for that barcode, but I matched it to ${selected?.name || "a close AU/NZ catalogue item"} from ${sourceText.toLowerCase()}. Review it below before you log it.`
+  }
+  if (sourceKind === "estimated_fallback") {
+    return `I couldn't verify an exact product label for that barcode, so this is only an estimate for ${selected?.name || "that product"}. Review it carefully before logging.`
+  }
   return `I found ${selected?.name || "that product"} from ${sourceText.toLowerCase()}. Review it below and log it when you're happy.`
 }
 
@@ -938,6 +959,14 @@ export default function Coach() {
     const draft = buildPhotoCoachDraft(result, coachFoodDraft?.meal_type || "snack")
     setCoachFoodDraft(draft)
     setAiError("")
+    recordTelemetry("coach_photo_analysis_completed", {
+      meal_type: draft.meal_type,
+      source_type: draft.nutrition_source_type,
+      macro_confidence: draft.macro_confidence,
+      needs_review: draft.needs_review,
+      can_autofill: draft.can_autofill,
+      item_count: draft.items.length,
+    }, draft.needs_review ? "warn" : "info")
     appendCoachToolAssistant(buildCoachPhotoDraftReply(draft), {
       actions: draft.action ? [draft.action] : [],
       clarification_asked: Boolean(draft.needs_review),
@@ -979,6 +1008,14 @@ export default function Coach() {
       })
       const nextDraft = buildPhotoCoachDraft(reviewed, coachFoodDraft.meal_type)
       setCoachFoodDraft(nextDraft)
+      recordTelemetry("coach_photo_review_completed", {
+        meal_type: nextDraft.meal_type,
+        source_type: nextDraft.nutrition_source_type,
+        macro_confidence: nextDraft.macro_confidence,
+        needs_review: nextDraft.needs_review,
+        can_autofill: nextDraft.can_autofill,
+        item_count: nextDraft.items.length,
+      }, nextDraft.needs_review ? "warn" : "info")
       appendCoachToolAssistant(
         nextDraft.action
           ? "I recalculated the photo estimate with your edits. Review it below and log it when you're ready."
@@ -993,6 +1030,9 @@ export default function Coach() {
     } catch (error) {
       const message = error instanceof Error ? error.message : "I couldn't refresh that photo estimate just now."
       setAiError(message)
+      recordTelemetry("coach_photo_review_failed", {
+        message,
+      }, "error")
       appendCoachToolAssistant(message, {
         route_type: "failed",
         persistence_status: "failed_before_persistence",
@@ -1008,6 +1048,13 @@ export default function Coach() {
   const logCoachPhotoDraft = () => {
     if (!coachFoodDraft || coachFoodDraft.type !== "photo") return
     if (!coachFoodDraft.action) {
+      recordTelemetry("coach_photo_log_blocked", {
+        meal_type: coachFoodDraft.meal_type,
+        source_type: coachFoodDraft.nutrition_source_type,
+        macro_confidence: coachFoodDraft.macro_confidence,
+        needs_review: coachFoodDraft.needs_review,
+        item_count: coachFoodDraft.items.length,
+      }, "warn")
       appendCoachToolAssistant("I still need a reviewed macro estimate before I can log that photo cleanly.", {
         clarification_asked: true,
         state_after: buildAuditStateSnapshot(mealSession, workoutSession),
@@ -1015,6 +1062,12 @@ export default function Coach() {
       })
       return
     }
+    recordTelemetry("coach_photo_logged", {
+      meal_type: coachFoodDraft.meal_type,
+      source_type: coachFoodDraft.action.nutrition_source_type,
+      macro_confidence: coachFoodDraft.action.macro_confidence,
+      item_count: coachFoodDraft.items.length,
+    })
     persistCoachToolMealAction({
       ...coachFoodDraft.action,
       photo_analysis_items: coachFoodDraft.items,
@@ -1029,6 +1082,13 @@ export default function Coach() {
       const results = await searchNutritionDatabase(code)
       const draft = buildCoachBarcodeDraft(results, code, coachFoodDraft?.meal_type || "snack")
       setCoachFoodDraft(draft)
+      const selected = draft.matches.find((item) => item.id === draft.selected_food_id) || draft.matches[0] || null
+      recordTelemetry("coach_barcode_lookup_completed", {
+        barcode_tail: barcodeTail(code),
+        match_count: draft.matches.length,
+        selected_source_type: String(selected?.source_type || "").trim().toLowerCase(),
+        selected_match_kind: barcodeMatchKind(selected),
+      }, draft.matches.length ? "info" : "warn")
       appendCoachToolAssistant(buildCoachBarcodeDraftReply(draft), {
         clarification_asked: !draft.matches.length,
         state_after: buildAuditStateSnapshot(mealSession, workoutSession),
@@ -1037,6 +1097,10 @@ export default function Coach() {
     } catch (error) {
       const message = error instanceof Error ? error.message : "I couldn't search that barcode just now."
       setAiError(message)
+      recordTelemetry("coach_barcode_lookup_failed", {
+        barcode_tail: barcodeTail(code),
+        message,
+      }, "error")
       appendCoachToolAssistant(message, {
         route_type: "failed",
         persistence_status: "failed_before_persistence",
@@ -1068,6 +1132,12 @@ export default function Coach() {
     }
     const sourceType = String(selected.source_type || "").trim().toLowerCase() || "barcode_label"
     const estimated = ["estimated_internal_profile", "manual_user_entry", "mixed_reference_and_estimate", "photo_ai_estimate"].includes(sourceType)
+    recordTelemetry("coach_barcode_logged", {
+      barcode_tail: barcodeTail(coachFoodDraft.barcode),
+      source_type: sourceType,
+      match_kind: barcodeMatchKind(selected),
+      macro_confidence: normalizeMacroConfidence(selected.macro_confidence, estimated ? "low" : "high"),
+    }, estimated ? "warn" : "info")
     const action = {
       type: "log_meal",
       meal_type: coachFoodDraft.meal_type || "snack",

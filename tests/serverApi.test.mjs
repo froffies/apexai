@@ -1360,15 +1360,35 @@ test("coach food macro questions fall back to deterministic food answers when Op
       Origin: "http://127.0.0.1:5173",
     },
     body: JSON.stringify({
-      message: "whats the macros for a standard serve of caesar salad?",
+      message: "whats the macros for 100g chicken breast",
+      mealSession: null,
+      workoutSession: null,
     }),
   })
   const coach = await coachResponse.json()
   assert.equal(coachResponse.status, 200)
   assert.equal(coach.actions?.length || 0, 0)
-  assert.match(coach.reply, /caesar salad/i)
-  assert.match(coach.reply, /360 kcal/i)
+  assert.match(coach.reply, /chicken/i)
+  assert.match(coach.reply, /143 kcal/i)
+  assert.match(coach.reply, /30g protein|31g protein/i)
   assert.doesNotMatch(coach.reply, /couldn't reach the live coach/i)
+
+  const caesarCoachResponse = await fetch(`http://127.0.0.1:${port}/api/coach`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Origin: "http://127.0.0.1:5173",
+    },
+    body: JSON.stringify({
+      message: "whats the macros for a standard serve of caesar salad?",
+    }),
+  })
+  const caesarCoach = await caesarCoachResponse.json()
+  assert.equal(caesarCoachResponse.status, 200)
+  assert.equal(caesarCoach.actions?.length || 0, 0)
+  assert.match(caesarCoach.reply, /caesar salad/i)
+  assert.match(caesarCoach.reply, /360 kcal/i)
+  assert.doesNotMatch(caesarCoach.reply, /couldn't reach the live coach/i)
 
   const barramundiCoachResponse = await fetch(`http://127.0.0.1:${port}/api/coach`, {
     method: "POST",

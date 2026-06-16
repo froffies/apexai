@@ -14,10 +14,13 @@
     "package:zip": "node scripts/package-zip.mjs",
     "lint": "eslint . --quiet",
     "lint:fix": "eslint . --fix",
+    "report:telemetry": "node scripts/coach-monitor-report.mjs",
     "test": "node --loader ./tests/alias-loader.mjs --test tests/*.test.mjs",
     "test:e2e": "playwright test",
     "test:coach-chaos": "node scripts/coach-chaos-test.mjs",
     "test:coach-soak": "node scripts/coach-soak-test.mjs",
+    "test:live-verify": "node scripts/live-production-verify.mjs",
+    "test:nutrition-smoke": "node scripts/nutrition-smoke-test.mjs",
     "test:full": "npm run typecheck && npm run lint && npm test && npm run build && npm run test:e2e",
     "typecheck": "tsc -p ./jsconfig.json",
     "preview": "vite preview"

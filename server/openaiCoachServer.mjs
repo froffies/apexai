@@ -760,8 +760,8 @@ function validateCoachBody(body) {
   assertString(body.message, "message", 3000)
   if (body.profile !== undefined) assertObject(body.profile, "profile")
   if (body.coachContext !== undefined) assertObject(body.coachContext, "coachContext")
-  if (body.mealSession !== undefined) assertObject(body.mealSession, "mealSession")
-  if (body.workoutSession !== undefined) assertObject(body.workoutSession, "workoutSession")
+  if (body.mealSession !== undefined && body.mealSession !== null) assertObject(body.mealSession, "mealSession")
+  if (body.workoutSession !== undefined && body.workoutSession !== null) assertObject(body.workoutSession, "workoutSession")
   if (body.auditMeta !== undefined) assertObject(body.auditMeta, "auditMeta")
   for (const key of ["recentMessages", "meals", "workouts", "workoutSets", "workoutPlans", "mealPlans", "recoveryLogs"]) {
     if (body[key] !== undefined && !Array.isArray(body[key])) {
