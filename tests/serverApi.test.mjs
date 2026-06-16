@@ -182,6 +182,34 @@ test("local API server exposes health, local nutrition, telemetry, and sanitized
   assert.equal(barramundiResults.results[0]?.source_type, "estimated_internal_profile")
   assert.match(String(barramundiResults.results[0]?.source || ""), /deterministic food-class estimate/i)
 
+  const parmiResponse = await fetch(`http://127.0.0.1:${port}/api/nutrition/search`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Origin: "http://127.0.0.1:5173",
+    },
+    body: JSON.stringify({ query: "parmi" }),
+  })
+  const parmiResults = await parmiResponse.json()
+  assert.equal(parmiResponse.status, 200)
+  assert.match(String(parmiResults.results[0]?.name || ""), /parmi/i)
+  assert.equal(parmiResults.results[0]?.source_type, "estimated_internal_profile")
+  assert.ok(Number(parmiResults.results[0]?.calories || 0) >= 900)
+
+  const potatoScallopsResponse = await fetch(`http://127.0.0.1:${port}/api/nutrition/search`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Origin: "http://127.0.0.1:5173",
+    },
+    body: JSON.stringify({ query: "potato scallops" }),
+  })
+  const potatoScallopsResults = await potatoScallopsResponse.json()
+  assert.equal(potatoScallopsResponse.status, 200)
+  assert.match(String(potatoScallopsResults.results[0]?.name || ""), /potato scallops/i)
+  assert.equal(potatoScallopsResults.results[0]?.source_type, "estimated_internal_profile")
+  assert.ok(Number(potatoScallopsResults.results[0]?.carbs_g || 0) >= 20)
+
   const nutritionPhotoResponse = await fetch(`http://127.0.0.1:${port}/api/nutrition/analyze-photo`, {
     method: "POST",
     headers: {

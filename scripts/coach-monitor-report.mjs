@@ -101,6 +101,9 @@ function buildAlertRows({ telemetryEvents = [], auditRecords = [], auditSummary 
   const coachTurns = auditSummary.total || auditRecords.length || 0
   const parserTurns = (auditSummary.graph_native_turns || 0) + (auditSummary.legacy_fallback_turns || 0)
   const errorEvents = telemetryEvents.filter((event) => String(event.level || "").trim().toLowerCase() === "error")
+  const nutritionSearchEvents = telemetryEvents.filter((event) => event.type === "nutrition_search_completed")
+  const nutritionSearchResolved = nutritionSearchEvents.filter((event) => Number(event.payload?.result_count || 0) > 0)
+  const nutritionPhotoEvents = telemetryEvents.filter((event) => event.type === "nutrition_photo_completed")
 
   return [
     ["coach_failure_rate", asRate(auditSummary.failures || 0, coachTurns)],
@@ -108,6 +111,9 @@ function buildAlertRows({ telemetryEvents = [], auditRecords = [], auditSummary 
     ["low_confidence_macro_rate", asRate(macroTurns, coachTurns)],
     ["legacy_fallback_rate", asRate(auditSummary.legacy_fallback_turns || 0, parserTurns)],
     ["telemetry_error_rate", asRate(errorEvents.length, telemetryEvents.length || errorEvents.length || 0)],
+    ["nutrition_search_empty_rate", asRate(nutritionSearchEvents.length - nutritionSearchResolved.length, nutritionSearchEvents.length)],
+    ["nutrition_low_confidence_search_rate", asRate(nutritionSearchResolved.filter((event) => String(event.payload?.top_macro_confidence || "") === "low").length, nutritionSearchResolved.length)],
+    ["nutrition_photo_review_rate", asRate(nutritionPhotoEvents.filter((event) => Boolean(event.payload?.needs_review)).length, nutritionPhotoEvents.length)],
   ]
 }
 
@@ -118,6 +124,9 @@ function evaluateThresholds(rows = []) {
     low_confidence_macro_rate: numericEnv("MAX_LOW_CONFIDENCE_MACRO_RATE", 0.35),
     legacy_fallback_rate: numericEnv("MAX_LEGACY_FALLBACK_RATE", 0.30),
     telemetry_error_rate: numericEnv("MAX_TELEMETRY_ERROR_RATE", 0.10),
+    nutrition_search_empty_rate: numericEnv("MAX_NUTRITION_SEARCH_EMPTY_RATE", 0.08),
+    nutrition_low_confidence_search_rate: numericEnv("MAX_NUTRITION_LOW_CONFIDENCE_SEARCH_RATE", 0.60),
+    nutrition_photo_review_rate: numericEnv("MAX_NUTRITION_PHOTO_REVIEW_RATE", 0.70),
   }
 
   return rows
@@ -183,6 +192,8 @@ console.log(`Audit records: ${auditRecords.length}`)
 
 const photoEvents = telemetryEvents.filter((event) => String(event.type || "").startsWith("coach_photo_"))
 const barcodeEvents = telemetryEvents.filter((event) => String(event.type || "").startsWith("coach_barcode_"))
+const nutritionSearchEvents = telemetryEvents.filter((event) => event.type === "nutrition_search_completed")
+const nutritionPhotoEvents = telemetryEvents.filter((event) => event.type === "nutrition_photo_completed" || event.type === "nutrition_photo_review_completed")
 const errorEvents = telemetryEvents.filter((event) => String(event.level || "").trim().toLowerCase() === "error")
 
 printSection("Telemetry event types", countBy(telemetryEvents, (event) => String(event.type || "unknown")))
@@ -197,6 +208,14 @@ printSection("Photo source types", countBy(
 printSection("Barcode outcomes", countBy(
   barcodeEvents.filter((event) => event.type === "coach_barcode_lookup_completed" || event.type === "coach_barcode_logged"),
   (event) => `${event.type}:${String(event.payload?.match_kind || event.payload?.selected_match_kind || "unknown")}`
+))
+printSection("Nutrition search outcomes", countBy(
+  nutritionSearchEvents,
+  (event) => `${String(event.payload?.query_kind || "unknown")}:${String(event.payload?.top_source_type || "none")}:${String(event.payload?.top_macro_confidence || "none")}:${Number(event.payload?.result_count || 0) > 0 ? "resolved" : "empty"}`
+))
+printSection("Nutrition photo outcomes", countBy(
+  nutritionPhotoEvents,
+  (event) => `${event.type}:${String(event.payload?.source_type || "unknown")}:${String(event.payload?.macro_confidence || "unknown")}:${event.payload?.needs_review ? "needs_review" : "ready"}`
 ))
 printSection("Telemetry error events", countBy(errorEvents, (event) => String(event.type || "unknown")))
 

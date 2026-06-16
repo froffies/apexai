@@ -92,6 +92,13 @@ const openFoodFactsTimeoutMs = Number(process.env.OPENFOODFACTS_TIMEOUT_MS || 50
 const foodLookupCacheTtlMs = Number(process.env.FOOD_LOOKUP_CACHE_TTL_MS || 15 * 60_000)
 const foodLookupCacheMaxEntries = Number(process.env.FOOD_LOOKUP_CACHE_MAX_ENTRIES || 200)
 const foodLookupCache = new Map()
+const NUTRITION_LOOKUP_STOPWORDS = new Set(["a", "an", "and", "for", "in", "of", "or", "the", "with"])
+const NUTRITION_LOOKUP_TOKEN_EQUIVALENTS = new Map([
+  ["fries", "chips"],
+  ["lite", "light"],
+  ["yogurt", "yoghurt"],
+  ["parma", "parmi"],
+])
 const auditCapabilities = coachAuditCapabilities(adminSupabase)
 const defaultRequestBodyLimitBytes = 1_000_000
 const photoRequestBodyLimitBytes = 30_000_000
@@ -1175,6 +1182,62 @@ function cleanLookupText(value) {
   return String(value || "").toLowerCase().replace(/[^a-z0-9\s,]/g, " ").replace(/\s+/g, " ").trim()
 }
 
+function compactLookupText(value) {
+  return cleanLookupText(value).replace(/\s+/g, "")
+}
+
+function normalizeLookupToken(token) {
+  const normalized = cleanLookupText(token)
+  if (!normalized) return ""
+  const swapped = NUTRITION_LOOKUP_TOKEN_EQUIVALENTS.get(normalized) || normalized
+  if (swapped.length > 4 && swapped.endsWith("ies")) return `${swapped.slice(0, -3)}y`
+  if (swapped.length > 4 && swapped.endsWith("oes")) return swapped.slice(0, -2)
+  if (swapped.length > 3 && swapped.endsWith("s") && !swapped.endsWith("ss")) return swapped.slice(0, -1)
+  return swapped
+}
+
+function nutritionLookupTokens(value, { includeStopwords = false } = {}) {
+  const tokens = cleanLookupText(value)
+    .split(/\s+/)
+    .map((token) => normalizeLookupToken(token))
+    .filter(Boolean)
+  return includeStopwords ? tokens : tokens.filter((token) => !NUTRITION_LOOKUP_STOPWORDS.has(token))
+}
+
+function nutritionLookupNames(food = {}) {
+  return [food?.name, ...(Array.isArray(food?.aliases) ? food.aliases : [])].filter(Boolean)
+}
+
+function queryTokensCoveredByFood(query, food = {}) {
+  const queryTokens = nutritionLookupTokens(query)
+  if (!queryTokens.length) return false
+  return nutritionLookupNames(food).some((name) => {
+    const nameTokens = nutritionLookupTokens(name, { includeStopwords: true })
+    return queryTokens.every((term) => nameTokens.includes(term) || nameTokens.some((token) => token.startsWith(term)))
+  })
+}
+
+function hasStrongLocalNutritionMatch(query, localResults = []) {
+  const top = safeArray(localResults, 1)[0]
+  if (!top) return false
+  const normalizedQuery = cleanLookupText(query)
+  const compactQuery = compactLookupText(query)
+  return nutritionLookupNames(top).some((name) => {
+    const normalizedName = cleanLookupText(name)
+    const compactName = compactLookupText(name)
+    return normalizedName === normalizedQuery
+      || compactName === compactQuery
+      || normalizedName.startsWith(`${normalizedQuery} `)
+      || compactName.startsWith(compactQuery)
+  }) || queryTokensCoveredByFood(query, top)
+}
+
+function filterExternalNutritionResults(query, foods = []) {
+  const queryTokens = nutritionLookupTokens(query)
+  if (!queryTokens.length) return safeArray(foods, 8)
+  return safeArray(foods, 8).filter((food) => queryTokensCoveredByFood(query, food))
+}
+
 function extractCoachFoodSearchTerms(message) {
   const directMacroFoodQuery = extractFoodMacroLookupTerm(message)
   if (directMacroFoodQuery) return [directMacroFoodQuery]
@@ -1400,6 +1463,23 @@ async function persistTelemetryEntry(entry) {
     // Fall through to file.
   }
   return { ...(await persistTelemetryToFile(entry)), preferred_sink: "supabase_table", fallback_reason: "unavailable" }
+}
+
+function queueInternalTelemetry(type, payload = {}, level = "info") {
+  const entry = {
+    id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    created_at: new Date().toISOString(),
+    type,
+    level,
+    payload: {
+      origin: "server",
+      ...payload,
+    },
+    user_id: null,
+    ip: "",
+    user_agent: "",
+  }
+  void persistTelemetryEntry(entry).catch(() => {})
 }
 
 function shouldHydrateCoachFoodMatches(message, recentMessages = []) {
@@ -1988,11 +2068,11 @@ async function lookupFoodsBroad(query) {
 
   const localResults = searchBestFoodMatches(query).map(verifiedNutritionResult)
   const barcodeResults = looksLikeBarcode(normalizedQuery) ? await searchOpenFoodFactsByBarcode(normalizedQuery) : []
-  const shouldSkipExternal = localResults.length >= 4
-  const auResults = shouldSkipExternal ? [] : await searchOpenFoodFacts(query, { australiaOnly: true })
+  const shouldSkipExternal = hasStrongLocalNutritionMatch(query, localResults) || localResults.length >= 4
+  const auResults = shouldSkipExternal ? [] : filterExternalNutritionResults(query, await searchOpenFoodFacts(query, { australiaOnly: true }))
   const globalResults = shouldSkipExternal || auResults.length || localResults.length >= 2
     ? []
-    : await searchOpenFoodFacts(query, { australiaOnly: false })
+    : filterExternalNutritionResults(query, await searchOpenFoodFacts(query, { australiaOnly: false }))
 
   const seen = new Set()
   const results = [...barcodeResults, ...localResults, ...auResults, ...globalResults].filter((food) => {
@@ -2032,6 +2112,18 @@ async function handleNutritionSearch(request, response) {
   validateNutritionBody(body)
   const query = String(body.query || "")
   const results = await lookupFoodsBroad(query)
+  const top = results[0] || null
+  queueInternalTelemetry("nutrition_search_completed", {
+    query_kind: looksLikeBarcode(query) ? "barcode" : "text",
+    query_key: looksLikeBarcode(query)
+      ? `barcode:${String(query).replace(/\D/g, "").slice(-4)}`
+      : cleanLookupText(query).slice(0, 64),
+    result_count: results.length,
+    top_name: String(top?.name || "").slice(0, 96),
+    top_source_type: String(top?.source_type || ""),
+    top_macro_confidence: String(top?.macro_confidence || ""),
+    top_estimated: Boolean(top?.estimated || String(top?.source_type || "").trim().toLowerCase() === "estimated_internal_profile"),
+  }, results.length ? "info" : "warn")
   sendJson(response, 200, { results }, requestResponseOrigin(request))
 }
 
@@ -2136,6 +2228,13 @@ async function handleNutritionPhoto(request, response) {
       : (Array.isArray(estimatedMeal.breakdown) ? estimatedMeal.breakdown : []),
   }
 
+  queueInternalTelemetry("nutrition_photo_completed", {
+    item_count: Array.isArray(estimatedMeal.breakdown) ? estimatedMeal.breakdown.length : 0,
+    can_autofill: Boolean(estimatedMeal.can_autofill),
+    needs_review: Boolean(estimatedMeal.needs_review),
+    macro_confidence: String(estimatedMeal.macro_confidence || ""),
+    source_type: String(responseBody.nutrition_source_type || ""),
+  }, estimatedMeal.needs_review ? "warn" : "info")
   sendJson(response, 200, responseBody, requestResponseOrigin(request))
 }
 
@@ -2178,6 +2277,11 @@ async function handleNutritionPhotoReview(request, response) {
       : (Array.isArray(estimatedMeal.breakdown) ? estimatedMeal.breakdown : []),
   }
 
+  queueInternalTelemetry("nutrition_photo_review_completed", {
+    item_count: Array.isArray(estimatedMeal.breakdown) ? estimatedMeal.breakdown.length : 0,
+    macro_confidence: String(estimatedMeal.macro_confidence || ""),
+    source_type: String(responseBody.nutrition_source_type || ""),
+  })
   sendJson(response, 200, responseBody, requestResponseOrigin(request))
 }
 

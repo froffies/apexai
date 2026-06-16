@@ -10,6 +10,7 @@ const PHOTO_CONFIDENCE_LEVELS = new Set(["high", "medium", "low"])
 const PHOTO_VERIFIED_SOURCE_TYPES = new Set(["curated_au_catalogue", "nz_curated_catalogue"])
 const PHOTO_DEFENSIBLE_SOURCE_TYPES = new Set(["curated_au_catalogue", "nz_curated_catalogue", "photo_dish_profile"])
 const LOW_IMPACT_PHOTO_TERMS = ["lettuce", "tomato", "onion", "capsicum", "pickle", "mustard", "basil", "coriander", "sauce", "herb"]
+const PHOTO_REVIEW_SIGNAL_TERMS = ["sauce", "dressing", "gravy", "aioli", "mayo", "mayonnaise", "dip", "dipping", "drizzle", "coated", "smothered", "platter", "shared", "sampler", "combo", "buffet"]
 const COUNT_WORD_MAP = {
   a: 1,
   an: 1,
@@ -580,10 +581,19 @@ function isLowImpactEstimatedPhotoItem(item = {}) {
 function canAutofillPhotoEstimate(analysis, breakdown = [], macroConfidence = "low") {
   if (analysis?.needs_clarification || !breakdown.length) return false
   if (String(analysis?.overall_confidence || "").trim().toLowerCase() === "low") return false
+  if (hasMessyPlateReviewSignals(analysis, breakdown) && macroConfidence !== "high") return false
   if (macroConfidence === "high") return true
   const substantiveItems = breakdown.filter((item) => !isLowImpactEstimatedPhotoItem(item))
   if (!substantiveItems.length) return false
   return substantiveItems.every((item) => PHOTO_DEFENSIBLE_SOURCE_TYPES.has(String(item.source_type || "").trim()))
+}
+
+function hasMessyPlateReviewSignals(analysis = {}, breakdown = []) {
+  const text = buildPhotoDishClusterText(analysis, breakdown)
+  if (!text) return false
+  if (!PHOTO_REVIEW_SIGNAL_TERMS.some((term) => text.includes(term))) return false
+  const substantiveCount = breakdown.filter((item) => !isLowImpactEstimatedPhotoItem(item)).length || safeArray(analysis.items, 12).length
+  return substantiveCount > 1 || /\b(?:platter|shared|sampler|combo|buffet)\b/.test(text)
 }
 
 function buildPhotoDishClusterText(analysis = {}, breakdown = []) {
@@ -1025,6 +1035,7 @@ async function estimatePreparedPhotoAnalysis(analysis = {}, options = {}, { manu
   const macroConfidence = deriveMacroConfidence(breakdownEstimate.items)
   const provisionalTotals = summarizePhotoBreakdown(breakdownEstimate.items)
   const naturalAutofill = canAutofillPhotoEstimate(analysis, breakdownEstimate.items, macroConfidence)
+  const messyPlateReview = hasMessyPlateReviewSignals(analysis, breakdownEstimate.items)
   let canAutofill = manualReview ? true : naturalAutofill
   let action = null
   let safeBreakdown = breakdownEstimate.items.map((item, index) => sanitizePhotoBreakdownItem({
@@ -1084,7 +1095,13 @@ async function estimatePreparedPhotoAnalysis(analysis = {}, options = {}, { manu
     macro_confidence: macroConfidence,
     nutrition_source: source,
     needs_review: needsReview,
-    clarification_question: analysis.clarification_question || (needsReview ? "I identified the foods, but the macros still need review before you save this." : ""),
+    clarification_question: analysis.clarification_question || (
+      needsReview
+        ? (messyPlateReview
+          ? "I identified the main foods, but sauces or shared-plate portions still need review before you save this."
+          : "I identified the foods, but the macros still need review before you save this.")
+        : ""
+    ),
     assumptions: analysis.assumptions,
   }
 }

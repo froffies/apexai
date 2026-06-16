@@ -410,6 +410,21 @@ test("buildFoodPhotoEstimate can auto-fill broader plated dish profiles like pok
   assert.equal(friedChickenEstimate.needs_review, false)
   assert.equal(friedChickenEstimate.breakdown[0]?.source_type, "photo_dish_profile")
   assert.match(String(friedChickenEstimate.action?.food_name || ""), /fried chicken and chips/i)
+
+  const messyPlatterEstimate = await buildFoodPhotoEstimate({
+    summary: "Fried chicken pieces with hot chips, aioli and dipping sauce on a shared platter.",
+    items: [],
+    portion: "1 platter",
+    overall_confidence: "high",
+  }, {
+    mealType: "lunch",
+    lookupFoods: async (term) => searchPhotoReferenceFoods(term),
+  })
+
+  assert.equal(messyPlatterEstimate.action, null)
+  assert.equal(messyPlatterEstimate.can_autofill, false)
+  assert.equal(messyPlatterEstimate.needs_review, true)
+  assert.match(String(messyPlatterEstimate.clarification_question || ""), /sauces|shared-plate portions|review/i)
 })
 
 test("buildFoodPhotoEstimate keeps dish confidence when the model omits the item name", async () => {
