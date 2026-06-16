@@ -89,8 +89,20 @@ async function ensureSignedInOnProtectedRoute(page, frontendUrl) {
   await page.getByLabel("Password").fill(process.env.E2E_SUPABASE_PASSWORD || "")
   await page.getByRole("button", { name: /^sign in$/i }).click()
   await page.waitForURL(/https:\/\/apexai-bay\.vercel\.app\//, { timeout: 30000 }).catch(() => {})
-  await page.waitForTimeout(3000)
-  await page.goto(`${frontendUrl}/Coach`, { waitUntil: "domcontentloaded", timeout: 60000 })
+  await page.waitForFunction(() => {
+    try {
+      return Object.keys(window.localStorage || {}).some((key) => key.includes("-auth-token"))
+    } catch {
+      return false
+    }
+  }, { timeout: 30000 }).catch(() => {})
+  await page.waitForTimeout(4000)
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    await page.goto(`${frontendUrl}/Coach`, { waitUntil: "domcontentloaded", timeout: 60000 })
+    const signInStillVisible = await signInHeading.isVisible().catch(() => false)
+    if (!signInStillVisible) break
+    await page.waitForTimeout(3000)
+  }
   return true
 }
 

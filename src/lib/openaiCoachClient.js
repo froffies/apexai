@@ -10,6 +10,17 @@ function normalizeSessionPayload(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {}
 }
 
+function normalizeRecentMessages(value) {
+  if (!Array.isArray(value)) return []
+  return value
+    .slice(-20)
+    .map((message) => ({
+      role: String(message?.role || "").trim() || "user",
+      content: String(message?.content || "").trim(),
+    }))
+    .filter((message) => message.content)
+}
+
 export async function requestOpenAICoach(payload) {
   if (import.meta.env.VITE_OPENAI_COACH_DISABLED === "true") return null
 
@@ -23,6 +34,9 @@ export async function requestOpenAICoach(payload) {
       : {}),
     ...(payload && Object.prototype.hasOwnProperty.call(payload, "workoutSession")
       ? { workoutSession: normalizeSessionPayload(payload.workoutSession) }
+      : {}),
+    ...(payload && Object.prototype.hasOwnProperty.call(payload, "recentMessages")
+      ? { recentMessages: normalizeRecentMessages(payload.recentMessages) }
       : {}),
   }
 
