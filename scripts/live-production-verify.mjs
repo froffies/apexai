@@ -76,6 +76,26 @@ async function seedBrowserAuthSession(page, authContext) {
   return true
 }
 
+async function extractBrowserAuthHeaders(page) {
+  const accessToken = await page.evaluate(() => {
+    try {
+      for (let index = 0; index < window.localStorage.length; index += 1) {
+        const key = window.localStorage.key(index)
+        if (!key || !key.includes("-auth-token")) continue
+        const raw = window.localStorage.getItem(key)
+        if (!raw) continue
+        const parsed = JSON.parse(raw)
+        const token = parsed?.access_token || parsed?.currentSession?.access_token || parsed?.session?.access_token
+        if (token) return String(token)
+      }
+    } catch {
+      return ""
+    }
+    return ""
+  })
+  return accessToken ? { Authorization: `Bearer ${accessToken}` } : {}
+}
+
 async function postJson(url, body, headers = {}) {
   const response = await fetch(url, {
     method: "POST",
@@ -242,7 +262,7 @@ const authContext = await buildAuthContext().catch((error) => {
     authStorageKey: null,
   }
 })
-const authHeaders = authContext.headers || {}
+let authHeaders = authContext.headers || {}
 
 try {
   const frontendResponse = await fetch(frontendUrl)
@@ -258,23 +278,6 @@ try {
     visionConfigured: coachHealth.openaiVisionConfigured,
   }))
 
-  for (const query of [
-    "100g chicken breast",
-    "standard serve of caesar salad",
-    "salmon poke bowl",
-  ]) {
-    const result = await postJson(`${apiBaseUrl}/api/nutrition/search`, { query }, authHeaders)
-    assertCheck(result.ok, `${query} search failed with ${result.status}`)
-    assertCheck(Array.isArray(result.data?.results) && result.data.results.length > 0, `${query} search returned no results`)
-    const top = result.data.results[0]
-    report.checks.push(latestReportLine(`nutrition_search:${query}`, "passed", {
-      source_type: top.source_type,
-      macro_confidence: top.macro_confidence,
-      food: top.name,
-      calories: top.calories,
-    }))
-  }
-
   if (requireUiAuth) {
     const browser = await chromium.launch({ headless: true })
     const page = await browser.newPage()
@@ -282,6 +285,11 @@ try {
       await seedBrowserAuthSession(page, authContext)
       await page.goto(frontendUrl, { waitUntil: "domcontentloaded", timeout: 60000 })
       await ensureSignedInOnProtectedRoute(page, frontendUrl)
+      const browserAuthHeaders = await extractBrowserAuthHeaders(page)
+      if (Object.keys(browserAuthHeaders).length) {
+        authHeaders = browserAuthHeaders
+        report.checks.push(latestReportLine("ui_auth_headers", "passed", { source: "browser_local_storage" }))
+      }
 
       await completeOnboardingIfNeeded(page)
       let composerVisible = await ensureCoachComposer(page, frontendUrl)
@@ -316,6 +324,23 @@ try {
       await page.screenshot({ path: path.join(outputDir, `live-ui-${Date.now()}.png`), fullPage: true }).catch(() => {})
       await browser.close()
     }
+  }
+
+  for (const query of [
+    "100g chicken breast",
+    "standard serve of caesar salad",
+    "salmon poke bowl",
+  ]) {
+    const result = await postJson(`${apiBaseUrl}/api/nutrition/search`, { query }, authHeaders)
+    assertCheck(result.ok, `${query} search failed with ${result.status}`)
+    assertCheck(Array.isArray(result.data?.results) && result.data.results.length > 0, `${query} search returned no results`)
+    const top = result.data.results[0]
+    report.checks.push(latestReportLine(`nutrition_search:${query}`, "passed", {
+      source_type: top.source_type,
+      macro_confidence: top.macro_confidence,
+      food: top.name,
+      calories: top.calories,
+    }))
   }
 } catch (error) {
   report.failed_at = new Date().toISOString()

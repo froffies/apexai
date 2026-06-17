@@ -33,6 +33,69 @@ function base64ImageDataUrl(filePath) {
   return `data:${mime};base64,${buffer.toString("base64")}`
 }
 
+function deriveBaseUrlFromConfiguredEndpoint(endpoint = "") {
+  const value = String(endpoint || "").trim()
+  if (!value) return ""
+  try {
+    const parsed = new URL(value)
+    return `${parsed.protocol}//${parsed.host}`
+  } catch {
+    return value.replace(/\/api\/.*$/i, "").replace(/\/$/, "")
+  }
+}
+
+function defaultSmokeBaseUrl() {
+  const configuredNutritionUrl = String(process.env.VITE_NUTRITION_API_URL || "").trim()
+  const configuredCoachUrl = String(process.env.VITE_OPENAI_COACH_URL || "").trim()
+  const derivedConfiguredBase = deriveBaseUrlFromConfiguredEndpoint(configuredNutritionUrl || configuredCoachUrl)
+  if (derivedConfiguredBase) return derivedConfiguredBase
+
+  const localCoachPort = String(process.env.OPENAI_COACH_PORT || process.env.PORT || "8787").trim()
+  return `http://127.0.0.1:${localCoachPort}`
+}
+
+function buildBaseUrlCandidates() {
+  const explicitBase = String(process.env.NUTRITION_SMOKE_BASE_URL || "").trim()
+  if (explicitBase) return [explicitBase.replace(/\/$/, "")]
+
+  const localCoachPort = String(process.env.OPENAI_COACH_PORT || process.env.PORT || "8787").trim()
+  return [
+    deriveBaseUrlFromConfiguredEndpoint(process.env.VITE_NUTRITION_API_URL || ""),
+    deriveBaseUrlFromConfiguredEndpoint(process.env.VITE_OPENAI_COACH_URL || ""),
+    deriveBaseUrlFromConfiguredEndpoint(process.env.LIVE_VERIFY_COACH_URL || ""),
+    deriveBaseUrlFromConfiguredEndpoint("https://apexai-coach.onrender.com/api/coach"),
+    `http://127.0.0.1:${localCoachPort}`,
+    defaultSmokeBaseUrl(),
+  ].map((value) => String(value || "").trim().replace(/\/$/, "")).filter(Boolean).filter((value, index, list) => list.indexOf(value) === index)
+}
+
+async function isReachableHealth(baseUrl) {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 5000)
+    try {
+      const response = await fetch(`${baseUrl}/health`, { signal: controller.signal })
+      if (response.ok) return true
+    } catch {
+      // try the next probe attempt
+    } finally {
+      clearTimeout(timeout)
+    }
+    if (attempt === 0) {
+      await new Promise((resolve) => setTimeout(resolve, 400))
+    }
+  }
+  return false
+}
+
+async function resolveBaseUrl() {
+  const candidates = buildBaseUrlCandidates()
+  for (const candidate of candidates) {
+    if (await isReachableHealth(candidate)) return candidate
+  }
+  return candidates[0] || defaultSmokeBaseUrl()
+}
+
 async function buildAuthHeaders() {
   const explicitToken = String(process.env.NUTRITION_SMOKE_TOKEN || "").trim()
   if (explicitToken) return { Authorization: `Bearer ${explicitToken}` }
@@ -75,10 +138,10 @@ function ensureTopResult(result, label) {
 
 loadDotEnvIntoProcess()
 
-const baseUrl = String(process.env.NUTRITION_SMOKE_BASE_URL || "http://127.0.0.1:8787").trim().replace(/\/$/, "")
 const photoPath = String(process.env.NUTRITION_SMOKE_PHOTO_PATH || "").trim()
 const barcodeCode = String(process.env.NUTRITION_SMOKE_BARCODE || "").trim()
 
+const baseUrl = await resolveBaseUrl()
 const headers = await buildAuthHeaders()
 const failures = []
 
