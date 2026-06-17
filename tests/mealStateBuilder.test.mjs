@@ -115,12 +115,50 @@ test("meal session binds standalone numeric replies to the pending food quantity
   assert.equal(session.invalidStructure, false)
 })
 
+test("graph-native meal session keeps prepared same-base foods separate and binds follow-up cooking ingredients correctly", () => {
+  const { snapshots, session } = replayMealConversation([
+    user("i had egg"),
+    assistant("How many eggs did you have?"),
+    user("i had 18 fried eggs and 14 hard boiled"),
+    assistant("What were the fried eggs cooked in?"),
+    user("120g of butter"),
+  ])
+
+  assertGraphNativeSession(snapshots[1].session)
+  assert.equal(snapshots[1].session.summary, "18 fried eggs, plus 14 hard boiled eggs")
+  assert.equal(snapshots[1].session.clarifyQuestion, "What were the fried eggs cooked in?")
+  assert.equal(snapshots[1].session.items.filter((item) => !item.attached_to).length, 2)
+
+  assertGraphNativeSession(session)
+  assert.equal(session.readyToLog, true)
+  assert.equal(session.summary, "18 fried eggs cooked in 120g butter, plus 14 hard boiled eggs")
+
+  const friedEggs = session.items.find((item) => !item.attached_to && item.variant_key === "fried")
+  const hardBoiledEggs = session.items.find((item) => !item.attached_to && item.variant_key === "hard boiled")
+  const butter = session.items.find((item) => item.base_name === "butter")
+
+  assert.ok(friedEggs)
+  assert.ok(hardBoiledEggs)
+  assert.equal(butter?.attached_to, "egg::fried")
+})
+
 test("graph-native meal session treats bare had/ate/drank starts as logging intent", () => {
   const session = buildMealContext([], "had steak", emptyMealSession())
 
   assert.ok(session)
   assert.equal(session.wantsLogging, true)
   assert.equal(session.clarifyQuestion, "How much steak did you have?")
+})
+
+test("graph-native meal session treats simple measured turns without a log verb as logging intent", () => {
+  const session = buildMealContext([], "500ml coffee", emptyMealSession())
+
+  assert.ok(session)
+  assertGraphNativeSession(session)
+  assert.equal(session.processingMode, "graph_native")
+  assert.equal(session.wantsLogging, true)
+  assert.equal(session.readyToLog, true)
+  assert.equal(session.summary, "500ml coffee")
 })
 
 test("graph-native meal session preserves logging intent across a quantity clarification", () => {
@@ -134,6 +172,36 @@ test("graph-native meal session preserves logging intent across a quantity clari
   assert.equal(session.wantsLogging, true)
   assert.equal(session.readyToLog, true)
   assert.equal(session.summary, "300g steak")
+})
+
+test("graph-native meal session keeps simple daypart groups out of legacy fallback", () => {
+  const session = buildMealContext([], "breakfast was 2 eggs, lunch was 200g salad", emptyMealSession())
+
+  assert.ok(session)
+  assertGraphNativeSession(session)
+  assert.equal(session.processingMode, "graph_native")
+  assert.equal(session.readyToLog, true)
+  assert.deepEqual(
+    session.meal_groups.map((group) => group.meal_type),
+    ["breakfast", "lunch"],
+  )
+  assert.equal(session.meal_groups[0].summary, "2 eggs")
+  assert.equal(session.meal_groups[1].summary, "200g salad")
+})
+
+test("graph-native meal session clarifies ambiguous bare-count staples instead of auto-saving them", () => {
+  const rice = buildMealContext([], "i had 1 rice", emptyMealSession())
+  const oats = buildMealContext([], "breakfast was 2 oats", emptyMealSession())
+
+  assert.ok(rice)
+  assertGraphNativeSession(rice)
+  assert.equal(rice.readyToLog, false)
+  assert.equal(rice.clarifyQuestion, "How much rice did you have?")
+
+  assert.ok(oats)
+  assertGraphNativeSession(oats)
+  assert.equal(oats.readyToLog, false)
+  assert.equal(oats.clarifyQuestion, "How much oats did you have?")
 })
 
 test("future meal intent does not open a meal logging session", () => {
@@ -414,6 +482,29 @@ test("inline correction replaces a measured food quantity cleanly", () => {
   assert.equal(session.items[0]?.quantity?.unit, "g")
 })
 
+test("graph-native meal context keeps persisted ingredient follow-ups out of legacy fallback", () => {
+  const initial = buildMealContext([], "i had 1 burger", emptyMealSession())
+  const persisted = {
+    ...initial,
+    persisted: true,
+    persistedMealId: "meal_burger",
+    persistedSummary: initial?.summary || "",
+    persistedAt: "2026-06-17T00:00:00.000Z",
+    active: false,
+    readyToLog: false,
+    clarifyQuestion: "",
+    alreadyLogged: false,
+  }
+  const next = buildMealContext([], "with bbq sauce", persisted)
+
+  assert.ok(initial)
+  assert.ok(next)
+  assertGraphNativeSession(next)
+  assert.equal(next.processingMode, "graph_native")
+  assert.equal(next.readyToLog, true)
+  assert.match(next.summary, /burger with bbq sauce/i)
+})
+
 test("meal session keeps clarification binding stable and ignores complaint text in the pie egg milk conversation", () => {
   const { session, snapshots } = replayMealConversation([
     user("i had pie and egg and milk today"),
@@ -467,13 +558,13 @@ test("meal session keeps a user-only fragmented drink reply from hijacking a pen
   assert.ok(session)
   assertGraphNativeSession(session)
   assert.equal(snapshots[2].session.clarifyQuestion, "What were the fried eggs cooked in?")
-  assert.equal(snapshots[2].session.summary, "1 fried eggs, plus 472ml coffee with no sugar")
+  assert.equal(snapshots[2].session.summary, "1 fried egg, plus 472ml coffee with no sugar")
   assert.equal(
     snapshots[2].session.items.some((item) => item.attached_to?.includes("egg") && /coffee/i.test(`${item.base_name} ${item.label}`)),
     false,
   )
   assert.equal(session.readyToLog, true)
-  assert.equal(session.summary, "1 fried eggs cooked in 15g gravy, plus 472ml coffee with no sugar")
+  assert.equal(session.summary, "1 fried egg cooked in 15g gravy, plus 472ml coffee with no sugar")
 })
 
 test("meal session keeps a user-only fragmented ingredient reply from clearing a pending drink quantity", () => {
@@ -487,9 +578,9 @@ test("meal session keeps a user-only fragmented ingredient reply from clearing a
   assert.ok(session)
   assertGraphNativeSession(session)
   assert.equal(snapshots[2].session.clarifyQuestion, "How much coffee did you have?")
-  assert.equal(snapshots[2].session.summary, "1 fried eggs cooked in 15g gravy, plus coffee")
+  assert.equal(snapshots[2].session.summary, "1 fried egg cooked in 15g gravy, plus coffee")
   assert.equal(session.readyToLog, true)
-  assert.equal(session.summary, "1 fried eggs cooked in 15g gravy, plus 472ml coffee with no sugar")
+  assert.equal(session.summary, "1 fried egg cooked in 15g gravy, plus 472ml coffee with no sugar")
 })
 
 test("meal session keeps a simple user-only steak and tea fragmentation out of legacy collapse", () => {
@@ -1248,13 +1339,18 @@ test("meal session keeps count-style summaries readable for simple foods", () =>
 
 test("meal session exposes whether parsing stayed graph-native or fell back to legacy", () => {
   const graphSession = buildMealContext([], "i had 2 eggs", emptyMealSession())
-  const legacySession = buildMealContext([], "breakfast was 2 eggs and lunch was 200g steak", emptyMealSession())
+  const simpleGroupedSession = buildMealContext([], "breakfast was 2 eggs and lunch was 200g steak", emptyMealSession())
+  const legacySession = buildMealContext([], "breakfast was 2 eggs and lunch was 200g steak and same as yesterday", emptyMealSession())
 
   assert.ok(graphSession)
+  assert.ok(simpleGroupedSession)
   assert.ok(legacySession)
   assert.equal(graphSession.processingMode, "graph_native")
   assert.equal(graphSession.graphNative, true)
   assert.equal(graphSession.fallbackReason, "")
+  assert.equal(simpleGroupedSession.processingMode, "graph_native")
+  assert.equal(simpleGroupedSession.graphNative, true)
+  assert.equal(simpleGroupedSession.fallbackReason, "")
   assert.equal(legacySession.processingMode, "legacy")
   assert.equal(legacySession.graphNative, false)
   assert.equal(legacySession.fallbackReason, "legacy_gate")

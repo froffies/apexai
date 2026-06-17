@@ -977,6 +977,20 @@ function shouldKeepPersistedMealGraphNativeForRefinement(session, currentMessage
   if (!session?.graphNative) return false
   const normalized = cleanText(currentMessage)
   if (!normalized) return false
+  if (
+    !detectQuestionOnlyTurn(currentMessage)
+    && !suppressionRequested(currentMessage)
+    && !isExplicitMealStart(currentMessage)
+    && !looksLikeWorkoutOnlyTurn(currentMessage)
+    && !/^(?:update|remove|swap|change)\b/i.test(normalized)
+    && (
+      /^\s*(?:with|without|cooked in|fried in|mixed with|topped with|covered in)\b/i.test(normalized)
+      || /\b(?:with|without|cooked in|fried in|mixed with|topped with|covered in)\b/i.test(normalized)
+      || /^the\s+/i.test(normalized)
+      || /^used (?:to fry|for)\b/i.test(normalized)
+      || /\d/.test(normalized)
+    )
+  ) return true
   return Boolean(
     /\b(?:fried|grilled|baked|boiled|hard boiled|hardboiled|soft boiled|softboiled|poached|scrambled|raw|plain)\b/i.test(normalized)
     && (

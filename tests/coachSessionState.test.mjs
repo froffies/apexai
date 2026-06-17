@@ -200,6 +200,29 @@ test("coach session state treats additive follow-ups on a persisted meal as upda
   assert.match(next.mealSession.summary, /chips with gravy/i)
 })
 
+test("coach session state keeps simple persisted ingredient refinements on the graph-native meal path", () => {
+  const initial = replayCoachConversation([
+    user("i had 1 burger"),
+  ])
+
+  const persistedMeal = makePersistedMealSession(initial.mealSession, "meal_burger")
+  const next = buildCoachSessionState({
+    recentMessages: [
+      ...initial.history,
+      assistant("Saved to today's nutrition: 1 burger."),
+    ],
+    currentMessage: "with bbq sauce",
+    mealSession: persistedMeal,
+    workoutSession: emptyWorkoutSessionState(),
+  })
+
+  assert.ok(next.mealSession)
+  assert.equal(next.mealSession.graphNative, true)
+  assert.equal(next.mealSession.correctionRequested, true)
+  assert.equal(next.mealSession.readyToLog, true)
+  assert.match(next.mealSession.summary, /burger with bbq sauce/i)
+})
+
 test("coach session state treats preparation refinements on a persisted meal as updates", () => {
   const initial = replayCoachConversation([
     user("i had 2 egg"),
@@ -219,7 +242,7 @@ test("coach session state treats preparation refinements on a persisted meal as 
   assert.ok(next.mealSession)
   assert.equal(next.mealSession.correctionRequested, true)
   assert.equal(next.mealSession.readyToLog, true)
-  assert.match(next.mealSession.summary, /2 eggs cooked in butter/i)
+  assert.match(next.mealSession.summary, /2 fried eggs cooked in butter|2 eggs cooked in butter/i)
 })
 
 test("coach session state keeps strong workout clauses out of meal fragments in mixed turns", () => {

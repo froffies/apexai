@@ -80,7 +80,7 @@ const auVerifiedFoods = [
   { id: "bread_wholemeal_toasted", name: "Bread, from wholemeal flour, toasted", aliases: ["wholemeal toast", "whole wheat toast"], quantity: "100g", calories: 279, protein_g: 12.2, carbs_g: 46.1, fat_g: 2.9, category: "carbs" },
   { id: "bread_rye_sourdough", name: "Bread, from rye flour, sour dough", aliases: ["rye bread", "sourdough rye"], quantity: "100g", calories: 234, protein_g: 9.2, carbs_g: 42.7, fat_g: 1.6, category: "carbs" },
   { id: "bread_rye_sourdough_toasted", name: "Bread, from rye flour, sour dough, toasted", aliases: ["rye toast", "toasted rye bread"], quantity: "100g", calories: 276, protein_g: 10.8, carbs_g: 50.2, fat_g: 1.9, category: "carbs" },
-  { id: "oats_rolled_uncooked", name: "Oats, rolled, uncooked", aliases: ["rolled oats", "oats"], quantity: "100g", calories: 374, protein_g: 12.2, carbs_g: 54.5, fat_g: 9.5, category: "breakfast" },
+  { id: "oats_rolled_uncooked", name: "Oats, rolled, uncooked", aliases: ["rolled oats", "oats", "oat"], quantity: "100g", calories: 374, protein_g: 12.2, carbs_g: 54.5, fat_g: 9.5, category: "breakfast" },
   { id: "porridge_oats_water", name: "Porridge, rolled oats, prepared with water", aliases: ["porridge", "oat porridge"], quantity: "100g", calories: 89, protein_g: 3, carbs_g: 11.4, fat_g: 2.9, category: "breakfast" },
   { id: "rice_white_boiled", name: "Rice, white, boiled or rice cooker, no added salt", aliases: ["white rice", "boiled white rice", "cooked white rice"], quantity: "100g", calories: 158, protein_g: 3.1, carbs_g: 34.7, fat_g: 0.2, category: "carbs" },
   { id: "rice_brown_boiled", name: "Rice, brown, boiled, no added salt", aliases: ["brown rice", "boiled brown rice", "cooked brown rice"], quantity: "100g", calories: 166, protein_g: 4.1, carbs_g: 33.5, fat_g: 1.1, category: "carbs" },
@@ -229,7 +229,7 @@ const estimatedFoods = [
 ].map(estimatedFood)
 
 const deterministicFoods = [
-  { id: "garden_salad_generic", name: "Garden salad", aliases: ["garden salad", "green salad", "house salad", "side salad"], quantity: "1 bowl", calories: 120, protein_g: 4, carbs_g: 10, fat_g: 7, category: "mixed meal" },
+  { id: "garden_salad_generic", name: "Garden salad", aliases: ["salad", "garden salad", "green salad", "house salad", "side salad"], quantity: "1 bowl", calories: 120, protein_g: 4, carbs_g: 10, fat_g: 7, category: "mixed meal" },
   { id: "greek_salad_generic", name: "Greek salad", aliases: ["greek salad", "feta salad"], quantity: "1 bowl", calories: 280, protein_g: 7, carbs_g: 11, fat_g: 21, category: "mixed meal" },
   { id: "chicken_salad_generic", name: "Chicken salad", aliases: ["chicken salad", "grilled chicken salad"], quantity: "1 bowl", calories: 360, protein_g: 30, carbs_g: 13, fat_g: 20, category: "mixed meal" },
   { id: "tuna_salad_generic", name: "Tuna salad", aliases: ["tuna salad"], quantity: "1 bowl", calories: 330, protein_g: 24, carbs_g: 12, fat_g: 18, category: "mixed meal" },
@@ -485,7 +485,7 @@ function scoreFoodMatch(query, food) {
       continue
     }
 
-    if (normalizedName.startsWith(`${normalizedQuery} `) || compactName.startsWith(compactQuery)) {
+    if (normalizedName.startsWith(`${normalizedQuery} `)) {
       bestScore = Math.max(bestScore, 240)
       continue
     }

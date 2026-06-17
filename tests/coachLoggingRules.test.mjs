@@ -172,6 +172,30 @@ test("coach logging rules keep verified provenance when a meal resolves entirely
   assert.equal(action?.macro_confidence, "high")
 })
 
+test("coach logging rules do not auto-persist a ready meal when wantsLogging is false", () => {
+  const action = buildDeterministicMealAction({
+    mealSession: {
+      readyToLog: true,
+      alreadyLogged: false,
+      wantsLogging: false,
+      mealConversation: true,
+      summary: "500ml coffee",
+      items: [
+        {
+          baseName: "coffee",
+          label: "Coffee",
+          category: "drink",
+          quantity: { amount: 500, unit: "ml", text: "500ml" },
+          exclusions: [],
+        },
+      ],
+    },
+    prompt: "500ml coffee",
+  })
+
+  assert.equal(action, null)
+})
+
 test("coach logging rules keep NZ verified provenance when a meal resolves from the curated NZ catalogue", () => {
   const weetbix = verifiedFoods.find((food) => food.id === "d1056")
   assert.ok(weetbix)

@@ -42,6 +42,19 @@ test("findBestFoodMatch widens deterministic matching for common food questions"
   assert.match(String(sandwichMatches[0]?.name || ""), /chicken sandwich/i)
 })
 
+test("findBestFoodMatch does not confuse salad or oats with similarly named products", () => {
+  const salad = findBestFoodMatch("salad")
+  const oats = findBestFoodMatch("oat")
+
+  assert.ok(salad)
+  assert.match(String(salad.name || ""), /salad/i)
+  assert.equal(/salada/i.test(String(salad.name || "")), false)
+
+  assert.ok(oats)
+  assert.match(String(oats.name || ""), /oats/i)
+  assert.equal(/oat beverage|oat milk/i.test(String(oats.name || "")), false)
+})
+
 test("findBestFoodMatch covers broader common mixed dishes and drinks with deterministic profiles", () => {
   const poke = findBestFoodMatch("salmon poke bowl")
   assert.ok(poke)

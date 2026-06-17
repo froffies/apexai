@@ -25,7 +25,7 @@ const DRINK_WORDS = ["tea", "coffee", "juice", "water", "milk", "smoothie", "sha
 const INGREDIENT_WORDS = ["butter", "oil", "cheese", "sugar", "milk", "cream", "sauce", "gravy", "dressing", "vegemite", "jam", "honey", "salt", "pesto", "mayo"]
 const FOOD_HINTS = ["egg", "eggs", "chicken", "rice", "beef", "steak", "pork", "lamb", "fish", "salmon", "tuna", "toast", "bread", "tea", "coffee", "juice", "milk", "beans", "oats", "yoghurt", "yogurt", "butter", "oil", "cheese", "potato", "salad", "apple", "banana", "celery", "chocolate", "pasta", "chips", "fries", "burger", "taco", "tacos", "vegemite", "berry", "berries", "whey", "almond milk"]
 const COUNT_REQUIRED = new Set(["egg"])
-const COUNT_FRIENDLY_BASES = new Set(["egg", "pie", "pizza", "burger", "cake", "fry", "fries", "chip", "chips", "taco", "cookie", "biscuit", "slider", "sandwich", "wrap"])
+const COUNT_FRIENDLY_BASES = new Set(["egg", "pie", "pizza", "burger", "cake", "fry", "fries", "chip", "chips", "taco", "cookie", "biscuit", "slider", "sandwich", "wrap", "steak"])
 const STOPWORDS = new Set(["i", "had", "have", "ate", "drank", "also", "just", "then", "but", "the", "a", "an", "my", "for", "to", "at", "with", "and", "plus", "of", "it", "that", "this", "was", "were", "is", "are", "did", "do", "done", "log", "track", "save", "add", "include", "today", "later", "tomorrow", "tonight"])
 
 const MEAL_START_PATTERN = /^(?:please\s+)?(?:(?:i\s+)?(?:had|ate|drank)|log|track|save|add|include)\b/i
@@ -34,6 +34,7 @@ const SUPPRESS_PATTERN = /\b(?:don't|dont|do not|stop|no)\s+(?:log|save|track|re
 const MEAL_LOG_QUERY_PATTERN = /^(?:what(?:'s|s| is)?|show|list|see|view|display)\b.*\b(?:today'?s?|todays?|my)\b.*\b(?:nutrition|food|meal|meals|log)\b/i
 const WORKOUTISH_PATTERN = /\b(?:bench(?:\s+press)?|incline\s+bench|overhead\s+press|shoulder\s+press|row|rows|pull\s*ups?|pullups?|push\s*ups?|pushups?|sit\s*ups?|situps?|burpees?|dips?|lunges?|squat|squats|deadlift|rdl|leg press|treadmill|bike|rower|elliptical|stairmaster|run|ran|walk|walked|cycle|cycled|swam|swim|sets?|reps?)\b|\b\d+\s*x\s*\d+\b|\b\d+(?:\.\d+)?\s*(?:kg|km|mi|miles?|min|mins|minutes)\b/i
 const COMPLEX_PATTERN = /\b(?:total|rest|remainder|each|breakfast|lunch|dinner|snack|same as yesterday|same as last time|same as before|repeat that|host variant|taco|tacos|burrito bowl)\b/i
+const GROUPED_COMPLEX_PATTERN = /\b(?:total|rest|remainder|each|same as yesterday|same as last time|same as before|repeat that|host variant|taco|tacos|burrito bowl)\b/i
 const TIME_REFERENCE_PATTERN = /\b(?:yesterday|last night|last week|earlier today|this morning|tonight)\b/i
 const META_COMPLAINT_PATTERN = /\b(?:you asked|i gave you|why can(?:'|’)t you understand|why cant you understand|i told you|already said|what do you mean|i just answered|you just asked)\b/i
 const VAGUE_REFERENCE_PATTERN = /^(?:the\s+)?(?:eggs?|tea|coffee|toast|beans?|chicken|rice|butter|oil|salmon|milk|drink|pizza|burger|chips)\b/i
@@ -43,6 +44,9 @@ const TRAILING_LOG_DIRECTIVE_PATTERN = /\b(?:(?:can|could)\s+you|please|just)?\s
 const PACKAGED_UNIT_PATTERN = /\b(?:tin|tins|can|cans|block|blocks|bunch|bunches)\b/i
 const WORKOUT_ONLY_FOLLOW_UP_PATTERN = /^(?:i\s+did\s+\d+(?:\.\d+)?(?:\s+total)?|\d+(?:\.\d+)?\s*(?:reps?|sets?|kg|km|mi|miles?|min|mins|minutes)(?:\s*,\s*\d+(?:\.\d+)?\s*(?:reps?|sets?|kg|km|mi|miles?|min|mins|minutes))*)$/i
 const FUTURE_MEAL_INTENT_PATTERN = /\b(?:(?:i\s*(?:am|['’]m)?\s*)?(?:going\s+to|gonna)\s+(?:have|eat|drink)|(?:i(?:['’]ll)?|i\s+will|will)\s+(?:have|eat|drink))\b/i
+const MEAL_TYPES = ["breakfast", "lunch", "dinner", "snack"]
+const MEAL_TYPE_PREFIX_PATTERN = /^(?:(?<mealType>breakfast|lunch|dinner|snack)\b(?:\s*(?:was|is|:|-)\s*)?)(?<details>.*)$/i
+const MEAL_TYPE_SUFFIX_PATTERN = /^(?<details>.+?)\s+\b(?:for|at)\s+(?<mealType>breakfast|lunch|dinner|snack)\b$/i
 const RELATION_PATTERNS = [
   { relation: "cooked_in", pattern: /\b(?:cooked|fried|grilled|baked|roasted|boiled|poached|scrambled|steamed)\s+in\b/i },
   { relation: "mixed_with", pattern: /\bmixed with\b/i },
@@ -51,6 +55,7 @@ const RELATION_PATTERNS = [
   { relation: "with", pattern: /\bwith\b/i },
 ]
 const GENERIC_DRINK_BASES = new Set(["tea", "coffee", "juice", "water", "milk", "smoothie", "shake"])
+const AMBIGUOUS_BARE_COUNT_BASES = new Set(["oat", "pasta", "rice", "salad"])
 
 const baseSession = () => ({
   ...legacyEmptyMealSession(),
@@ -99,6 +104,10 @@ const mentionsDrink = (text = "") => DRINK_WORDS.some((word) => containsWord(tex
 const isIngredient = (name = "") => INGREDIENT_WORDS.some((word) => containsWord(name, word))
 const isWorkoutish = (text = "") => WORKOUTISH_PATTERN.test(cleanText(text))
 const looksFoodish = (text = "") => FOOD_HINTS.some((word) => containsWord(text, word))
+const normalizeMealType = (value = "") => {
+  const text = cleanText(value)
+  return MEAL_TYPES.includes(text) ? text : ""
+}
 
 function resolveInlineCorrection(text = "") {
   const match = String(text || "").trim().match(
@@ -228,6 +237,146 @@ function isGraphNativeFriendlyFreshTurn(conversation = [], currentMessage = "", 
   return /\b(?:with|without|cooked in|fried in|no sugar|no milk)\b/i.test(normalizedCurrent)
 }
 
+function stripMealTypePhrase(text = "", fallbackMealType = "") {
+  const normalized = String(text || "").trim()
+  const inheritedMealType = normalizeMealType(fallbackMealType)
+  if (!normalized) return { explicitMealType: "", mealType: inheritedMealType, text: "" }
+
+  const prefixMatch = normalized.match(MEAL_TYPE_PREFIX_PATTERN)
+  if (prefixMatch?.groups) {
+    const explicitMealType = normalizeMealType(prefixMatch.groups.mealType)
+    return {
+      explicitMealType,
+      mealType: explicitMealType,
+      text: String(prefixMatch.groups.details || "").trim(),
+    }
+  }
+
+  const suffixMatch = normalized.match(MEAL_TYPE_SUFFIX_PATTERN)
+  if (suffixMatch?.groups) {
+    const explicitMealType = normalizeMealType(suffixMatch.groups.mealType)
+    return {
+      explicitMealType,
+      mealType: explicitMealType,
+      text: String(suffixMatch.groups.details || "").trim(),
+    }
+  }
+
+  const snackSuffixMatch = normalized.match(/^(?<details>.+?)\s+as\s+a\s+(?<mealType>snack)\b$/i)
+  if (snackSuffixMatch?.groups) {
+    const explicitMealType = normalizeMealType(snackSuffixMatch.groups.mealType)
+    return {
+      explicitMealType,
+      mealType: explicitMealType,
+      text: String(snackSuffixMatch.groups.details || "").trim(),
+    }
+  }
+
+  return { explicitMealType: "", mealType: inheritedMealType, text: normalized }
+}
+
+function isSimpleMeasuredMealFragment(text = "") {
+  const normalized = cleanText(text)
+  if (!normalized || detectQuestionOnlyTurn(text) || isWorkoutish(normalized)) return false
+  const quantity = extractQuantity(text) || extractEmbeddedQuantity(text)
+  if (!quantity) return false
+  const baseName = canonicalBaseName(baseNameFromText(text))
+  const resolvedBaseName = baseName || (quantity.unit === "egg" ? "egg" : "")
+  if (!resolvedBaseName) return false
+  return Boolean(looksFoodish(text) || mentionsDrink(text) || resolvedBaseName)
+}
+
+function isGraphNativeImplicitMeasuredTurn(conversation = [], currentMessage = "", existingSession = null) {
+  const normalizedCurrent = cleanText(currentMessage)
+  if (existingSession?.active || existingSession?.persisted) return false
+  if (safeArray(conversation, 4).length > 1) return false
+  if (MEAL_START_PATTERN.test(normalizedCurrent)) return false
+  if (detectQuestionOnlyTurn(normalizedCurrent)) return false
+  if (TIME_REFERENCE_PATTERN.test(normalizedCurrent)) return false
+  if (CORRECTION_PREFIX.test(normalizedCurrent) || INLINE_CORRECTION_PATTERN.test(normalizedCurrent)) return false
+  if (PACKAGED_UNIT_PATTERN.test(normalizedCurrent)) return false
+  if (isWorkoutish(normalizedCurrent)) return false
+  if (COMPLEX_PATTERN.test(normalizedCurrent)) return false
+  if (splitGraphClauses(currentMessage).length !== 1) return false
+  return isSimpleMeasuredMealFragment(currentMessage)
+}
+
+function isGraphNativeFriendlyDaypartTurn(conversation = [], currentMessage = "", existingSession = null) {
+  const normalizedCurrent = cleanText(currentMessage)
+  if (existingSession?.active || existingSession?.persisted) return false
+  if (safeArray(conversation, 4).length > 1) return false
+  if (detectQuestionOnlyTurn(normalizedCurrent)) return false
+  if (TIME_REFERENCE_PATTERN.test(normalizedCurrent)) return false
+  if (CORRECTION_PREFIX.test(normalizedCurrent) || INLINE_CORRECTION_PATTERN.test(normalizedCurrent)) return false
+  if (PACKAGED_UNIT_PATTERN.test(normalizedCurrent)) return false
+  if (isWorkoutish(normalizedCurrent)) return false
+
+  const fragments = splitGraphClauses(currentMessage)
+  if (!fragments.length || fragments.length > 4) return false
+
+  let activeMealType = ""
+  let explicitMealTypeSeen = false
+  for (const fragment of fragments) {
+    const { explicitMealType, mealType, text } = stripMealTypePhrase(fragment, activeMealType)
+    if (explicitMealType) {
+      explicitMealTypeSeen = true
+      activeMealType = explicitMealType
+    } else if (!mealType) {
+      return false
+    }
+    if (!text || detectQuestionOnlyTurn(text) || isWorkoutish(text)) return false
+    if (!looksFoodish(text) && !mentionsDrink(text) && !isSimpleMeasuredMealFragment(text) && !canonicalBaseName(baseNameFromText(text))) {
+      return false
+    }
+  }
+
+  return explicitMealTypeSeen
+}
+
+function isGraphNativeFriendlyPersistedFollowUp(currentMessage = "", existingSession = null) {
+  const normalizedCurrent = cleanText(currentMessage)
+  if (!existingSession?.persisted || !safeArray(existingSession?.items, 24).length) return false
+  if (!normalizedCurrent || detectQuestionOnlyTurn(currentMessage) || isWorkoutish(normalizedCurrent)) return false
+  if (MEAL_START_PATTERN.test(normalizedCurrent) || SUPPRESS_PATTERN.test(normalizedCurrent)) return false
+  if (/^(?:update|remove|swap|change)\b/i.test(normalizedCurrent)) return false
+  return Boolean(
+    /^\s*(?:with|without|cooked in|fried in|mixed with|topped with|covered in)\b/i.test(normalizedCurrent)
+    || /\b(?:with|without|cooked in|fried in|mixed with|topped with|covered in)\b/i.test(normalizedCurrent)
+    || /^the\s+/i.test(normalizedCurrent)
+    || /^used (?:to fry|for)\b/i.test(normalizedCurrent)
+    || extractPreparations(currentMessage).length > 0
+    || extractQuantity(currentMessage)
+    || extractEmbeddedQuantity(currentMessage)
+  )
+}
+
+function isActiveGraphGroupedFollowUp(currentMessage = "", existingSession = null) {
+  const normalizedCurrent = cleanText(currentMessage)
+  if (!existingSession?.active || !existingSession?.graphNative) return false
+  if (!normalizedCurrent || MEAL_START_PATTERN.test(normalizedCurrent)) return false
+  if (detectQuestionOnlyTurn(currentMessage) || isWorkoutish(normalizedCurrent)) return false
+  if (existingSession?.pendingClarification) return false
+  if (!/^(?:the\s+rest|rest|remainder|one|two|three|four|five|six|seven|eight|nine|ten|\d+)/i.test(normalizedCurrent)) return false
+  const roots = safeArray(existingSession?.items, 24).filter((item) => !item.attached_to)
+  if (roots.length !== 1) return false
+  const [primaryRoot] = roots
+  const primaryAmount = Number(primaryRoot?.quantity?.amount || 0)
+  const primaryBase = singularize(primaryRoot?.base_name || primaryRoot?.baseName || "")
+  const primarySupportsGroupedSplit = (
+    primaryAmount > 1
+    && (
+      !primaryRoot?.quantity?.unit
+      || primaryRoot?.category === "drink"
+      || COUNT_REQUIRED.has(primaryBase)
+      || COUNT_FRIENDLY_BASES.has(primaryBase)
+    )
+  )
+  if (!primarySupportsGroupedSplit) return false
+  const currentBase = canonicalBaseName(baseNameFromText(currentMessage))
+  if (!currentBase) return true
+  return !baseNamesCompatible(primaryRoot.base_name || primaryRoot.baseName || "", currentBase)
+}
+
 function shouldUseLegacy(conversation, currentMessage, existingSession) {
   const normalizedCurrent = cleanText(currentMessage)
   if (isMixedMealWorkoutStart(currentMessage, existingSession) || isWorkoutOnlyFollowUpTurn(currentMessage, existingSession)) {
@@ -243,32 +392,44 @@ function shouldUseLegacy(conversation, currentMessage, existingSession) {
   const simpleFoodDrinkStart = isSimpleFoodDrinkStart(currentMessage)
   const graphNativeFriendlyDrinkStart = isGraphNativeFriendlyDrinkStart(currentMessage)
   const graphNativeFriendlyFreshTurn = isGraphNativeFriendlyFreshTurn(conversation, currentMessage, existingSession)
+  const graphNativeImplicitMeasuredTurn = isGraphNativeImplicitMeasuredTurn(conversation, currentMessage, existingSession)
+  const graphNativeFriendlyDaypartTurn = isGraphNativeFriendlyDaypartTurn(conversation, currentMessage, existingSession)
+  const graphNativeFriendlyPersistedFollowUp = isGraphNativeFriendlyPersistedFollowUp(currentMessage, existingSession)
+  const activeGraphGroupedFollowUp = isActiveGraphGroupedFollowUp(currentMessage, existingSession)
   const graphNativeCorrectionFollowUp = isGraphNativeCorrectionFollowUp(currentMessage, existingSession)
+  const implicitGraphNativeTurn = (
+    graphNativeImplicitMeasuredTurn
+    || graphNativeFriendlyDaypartTurn
+    || graphNativeFriendlyPersistedFollowUp
+  )
   return Boolean(
     (activeSession && !activeGraphSession)
     ||
-    existingSession?.persisted
-    || (!activeGraphSession && existingSession?.mealConversation)
-    || existingSession?.meal_groups?.length
+    activeGraphGroupedFollowUp
+    ||
+    (existingSession?.persisted && !graphNativeFriendlyPersistedFollowUp)
+    || (!activeGraphSession && existingSession?.mealConversation && !graphNativeFriendlyPersistedFollowUp)
+    || (!activeGraphSession && existingSession?.meal_groups?.length)
     || existingSession?.declaredTotals?.length
     || existingSession?.pendingAttachments?.length
     || existingSession?.pendingQuantities?.length
     || existingSession?.correctionRequested
     || existingSession?.deleteRequested
-    || (!activeGraphSession && conversation.some((entry) => entry.role === "assistant"))
-    || (!activeGraphSession && conversation.filter((entry) => entry.role === "user").length > 1)
-    || (!activeGraphSession && !MEAL_START_PATTERN.test(cleanText(currentMessage)))
+    || (!activeGraphSession && conversation.some((entry) => entry.role === "assistant") && !graphNativeFriendlyPersistedFollowUp)
+    || (!activeGraphSession && conversation.filter((entry) => entry.role === "user").length > 1 && !graphNativeFriendlyPersistedFollowUp)
+    || (!activeGraphSession && !MEAL_START_PATTERN.test(cleanText(currentMessage)) && !implicitGraphNativeTurn)
     || TIME_REFERENCE_PATTERN.test(cleanText(currentMessage))
     || INLINE_CORRECTION_PATTERN.test(cleanText(currentMessage))
     || PACKAGED_UNIT_PATTERN.test(cleanText(currentMessage))
-    || quantitySignals > 1
-    || measuredAmountSignals > 1
-    || (!activeGraphSession && mentionsDrink(currentMessage) && !simpleFoodDrinkStart && !graphNativeFriendlyDrinkStart && !graphNativeFriendlyFreshTurn)
-    || (!activeGraphSession && /\b(?:with|without|cooked in|fried in|no sugar|no milk)\b/i.test(cleanText(currentMessage)) && !graphNativeFriendlyFreshTurn)
+    || (!activeGraphSession && quantitySignals > 1 && !graphNativeFriendlyDaypartTurn)
+    || (!activeGraphSession && measuredAmountSignals > 1 && !graphNativeFriendlyDaypartTurn)
+    || (!activeGraphSession && mentionsDrink(currentMessage) && !simpleFoodDrinkStart && !graphNativeFriendlyDrinkStart && !graphNativeFriendlyFreshTurn && !implicitGraphNativeTurn)
+    || (!activeGraphSession && /\b(?:with|without|cooked in|fried in|no sugar|no milk)\b/i.test(cleanText(currentMessage)) && !graphNativeFriendlyFreshTurn && !graphNativeFriendlyPersistedFollowUp)
     || (!graphNativeCorrectionFollowUp && CORRECTION_PREFIX.test(cleanText(currentMessage)))
-    || COMPLEX_PATTERN.test(joined)
+    || GROUPED_COMPLEX_PATTERN.test(joined)
+    || (!activeGraphSession && COMPLEX_PATTERN.test(joined) && !graphNativeFriendlyDaypartTurn)
     || (!activeGraphSession && assistantMealTurns > 1)
-    || (!activeGraphSession && currentClauses.length > 1 && !simpleFoodDrinkStart && !graphNativeFriendlyFreshTurn)
+    || (!activeGraphSession && currentClauses.length > 1 && !simpleFoodDrinkStart && !graphNativeFriendlyFreshTurn && !graphNativeFriendlyDaypartTurn)
     || (!activeGraphSession && currentClauses.length > 3)
     || (activeGraphSession && /\bthat were\b|\bwere just\b/.test(normalizedCurrent))
     || (activeGraphSession && /\b\d+\s+of the\b.*\bwere\b/i.test(normalizedCurrent))
@@ -315,6 +476,15 @@ function markLegacySession(session, reason = "legacy_gate") {
   }
 }
 
+function normalizeQuantityText(amount, unit = "", fallbackText = "") {
+  const normalizedUnit = normalizeUnit(unit)
+  const numericText = Number.isFinite(Number(amount)) ? `${Number(amount)}` : String(amount || "").trim()
+  if (!normalizedUnit) return String(fallbackText || numericText).trim()
+  if (normalizedUnit === "egg") return `${numericText} ${Number(amount) === 1 ? "egg" : "eggs"}`
+  if (normalizedUnit === "lb") return `${numericText} lb`
+  return String(fallbackText || `${numericText} ${normalizedUnit}`).trim()
+}
+
 function extractEmbeddedQuantity(text = "") {
   const normalized = cleanText(text)
   if (!normalized) return null
@@ -324,7 +494,9 @@ function extractEmbeddedQuantity(text = "") {
   const amount = QUANTITY_WORDS.get(rawAmount) ?? Number(rawAmount)
   if (!Number.isFinite(amount)) return null
   const unit = normalizeUnit(quantityMatch.groups.unit || "")
-  const textValue = unit ? quantityMatch[0].trim().replace(/\s+/g, " ") : `${rawAmount}`
+  const textValue = unit
+    ? normalizeQuantityText(amount, unit, quantityMatch[0].trim().replace(/\s+/g, " "))
+    : `${rawAmount}`
   return { amount, unit, text: textValue.trim(), modifier: "" }
 }
 
@@ -337,7 +509,9 @@ function extractQuantity(text = "") {
   const amount = QUANTITY_WORDS.get(rawAmount) ?? Number(rawAmount)
   if (!Number.isFinite(amount)) return null
   const unit = normalizeUnit(quantityMatch.groups.unit || "")
-  const textValue = unit ? quantityMatch[0].trim().replace(/\s+/g, " ") : `${rawAmount}`
+  const textValue = unit
+    ? normalizeQuantityText(amount, unit, quantityMatch[0].trim().replace(/\s+/g, " "))
+    : `${rawAmount}`
   return { amount, unit, text: textValue.trim(), modifier: "" }
 }
 
@@ -347,6 +521,9 @@ function extractPreparations(text = "") {
   for (const preparation of PREPARATIONS) {
     const pattern = new RegExp(`\\b${preparation.replace(/\s+/g, "\\s*")}\\b`, "i")
     if (pattern.test(normalized)) hits.push(preparation === "hardboiled" ? "hard boiled" : preparation === "softboiled" ? "soft boiled" : preparation)
+  }
+  if (hits.includes("hard boiled") || hits.includes("soft boiled")) {
+    return [...new Set(hits.filter((value) => value !== "boiled"))]
   }
   return [...new Set(hits)]
 }
@@ -449,6 +626,25 @@ function countDisplayName(item = {}) {
   return pluralizeCountLabel(base)
 }
 
+function effectiveVariantKey(item = {}) {
+  const explicitVariant = cleanText(item.variant_key || "")
+  if (explicitVariant) return explicitVariant
+  return [...new Set(safeArray(item.preparation, 8).map((value) => cleanText(value)).filter(Boolean))].join("+")
+}
+
+function syncVariantKey(item = {}) {
+  if (!item || typeof item !== "object") return item
+  item.variant_key = effectiveVariantKey(item)
+  return item
+}
+
+function variantsCompatible(existingItem = {}, nextItem = {}) {
+  const existingVariant = effectiveVariantKey(existingItem)
+  const nextVariant = effectiveVariantKey(nextItem)
+  if (existingVariant && nextVariant) return existingVariant === nextVariant
+  return true
+}
+
 function shouldUseCountStyleName(item = {}, quantity = null) {
   const base = singularize(item.base_name || item.label || "")
   if (COUNT_REQUIRED.has(base)) return true
@@ -523,9 +719,14 @@ function findRootByReference(state, reference = "") {
   return state.items.find((item) => !item.attached_to && itemReference(item) === cleanText(reference)) || null
 }
 
-function findRootByBaseName(state, baseName = "") {
+function findRootByBaseName(state, baseName = "", mealType = "") {
   const normalized = singularize(baseName)
-  return state.items.find((item) => !item.attached_to && singularize(item.base_name) === normalized) || null
+  const normalizedMealType = normalizeMealType(mealType)
+  return state.items.find((item) => (
+    !item.attached_to
+    && singularize(item.base_name) === normalized
+    && (!normalizedMealType || normalizeMealType(item.meal_type || "") === normalizedMealType)
+  )) || null
 }
 
 function findDrinkTarget(state) {
@@ -586,7 +787,17 @@ function parseItemFragment(text = "", state) {
   const embeddedQuantity = !quantity && !relationTail.relation ? extractEmbeddedQuantity(relationTail.lead) : null
   const resolvedQuantity = quantity || embeddedQuantity
   const foodUnitFallback = !baseName && resolvedQuantity?.unit === "egg" ? resolvedQuantity.unit : null
-  const resolvedBaseName = baseName || canonicalBaseName(foodUnitFallback || "")
+  const impliedPreparedBaseTarget = (
+    !baseName
+    && !foodUnitFallback
+    && !relationTail.relation
+    && resolvedQuantity
+    && preparations.length > 0
+  )
+    ? (findRootByReference(state, state.lastMainReference) || unresolvedRoots(state).slice(-1)[0] || null)
+    : null
+  const resolvedBaseName = baseName || canonicalBaseName(foodUnitFallback || impliedPreparedBaseTarget?.base_name || "")
+  const keepBareCountQuantity = !resolvedQuantity || resolvedQuantity.unit || !AMBIGUOUS_BARE_COUNT_BASES.has(singularize(resolvedBaseName))
   if (!resolvedBaseName && resolvedQuantity && CORRECTION_PREFIX.test(cleanText(text))) {
     const correctionTarget = findRootByReference(state, state.lastMainReference) || unresolvedRoots(state).slice(-1)[0] || null
     if (correctionTarget) {
@@ -606,7 +817,7 @@ function parseItemFragment(text = "", state) {
     const target = findDrinkTarget(state)
     if (target) return { kind: "bind_exclusions", targetReference: itemReference(target), exclusions }
   }
-  if (!resolvedBaseName && relationTail.relation && state.pendingClarification?.type === "ingredient") {
+  if (!resolvedBaseName && relationTail.relation) {
     return { kind: "bind_ingredient", relation: relationTail.relation, ingredientText: relationTail.ingredientText }
   }
   if (!resolvedBaseName && /^cooked in\b|^fried in\b|^with\b/i.test(normalized)) {
@@ -616,17 +827,19 @@ function parseItemFragment(text = "", state) {
     return { kind: "bind_variant", variantText: raw }
   }
   if (!resolvedBaseName) return { kind: "ignore" }
-    const item = {
-      base_name: resolvedBaseName,
-      label: itemLabel(sourceBaseName || resolvedBaseName),
-      category: detectCategory(resolvedBaseName, resolvedQuantity),
-      quantity: resolvedQuantity ? { ...resolvedQuantity, text: String(resolvedQuantity.text || "").replace(/\b(a couple)\b/i, "2") } : null,
-      preparation: preparations,
-      modifiers: [],
+  const item = {
+    base_name: resolvedBaseName,
+    label: itemLabel(sourceBaseName || resolvedBaseName),
+    category: detectCategory(resolvedBaseName, resolvedQuantity),
+    quantity: keepBareCountQuantity && resolvedQuantity
+      ? { ...resolvedQuantity, text: String(resolvedQuantity.text || "").replace(/\b(a couple)\b/i, "2") }
+      : null,
+    preparation: preparations,
+    modifiers: [],
     exclusions,
     attached_to: null,
     relation: null,
-    variant_key: "",
+    variant_key: [...new Set(preparations.map((value) => cleanText(value)).filter(Boolean))].join("+"),
     meal_type: "",
   }
   return relationTail.relation && relationTail.ingredientText
@@ -657,20 +870,30 @@ function parseIngredientItem(text = "") {
 
 function mergeRoot(state, nextItem) {
   const pendingTarget = state.pendingClarification?.targetReference ? findRootByReference(state, state.pendingClarification.targetReference) : null
-  const sameBase = findRootByBaseName(state, nextItem.base_name)
-  const target = pendingTarget && singularize(pendingTarget.base_name) === singularize(nextItem.base_name)
+  const sameBase = state.items.find((item) => (
+    !item.attached_to
+    && singularize(item.base_name) === singularize(nextItem.base_name)
+    && normalizeMealType(item.meal_type || "") === normalizeMealType(nextItem.meal_type || "")
+    && variantsCompatible(item, nextItem)
+  )) || null
+  const target = pendingTarget
+    && singularize(pendingTarget.base_name) === singularize(nextItem.base_name)
+    && variantsCompatible(pendingTarget, nextItem)
     ? pendingTarget
     : sameBase
   if (!target) {
+    syncVariantKey(nextItem)
     state.items.push(cloneItem(nextItem))
     state.lastMainKey = cleanText(nextItem.base_name)
     state.lastMainReference = itemReference(nextItem)
     if (nextItem.category === "drink") state.lastDrinkKey = cleanText(nextItem.base_name)
+    if (nextItem.meal_type) state.currentMealType = normalizeMealType(nextItem.meal_type)
     return
   }
   if (nextItem.quantity) target.quantity = { ...nextItem.quantity }
   if (nextItem.preparation.length) target.preparation = [...new Set([...target.preparation, ...nextItem.preparation])]
   if (nextItem.exclusions.length) target.exclusions = [...new Set([...target.exclusions, ...nextItem.exclusions])]
+  if (nextItem.meal_type && !target.meal_type) target.meal_type = normalizeMealType(nextItem.meal_type)
   if (target.base_name === "tea" && nextItem.base_name !== "tea") {
     target.base_name = nextItem.base_name
     target.label = nextItem.label
@@ -679,9 +902,11 @@ function mergeRoot(state, nextItem) {
     target.base_name = nextItem.base_name
     target.label = nextItem.label
   }
+  syncVariantKey(target)
   state.lastMainKey = cleanText(target.base_name)
   state.lastMainReference = itemReference(target)
   if (target.category === "drink") state.lastDrinkKey = cleanText(target.base_name)
+  if (target.meal_type) state.currentMealType = normalizeMealType(target.meal_type)
 }
 
 function defaultIngredientTarget(state, relation = "with") {
@@ -722,6 +947,14 @@ function applyAlternatePendingReply(state, pending, parsed) {
   if (!parsed || !pendingReference) return false
 
   const pendingTarget = findRootByReference(state, pendingReference)
+
+  if (
+    pending?.type === "ingredient"
+    && (parsed.kind === "item" || parsed.kind === "item_with_attachment")
+    && (parsed.item?.category === "ingredient" || isIngredient(parsed.item?.base_name || ""))
+  ) {
+    return false
+  }
 
   if (parsed.kind === "item") {
     const alternateTarget = findRootByBaseName(state, parsed.item.base_name)
@@ -847,6 +1080,7 @@ function resolvePendingReply(state, text) {
       target.quantity = { ...parsed.quantity }
       if (parsed.preparations.length) target.preparation = [...new Set([...target.preparation, ...parsed.preparations])]
       if (parsed.exclusions.length) target.exclusions = [...new Set([...target.exclusions, ...parsed.exclusions])]
+      syncVariantKey(target)
       state.pendingClarification = null
       state.lastMainReference = itemReference(target)
       if (target.category === "drink") state.lastDrinkKey = cleanText(target.base_name)
@@ -860,6 +1094,8 @@ function resolvePendingReply(state, text) {
         target.base_name = parsed.item.base_name
         target.label = parsed.item.label
       }
+      target.variant_key = parsed.item.variant_key || target.variant_key || ""
+      syncVariantKey(target)
       state.pendingClarification = null
       state.lastMainReference = itemReference(target)
       if (target.category === "drink") state.lastDrinkKey = cleanText(target.base_name)
@@ -1008,7 +1244,15 @@ function summarizeAttached(state, target) {
   return state.items
     .filter((item) => item.attached_to === itemReference(target))
     .map((item) => {
-      const prefix = item.relation === "cooked_in" ? " cooked in " : " with "
+      const prefix = item.relation === "cooked_in"
+        ? " cooked in "
+        : item.relation === "mixed_with"
+          ? " mixed with "
+          : item.relation === "topped_with"
+            ? " topped with "
+            : item.relation === "on"
+              ? " on "
+              : " with "
       return `${prefix}${summarizeItem(state, item, true)}`
     })
     .join("")
@@ -1074,23 +1318,24 @@ function processGraphTurn(state, turn) {
     state.suppressionReply = "Okay, I won't save that."
     return
   }
-  const applyParsedFragment = (fragment) => {
-    const parsed = parseItemFragment(fragment, state)
+  const applyParsedFragment = (fragment, inheritedMealType = "") => {
+    const { mealType, text: fragmentText } = stripMealTypePhrase(fragment, inheritedMealType)
+    const parsed = parseItemFragment(fragmentText, state)
     if (parsed.kind === "legacy") throw new Error("fallback")
-    if (parsed.kind === "ignore") return
+    if (parsed.kind === "ignore") return mealType
     if (parsed.kind === "reference") {
       const target = findRootByBaseName(state, parsed.reference)
       if (target) state.lastMainReference = itemReference(target)
-      return
+      return mealType
     }
     if (parsed.kind === "bind_ingredient") {
       attachIngredient(state, parseIngredientItem(parsed.ingredientText), parsed.relation || "cooked_in")
-      return
+      return mealType
     }
     if (parsed.kind === "bind_exclusions") {
       const target = parsed.targetReference ? findRootByReference(state, parsed.targetReference) : findDrinkTarget(state)
       if (target) target.exclusions = [...new Set([...target.exclusions, ...parsed.exclusions])]
-      return
+      return mealType
     }
     if (parsed.kind === "bind_variant") {
       const drinks = unresolvedRoots(state).filter((item) => item.category === "drink" && !item.quantity)
@@ -1101,7 +1346,7 @@ function processGraphTurn(state, turn) {
         drinks[0].label = itemLabel(label)
         state.lastDrinkKey = cleanText(label)
       }
-      return
+      return mealType
     }
     if (parsed.kind === "bind_quantity") {
       const target = parsed.targetReference
@@ -1113,36 +1358,42 @@ function processGraphTurn(state, turn) {
         target.quantity = { ...parsed.quantity }
         if (parsed.preparations.length) target.preparation = [...new Set([...target.preparation, ...parsed.preparations])]
         if (parsed.exclusions.length) target.exclusions = [...new Set([...target.exclusions, ...parsed.exclusions])]
+        if (mealType && !target.meal_type) target.meal_type = normalizeMealType(mealType)
       }
-      return
+      return mealType || target?.meal_type || ""
     }
     if (parsed.kind === "item_with_attachment") {
-      mergeRoot(state, parsed.item)
+      const item = { ...parsed.item, meal_type: normalizeMealType(parsed.item.meal_type || mealType || "") }
+      mergeRoot(state, item)
       attachIngredient(state, parseIngredientItem(parsed.ingredientText), parsed.relation || "with")
-      return
+      return item.meal_type || mealType
     }
     if (parsed.kind === "item") {
-      mergeRoot(state, parsed.item)
-      return
+      const item = { ...parsed.item, meal_type: normalizeMealType(parsed.item.meal_type || mealType || "") }
+      mergeRoot(state, item)
+      return item.meal_type || mealType
     }
+    return mealType
   }
 
   const fragments = splitGraphClauses(text)
   if (state.pendingClarification && fragments.length > 1) {
     let handledPending = false
+    let inheritedMealType = state.currentMealType || ""
     for (const fragment of fragments) {
       if (resolvePendingReply(state, fragment)) {
         handledPending = true
         continue
       }
-      applyParsedFragment(fragment)
+      inheritedMealType = applyParsedFragment(fragment, inheritedMealType) || inheritedMealType
     }
     if (handledPending) return
   }
 
   if (resolvePendingReply(state, text)) return
+  let inheritedMealType = state.currentMealType || ""
   for (const fragment of fragments) {
-    applyParsedFragment(fragment)
+    inheritedMealType = applyParsedFragment(fragment, inheritedMealType) || inheritedMealType
   }
 }
 
@@ -1153,6 +1404,11 @@ export function emptyMealSession() {
 export function buildMealStateFromConversation(recentMessages = [], currentMessage = "", existingSession = null) {
   const resolvedMessage = resolveInlineCorrection(currentMessage)
   const conversation = normalizeConversation(recentMessages, resolvedMessage, existingSession)
+  const implicitLoggingTurn = (
+    isGraphNativeImplicitMeasuredTurn(conversation, resolvedMessage, existingSession)
+    || isGraphNativeFriendlyDaypartTurn(conversation, resolvedMessage, existingSession)
+    || isGraphNativeFriendlyPersistedFollowUp(resolvedMessage, existingSession)
+  )
   if (!existingSession?.active && !existingSession?.persisted && isFutureMealIntent(resolvedMessage)) {
     return baseSession()
   }
@@ -1174,7 +1430,7 @@ export function buildMealStateFromConversation(recentMessages = [], currentMessa
   state.nextClarificationReference = String(existingSession?.nextClarificationReference || "")
   state.thread_messages = conversation.map((entry) => ({ role: entry.role, content: String(entry.content || "") }))
   state.answerOnly = detectQuestionOnlyTurn(resolvedMessage)
-  state.wantsLogging = Boolean(existingSession?.wantsLogging) || MEAL_START_PATTERN.test(cleanText(resolvedMessage))
+  state.wantsLogging = Boolean(existingSession?.wantsLogging) || MEAL_START_PATTERN.test(cleanText(resolvedMessage)) || implicitLoggingTurn
   state.wantsNutrition = Boolean(existingSession?.wantsNutrition) || /\b(?:calories|protein|carbs|fat|macro|macros)\b/i.test(cleanText(resolvedMessage))
   state.mealConversation = Boolean(existingSession?.mealConversation) || looksFoodish(resolvedMessage) || Boolean(existingSession?.active)
   state.intentGraph = buildIntentGraph(conversation, resolvedMessage, existingSession)
