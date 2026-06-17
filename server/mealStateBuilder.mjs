@@ -158,6 +158,47 @@ export function detectQuestionOnlyTurn(text) {
   return legacyDetectQuestionOnlyTurn(text)
 }
 
+function isFreshStandaloneMealTurn(currentMessage = "", existingSession = null) {
+  if (existingSession?.active || existingSession?.persisted) return false
+  const normalizedCurrent = cleanText(currentMessage)
+  if (!normalizedCurrent) return false
+  if (detectQuestionOnlyTurn(currentMessage) || isWorkoutish(normalizedCurrent) || isFutureMealIntent(currentMessage)) return false
+  return Boolean(
+    MEAL_START_PATTERN.test(normalizedCurrent)
+    || isSimpleMeasuredMealFragment(currentMessage)
+    || isMixedMealWorkoutStart(currentMessage, existingSession)
+    || looksFoodish(currentMessage)
+    || mentionsDrink(currentMessage)
+  )
+}
+
+function pruneTrailingNutritionQuestionHistory(recentMessages = [], currentMessage = "", existingSession = null) {
+  const history = safeArray(recentMessages, 18).filter((entry) => typeof entry?.content === "string")
+  if (!isFreshStandaloneMealTurn(currentMessage, existingSession)) return history
+
+  let cursor = history.length - 1
+  let removedNutritionQuestion = false
+
+  while (cursor >= 0) {
+    const entry = history[cursor]
+    const text = String(entry?.content || "")
+    if (entry?.role === "assistant") {
+      cursor -= 1
+      continue
+    }
+    if (entry?.role === "user" && detectQuestionOnlyTurn(text)) {
+      removedNutritionQuestion = true
+      cursor -= 1
+      continue
+    }
+    break
+  }
+
+  return removedNutritionQuestion
+    ? history.slice(0, cursor + 1)
+    : history
+}
+
 function cloneItem(item = {}) {
   return {
     base_name: item.base_name || "",
@@ -178,7 +219,8 @@ function normalizeConversation(recentMessages = [], currentMessage = "", existin
   if (existingSession?.active) {
     return [...safeArray(existingSession.thread_messages, 18), { role: "user", content: String(currentMessage || "") }]
   }
-  return [...safeArray(recentMessages, 18).filter((entry) => typeof entry?.content === "string"), { role: "user", content: String(currentMessage || "") }]
+  const history = pruneTrailingNutritionQuestionHistory(recentMessages, currentMessage, existingSession)
+  return [...history, { role: "user", content: String(currentMessage || "") }]
 }
 
 function isSimpleFoodDrinkStart(currentMessage = "") {
@@ -1403,7 +1445,8 @@ export function emptyMealSession() {
 
 export function buildMealStateFromConversation(recentMessages = [], currentMessage = "", existingSession = null) {
   const resolvedMessage = resolveInlineCorrection(currentMessage)
-  const conversation = normalizeConversation(recentMessages, resolvedMessage, existingSession)
+  const normalizedRecentMessages = pruneTrailingNutritionQuestionHistory(recentMessages, resolvedMessage, existingSession)
+  const conversation = normalizeConversation(normalizedRecentMessages, resolvedMessage, existingSession)
   const implicitLoggingTurn = (
     isGraphNativeImplicitMeasuredTurn(conversation, resolvedMessage, existingSession)
     || isGraphNativeFriendlyDaypartTurn(conversation, resolvedMessage, existingSession)
@@ -1416,7 +1459,7 @@ export function buildMealStateFromConversation(recentMessages = [], currentMessa
     return preserveExistingSessionForIgnoredTurn(conversation, resolvedMessage, existingSession)
   }
   if (shouldUseLegacy(conversation, resolvedMessage, existingSession)) {
-    return markLegacySession(buildLegacyMealStateFromConversation(recentMessages, resolvedMessage, existingSession), "legacy_gate")
+    return markLegacySession(buildLegacyMealStateFromConversation(normalizedRecentMessages, resolvedMessage, existingSession), "legacy_gate")
   }
 
   const state = baseSession()
@@ -1509,7 +1552,8 @@ export function mealStateNeedsClarification(mealState) {
 
 export function buildMealContext(recentMessages = [], currentMessage = "", existingSession = null) {
   const resolvedMessage = resolveInlineCorrection(currentMessage)
-  const conversation = normalizeConversation(recentMessages, resolvedMessage, existingSession)
+  const normalizedRecentMessages = pruneTrailingNutritionQuestionHistory(recentMessages, resolvedMessage, existingSession)
+  const conversation = normalizeConversation(normalizedRecentMessages, resolvedMessage, existingSession)
   if (!existingSession?.active && !existingSession?.persisted && isFutureMealIntent(resolvedMessage)) {
     return null
   }
@@ -1517,9 +1561,9 @@ export function buildMealContext(recentMessages = [], currentMessage = "", exist
     return preserveExistingSessionForIgnoredTurn(conversation, resolvedMessage, existingSession)
   }
   if (shouldUseLegacy(conversation, resolvedMessage, existingSession)) {
-    return markLegacySession(buildLegacyMealContext(recentMessages, resolvedMessage, existingSession), "legacy_gate")
+    return markLegacySession(buildLegacyMealContext(normalizedRecentMessages, resolvedMessage, existingSession), "legacy_gate")
   }
-  const state = buildMealStateFromConversation(recentMessages, resolvedMessage, existingSession)
+  const state = buildMealStateFromConversation(normalizedRecentMessages, resolvedMessage, existingSession)
   if (!state.mealConversation && !state.suppressed) return null
   return {
     ...state,

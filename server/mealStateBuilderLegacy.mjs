@@ -590,7 +590,7 @@ function looksLikeMealContinuation(text, state, threadHint = false) {
   if (!normalized) return false
   if (looksLikeMealLogQuery(normalized)) return false
   if (detectSuppressedLogging(normalized)) return true
-  if (detectQuestionOnlyTurn(text) && (threadHint || state.items.length)) return true
+  if (detectQuestionOnlyTurn(text)) return false
   if (looksLikeWorkoutOnly(normalized)) return false
   if (MEAL_VERBS.test(normalized)) return true
   if (FINALISE_PATTERN.test(normalized) && (threadHint || state.items.length)) return true
@@ -667,6 +667,7 @@ function extractMealThread(recentMessages = [], currentMessage = "", existingSes
   const hasMealHistory = history.some((entry) => (
     entry?.role === "user"
     && !looksLikeMealLogQuery(entry.content || "")
+    && !detectQuestionOnlyTurn(entry.content || "")
     && (isExplicitMealStart(entry.content) || looksFoodishPhrase(entry.content) || MEAL_REFERENCE_PATTERN.test(cleanText(entry.content || "")))
   ))
   const shouldTrack = isExplicitMealStart(normalizedCurrent)
@@ -2306,7 +2307,7 @@ function mergeClauseIntoState(state, clause) {
     return true
   }
 
-  if (detectQuestionOnlyTurn(clauseText) && state.items.length) {
+  if (detectQuestionOnlyTurn(clauseText)) {
     state.answerOnly = true
     return false
   }

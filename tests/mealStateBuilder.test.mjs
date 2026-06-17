@@ -482,6 +482,22 @@ test("inline correction replaces a measured food quantity cleanly", () => {
   assert.equal(session.items[0]?.quantity?.unit, "g")
 })
 
+test("nutrition question history does not pollute a fresh meal log turn", () => {
+  const { session } = replayMealConversation([
+    user("whats the macros for 100g chicken breast"),
+    assistant("100g chicken breast is about 165 calories."),
+    user("i had 2 eggs"),
+  ])
+
+  assert.ok(session)
+  assertGraphNativeSession(session)
+  assert.equal(session.processingMode, "graph_native")
+  assert.equal(session.readyToLog, true)
+  assert.equal(session.summary, "2 eggs")
+  assert.equal(session.items.some((item) => /chicken/i.test(item.base_name || "")), false)
+  assert.equal(session.wantsNutrition, false)
+})
+
 test("graph-native meal context keeps persisted ingredient follow-ups out of legacy fallback", () => {
   const initial = buildMealContext([], "i had 1 burger", emptyMealSession())
   const persisted = {

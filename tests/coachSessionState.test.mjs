@@ -649,6 +649,35 @@ test("post-save nutrition questions route away from a persisted meal session", (
   assert.equal(next.workoutSession, null)
 })
 
+test("nutrition answer history does not contaminate the next fresh meal log", () => {
+  const { mealSession, workoutSession } = replayCoachConversation([
+    user("whats the macros for 100g chicken breast"),
+    assistant("100g chicken breast is about 165 calories."),
+    user("i had 2 eggs"),
+  ])
+
+  assert.ok(mealSession)
+  assert.equal(mealSession.summary, "2 eggs")
+  assert.equal(mealSession.items.some((item) => /chicken/i.test(item.base_name || item.baseName || "")), false)
+  assert.equal(mealSession.answerOnly, false)
+  assert.equal(workoutSession.readyToLog, false)
+  assert.equal(workoutSession.exercise_name, "")
+})
+
+test("nutrition answer history does not contaminate the next workout log", () => {
+  const { mealSession, workoutSession } = replayCoachConversation([
+    user("whats the macros for 100g chicken breast"),
+    assistant("100g chicken breast is about 165 calories."),
+    user("i did 20 pushups"),
+  ])
+
+  assert.equal(mealSession.mealConversation, false)
+  assert.equal(mealSession.summary, "")
+  assert.equal(workoutSession.readyToLog, true)
+  assert.equal(normalizeValueText(workoutSession.exercise_name), "pushups")
+  assert.equal(workoutSession.reps, 20)
+})
+
 test("coach session state splits same-turn meal and workout fragments so the workout does not become food", () => {
   const firstTurn = buildCoachSessionState({
     recentMessages: [],
