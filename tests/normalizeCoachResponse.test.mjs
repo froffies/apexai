@@ -157,7 +157,7 @@ test("normalizeCoachResponse canonicalizes AI-requested meal persistence from se
   assert.equal(payload.actions[0].food_name, "17 fried eggs cooked in 100g salted butter, plus 250ml Earl Grey tea with no milk and no sugar")
 })
 
-test("normalizeCoachResponse binds a single candidate persistence action when the AI reply confirms the save but omits actions", () => {
+test("normalizeCoachResponse does not bind a candidate persistence action from reply text alone", () => {
   const payload = normalizeCoachResponse({
     reply: "Updated today's nutrition: 1 bowl chips with gravy.",
     actions: [],
@@ -179,9 +179,8 @@ test("normalizeCoachResponse binds a single candidate persistence action when th
     }],
   })
 
-  assert.equal(payload.actions.length, 1)
-  assert.equal(payload.actions[0].type, "update_meal_log")
-  assert.equal(payload.actions[0].meal_id, "meal_chips")
+  assert.equal(payload.actions.length, 0)
+  assert.equal(payload.reply, "I have the details, but I couldn't save it just now.")
 })
 
 test("normalizeCoachResponse does not auto-inject clarify actions on the AI-first path", () => {
@@ -542,7 +541,7 @@ test("normalizeCoachResponse keeps validated mixed actions when the AI reply fal
   assert.doesNotMatch(payload.reply, /couldn't save it just now/i)
 })
 
-test("normalizeCoachResponse recovers a single ready workout save when the AI keeps the meal clarification open", () => {
+test("normalizeCoachResponse does not auto-save a ready workout when the AI keeps the meal clarification open", () => {
   const payload = normalizeCoachResponse({
     reply: "You've done 45 pushups for 1 set-great work! I still need to know how much light milk you had to log your meal. Can you let me know?",
     actions: [],
@@ -589,13 +588,11 @@ test("normalizeCoachResponse recovers a single ready workout save when the AI ke
     },
   })
 
-  assert.equal(payload.actions.length, 1)
-  assert.equal(payload.actions[0].type, "log_workout")
-  assert.equal(payload.actions[0].exercise_name, "Pushups")
+  assert.equal(payload.actions.length, 0)
   assert.match(payload.reply, /light milk/i)
 })
 
-test("normalizeCoachResponse strict AI-first recovers a single ready workout save when the AI only asks the meal clarification", () => {
+test("normalizeCoachResponse strict AI-first keeps the meal clarification without auto-saving the workout", () => {
   const payload = normalizeCoachResponse({
     reply: "How much milk did you have?",
     actions: [],
@@ -643,14 +640,12 @@ test("normalizeCoachResponse strict AI-first recovers a single ready workout sav
     },
   })
 
-  assert.equal(payload.actions.some((action) => action.type === "log_workout"), true)
-  assert.equal(payload.actions.some((action) => action.type === "clarify"), true)
-  assert.equal(payload.actions.find((action) => action.type === "log_workout")?.exercise_name, "Pushup")
-  assert.match(payload.reply, /saved to workouts/i)
+  assert.equal(payload.actions.length, 1)
+  assert.equal(payload.actions[0].type, "clarify")
   assert.match(payload.reply, /how much milk/i)
 })
 
-test("normalizeCoachResponse strict AI-first still recovers the single workout save when other unresolved meal candidates are present", () => {
+test("normalizeCoachResponse strict AI-first ignores internal workout candidates when the AI only asks the meal clarification", () => {
   const payload = normalizeCoachResponse({
     reply: "How much milk did you have?",
     actions: [],
@@ -709,14 +704,13 @@ test("normalizeCoachResponse strict AI-first still recovers the single workout s
     },
   })
 
-  assert.equal(payload.actions.some((action) => action.type === "log_workout"), true)
-  assert.equal(payload.actions.some((action) => action.type === "clarify"), true)
+  assert.equal(payload.actions.length, 1)
+  assert.equal(payload.actions[0].type, "clarify")
   assert.equal(payload.actions.some((action) => action.type === "log_meal"), false)
-  assert.match(payload.reply, /saved to workouts/i)
   assert.match(payload.reply, /how much milk/i)
 })
 
-test("normalizeCoachResponse strict AI-first recovers the workout save for paraphrased meal quantity clarifications", () => {
+test("normalizeCoachResponse strict AI-first keeps a paraphrased meal clarification without auto-saving the workout", () => {
   const payload = normalizeCoachResponse({
     reply: "I'm asking how much milk you had.",
     actions: [
@@ -769,9 +763,8 @@ test("normalizeCoachResponse strict AI-first recovers the workout save for parap
     },
   })
 
-  assert.equal(payload.actions.some((action) => action.type === "log_workout"), true)
-  assert.equal(payload.actions.some((action) => action.type === "clarify"), true)
-  assert.match(payload.reply, /saved to workouts/i)
+  assert.equal(payload.actions.length, 1)
+  assert.equal(payload.actions[0].type, "clarify")
   assert.match(payload.reply, /milk/i)
 })
 
@@ -1045,7 +1038,7 @@ test("normalizeCoachResponse strict AI-first canonicalizes explicit meal persist
   assert.ok(payload.actions[0].carbs_g < 5)
 })
 
-test("normalizeCoachResponse strict AI-first recovers a single validated candidate save when the AI reply confirms it", () => {
+test("normalizeCoachResponse strict AI-first does not recover a validated candidate save from reply text alone", () => {
   const payload = normalizeCoachResponse({
     reply: "Updated today's nutrition: 1 bowl chips with gravy.",
     actions: [],
@@ -1068,9 +1061,41 @@ test("normalizeCoachResponse strict AI-first recovers a single validated candida
     }],
   })
 
+  assert.equal(payload.actions.length, 0)
+  assert.equal(payload.reply, "I have the details, but I couldn't save it just now.")
+})
+
+test("normalizeCoachResponse strict AI-first canonicalizes an explicit persistence action from internal candidates", () => {
+  const payload = normalizeCoachResponse({
+    reply: "Updated it.",
+    actions: [{
+      type: "update_meal_log",
+      meal_id: "meal_chips",
+    }],
+    warnings: [],
+  }, {
+    preferAIFirst: true,
+    strictAIFirst: true,
+    canonicalPersistenceActions: [{
+      type: "update_meal_log",
+      meal_id: "meal_chips",
+      meal_type: "snack",
+      food_name: "1 bowl chips with gravy",
+      quantity: "1 meal",
+      calories: 240,
+      protein_g: 13,
+      carbs_g: 20,
+      fat_g: 11,
+      estimated: true,
+      nutrition_source: "Coach estimate from accumulated meal details across chat",
+    }],
+  })
+
   assert.equal(payload.actions.length, 1)
   assert.equal(payload.actions[0].type, "update_meal_log")
   assert.equal(payload.actions[0].meal_id, "meal_chips")
+  assert.equal(payload.actions[0].food_name, "1 bowl chips with gravy")
+  assert.equal(payload.actions[0].calories, 240)
 })
 
 test("normalizeCoachResponse strict AI-first keeps a good AI clarify reply instead of replacing it with parser clarify hints", () => {

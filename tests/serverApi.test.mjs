@@ -997,8 +997,10 @@ test("ready meal corrections outrank stray workout clarifications when OpenAI is
   assert.ok(!coach.workout_session || !coach.workout_session.clarifyQuestion)
 })
 
-test("ai-assisted coach recovers a ready meal correction when the model replies with a stale workout message", async (t) => {
-  const fakeOpenAIBaseUrl = await startFakeOpenAIServer(t, async (_request, response) => {
+test("ai-assisted coach keeps parser persistence hints internal and will not auto-persist from a stale reply alone", async (t) => {
+  let upstreamRequestPayload = null
+  const fakeOpenAIBaseUrl = await startFakeOpenAIServer(t, async (_request, response, rawBody) => {
+    upstreamRequestPayload = JSON.parse(rawBody || "{}")
     response.writeHead(200, { "Content-Type": "application/json" })
     response.end(JSON.stringify({
       id: "chatcmpl_recover_meal",
@@ -1116,10 +1118,147 @@ test("ai-assisted coach recovers a ready meal correction when the model replies 
   })
   const coach = await coachResponse.json()
   assert.equal(coachResponse.status, 200)
+  const upstreamCoachPayload = JSON.parse(String(upstreamRequestPayload?.messages?.[1]?.content || "{}"))
+  assert.deepEqual(upstreamCoachPayload.candidate_persistence_actions, [])
+  assert.deepEqual(upstreamCoachPayload.response_hints?.candidate_persistence_action_types, [])
+  assert.equal((coach.actions || []).some((action) => action?.type === "update_meal_log" || action?.type === "log_meal"), false)
+  assert.equal(coach.reply, "I have the details, but I couldn't save it just now.")
+  assert.doesNotMatch(coach.reply, /already saved .*pushups/i)
+})
+
+test("ai-assisted coach canonicalizes an explicit meal update without exposing parser save candidates upstream", async (t) => {
+  let upstreamRequestPayload = null
+  const fakeOpenAIBaseUrl = await startFakeOpenAIServer(t, async (_request, response, rawBody) => {
+    upstreamRequestPayload = JSON.parse(rawBody || "{}")
+    response.writeHead(200, { "Content-Type": "application/json" })
+    response.end(JSON.stringify({
+      id: "chatcmpl_ai_first_meal_update",
+      object: "chat.completion",
+      created: 1,
+      model: "gpt-4o-mini",
+      choices: [
+        {
+          index: 0,
+          finish_reason: "stop",
+          message: {
+            role: "assistant",
+            content: JSON.stringify({
+              reply: "Updated it.",
+              actions: [
+                {
+                  type: "update_meal_log",
+                  meal_id: "meal_fix_live",
+                },
+              ],
+              warnings: [],
+            }),
+          },
+        },
+      ],
+    }))
+  })
+
+  const port = randomPort()
+  const serverProcess = spawn(process.execPath, [serverEntry], {
+    cwd,
+    env: {
+      ...process.env,
+      OPENAI_COACH_PORT: String(port),
+      OPENAI_COACH_REQUIRE_AUTH: "false",
+      OPENAI_COACH_CORS_ORIGIN: "http://127.0.0.1:5173",
+      OPENFOODFACTS_ENABLED: "false",
+      OPENAI_API_KEY: "test-key",
+      OPENAI_BASE_URL: fakeOpenAIBaseUrl,
+      NODE_ENV: "production",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  })
+
+  t.after(async () => {
+    serverProcess.kill()
+  })
+
+  await waitForHealth(port)
+
+  const coachResponse = await fetch(`http://127.0.0.1:${port}/api/coach`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Origin: "http://127.0.0.1:5173",
+    },
+    body: JSON.stringify({
+      message: "actually it was 18 fried eggs cooked in 100g of salted butter, plus 250ml Earl Grey tea with no milk and no sugar",
+      mealSession: {
+        active: true,
+        mealConversation: true,
+        readyToLog: true,
+        clarificationAttempts: 8,
+        clarificationCounts: { "egg:quantity": 2, "earl grey tea:quantity": 1, "egg:cooking_medium": 5, "tea:additions": 4 },
+        summary: "18 fried eggs cooked in 100g salted butter, plus 250ml Earl Grey tea with no milk and no sugar",
+        clarifyQuestion: "",
+        persisted: true,
+        persistedMealId: "meal_fix_live",
+        persistedSummary: "17 fried eggs cooked in 100g salted butter, plus 250ml Earl Grey tea with no milk and no sugar",
+        correctionRequested: true,
+        items: [
+          {
+            base_name: "egg",
+            label: "Eggs",
+            category: "food",
+            quantity: { amount: 18, unit: "egg", text: "18 eggs" },
+            preparation: ["fried"],
+            exclusions: [],
+            attached_to: null,
+            relation: null,
+          },
+          {
+            base_name: "earl grey tea",
+            label: "Earl Grey tea",
+            category: "drink",
+            quantity: { amount: 250, unit: "ml", text: "250ml" },
+            preparation: [],
+            exclusions: ["no sugar", "no milk"],
+            attached_to: null,
+            relation: null,
+          },
+          {
+            base_name: "salted butter",
+            label: "Salted Butter",
+            category: "ingredient",
+            quantity: { amount: 100, unit: "g", text: "100g" },
+            preparation: ["salted"],
+            exclusions: [],
+            attached_to: "egg::fried",
+            relation: "cooked_in",
+          },
+        ],
+      },
+      workoutSession: {
+        active: false,
+        workoutConversation: true,
+        readyToLog: false,
+        persisted: true,
+        persistedWorkoutId: "workout_pushups",
+        persistedSummary: "Pushups for 1 set of 3",
+        summary: "Pushups for 1 set of 3",
+        exercise_name: "Pushups",
+        workout_type: "Pushups",
+        muscle_group: "full_body",
+        sets: 1,
+        reps: 3,
+        weight_kg: 0,
+      },
+    }),
+  })
+  const coach = await coachResponse.json()
+  assert.equal(coachResponse.status, 200)
+  const upstreamCoachPayload = JSON.parse(String(upstreamRequestPayload?.messages?.[1]?.content || "{}"))
+  assert.deepEqual(upstreamCoachPayload.candidate_persistence_actions, [])
   assert.equal(coach.actions?.[0]?.type, "update_meal_log")
   assert.equal(coach.actions?.[0]?.meal_id, "meal_fix_live")
-  assert.match(coach.reply, /updated today's nutrition/i)
-  assert.doesNotMatch(coach.reply, /already saved .*pushups/i)
+  assert.match(String(coach.actions?.[0]?.food_name || ""), /18 fried eggs cooked in 100g salted butter/i)
+  assert.ok(Number(coach.actions?.[0]?.calories || 0) > 0)
+  assert.match(coach.reply || "", /updated/i)
 })
 
 test("additive meal follow-ups update the persisted meal instead of creating a duplicate", async (t) => {

@@ -95,34 +95,6 @@ function replyAddressesWorkoutClarification(reply = "", workoutContext = null) {
   return targetTokens.some((token) => token && normalizedReply.includes(token))
 }
 
-function replyAcknowledgesWorkoutCompletion(reply = "", workoutContext = null) {
-  if (!workoutContext?.readyToLog) return false
-  if (replyAddressesWorkoutClarification(reply, workoutContext)) return false
-  const normalizedReply = cleanReplyText(reply)
-  if (!normalizedReply) return false
-
-  const targetTokens = [
-    ...tokenVariants(workoutContext?.exercise_name || ""),
-    ...tokenVariants(workoutContext?.workout_type || ""),
-  ]
-  const mentionsWorkout = targetTokens.some((token) => token && new RegExp(`\\b${escapeRegex(token)}\\b`, "i").test(normalizedReply))
-  if (!mentionsWorkout) return false
-
-  const repText = Number.isFinite(Number(workoutContext?.reps)) && Number(workoutContext.reps) > 0
-    ? String(Number(workoutContext.reps))
-    : ""
-  const setText = Number.isFinite(Number(workoutContext?.sets)) && Number(workoutContext.sets) > 0
-    ? String(Number(workoutContext.sets))
-    : ""
-  const mentionsMetrics = Boolean(
-    (repText && new RegExp(`\\b${escapeRegex(repText)}\\b`, "i").test(normalizedReply))
-    || (setText && new RegExp(`\\b${escapeRegex(setText)}\\s+set`, "i").test(normalizedReply))
-    || /\b(?:great work|nice work|well done|done|you did)\b/i.test(normalizedReply)
-  )
-
-  return mentionsMetrics
-}
-
 function actionDedupeKey(action = {}) {
   const type = String(action?.type || "").trim()
   if (!type) return ""
@@ -191,6 +163,65 @@ function buildClarifyRecoveryAction(session, hint = "") {
   }
 }
 
+function normalizeComparableText(value = "") {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[’']/g, "'")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
+function valuesComparable(a = "", b = "") {
+  const left = normalizeComparableText(a)
+  const right = normalizeComparableText(b)
+  if (!left || !right) return false
+  return left === right || left.includes(right) || right.includes(left)
+}
+
+function findMatchingCanonicalPersistenceAction(action = {}, candidates = []) {
+  const normalizedCandidates = safeArray(candidates, 8).map(normalizeMealAction).filter(Boolean)
+  if (!normalizedCandidates.length) return null
+  if (normalizedCandidates.length === 1) return normalizedCandidates[0]
+
+  if (isMealPersistenceAction(action)) {
+    const mealId = String(action?.meal_id || "").trim()
+    const foodName = String(action?.food_name || "").trim()
+    const mealType = String(action?.meal_type || "").trim()
+    return normalizedCandidates.find((candidate) => (
+      (mealId && String(candidate?.meal_id || "").trim() === mealId)
+      || (foodName && valuesComparable(candidate?.food_name, foodName))
+      || (mealType && valuesComparable(candidate?.meal_type, mealType))
+    )) || null
+  }
+
+  if (isWorkoutPersistenceAction(action)) {
+    const workoutId = String(action?.workout_id || "").trim()
+    const exerciseName = String(action?.exercise_name || action?.workout_type || "").trim()
+    return normalizedCandidates.find((candidate) => (
+      (workoutId && String(candidate?.workout_id || "").trim() === workoutId)
+      || (exerciseName && valuesComparable(candidate?.exercise_name || candidate?.workout_type, exerciseName))
+    )) || null
+  }
+
+  return null
+}
+
+function canonicalizeExplicitPersistenceAction(action = {}, {
+  strictAIFirst = false,
+  canonicalMealPersistenceActions = [],
+  canonicalWorkoutPersistenceActions = [],
+} = {}) {
+  if (!strictAIFirst || !isPersistenceAction(action)) return action
+  if (isMealPersistenceAction(action)) {
+    return findMatchingCanonicalPersistenceAction(action, canonicalMealPersistenceActions) || action
+  }
+  if (isWorkoutPersistenceAction(action)) {
+    return findMatchingCanonicalPersistenceAction(action, canonicalWorkoutPersistenceActions) || action
+  }
+  return action
+}
+
 export function normalizeCoachResponse(value, context = {}) {
   if (!value || typeof value !== "object") {
     throw new Error("OpenAI returned an invalid coach payload")
@@ -231,7 +262,10 @@ export function normalizeCoachResponse(value, context = {}) {
     workoutSession: context.workoutContext,
     explicitActions: [],
   })
-  const candidatePersistenceActionsInput = safeArray(context.candidatePersistenceActions, 8).map(normalizeAction).filter(Boolean)
+  const canonicalPersistenceActionsInput = safeArray(
+    context.canonicalPersistenceActions ?? context.candidatePersistenceActions,
+    8
+  ).map(normalizeAction).filter(Boolean)
   const validatedActions = safeArray(context.validatedActions, 8).map(normalizeAction).filter(Boolean)
   const responseHints = context.responseHints || {}
   const hintAlreadyLoggedMeal = responseHints.already_logged?.meal || null
@@ -244,8 +278,8 @@ export function normalizeCoachResponse(value, context = {}) {
   const hasValidatedWorkoutPersistence = validatedActions.some(isWorkoutPersistenceAction)
   const hasValidatedMealDelete = validatedActions.some((action) => action?.type === "delete_meal_log")
   const hasValidatedWorkoutDelete = validatedActions.some((action) => action?.type === "delete_workout_log")
-  const candidatePersistenceActions = candidatePersistenceActionsInput.length
-    ? candidatePersistenceActionsInput
+  const candidatePersistenceActions = canonicalPersistenceActionsInput.length
+    ? canonicalPersistenceActionsInput
     : (strictAIFirst
       ? []
       : [
@@ -270,16 +304,20 @@ export function normalizeCoachResponse(value, context = {}) {
     : (strictAIFirst ? validationWorkoutPersistenceActions : [])
   const aiRequestedMealPersistence = explicitActions.some(isMealPersistenceAction)
   const aiRequestedWorkoutPersistence = explicitActions.some(isWorkoutPersistenceAction)
-  const deterministicMealActions = hasValidatedMealPersistence
+  const deterministicMealActions = strictAIFirst
     ? []
-    : (preferAIFirst
-      ? (aiRequestedMealPersistence ? canonicalMealPersistenceActions : [])
-      : candidateMealPersistenceActions)
-  const deterministicWorkoutActions = hasValidatedWorkoutPersistence
+    : (hasValidatedMealPersistence
+      ? []
+      : (preferAIFirst
+        ? (aiRequestedMealPersistence ? canonicalMealPersistenceActions : [])
+        : candidateMealPersistenceActions))
+  const deterministicWorkoutActions = strictAIFirst
     ? []
-    : (preferAIFirst
-      ? (aiRequestedWorkoutPersistence ? canonicalWorkoutPersistenceActions : [])
-      : candidateWorkoutPersistenceActions)
+    : (hasValidatedWorkoutPersistence
+      ? []
+      : (preferAIFirst
+        ? (aiRequestedWorkoutPersistence ? canonicalWorkoutPersistenceActions : [])
+        : candidateWorkoutPersistenceActions))
   const mealHasPendingWork = Boolean(
     context.mealContext
     && !context.mealContext.alreadyLogged
@@ -311,13 +349,10 @@ export function normalizeCoachResponse(value, context = {}) {
   const filteredExplicitActions = explicitActions.filter((action) => {
     if ((deterministicMealActions.length || deterministicMealDeleteAction || hasValidatedMealDelete || hasValidatedMealPersistence) && isMealPersistenceAction(action)) return false
     if ((deterministicWorkoutActions.length || deterministicWorkoutDeleteAction || hasValidatedWorkoutDelete || hasValidatedWorkoutPersistence) && isWorkoutPersistenceAction(action)) return false
-    if (strictAIFirst && canonicalMealPersistenceActions.length && isMealPersistenceAction(action)) return false
-    if (strictAIFirst && canonicalWorkoutPersistenceActions.length && isWorkoutPersistenceAction(action)) return false
     if (strictAIFirst && isAnswerOnlyMealTurn && isMealPersistenceAction(action)) return false
     if (
       strictAIFirst
       && isMealPersistenceAction(action)
-      && !candidateMealPersistenceActions.length
       && (
         String(context.mealContext?.pendingClarification?.type || "") !== ""
         || (context.mealContext?.clarifyQuestion && !context.mealContext?.readyToLog)
@@ -327,7 +362,6 @@ export function normalizeCoachResponse(value, context = {}) {
     if (
       strictAIFirst
       && isWorkoutPersistenceAction(action)
-      && !candidateWorkoutPersistenceActions.length
       && (
         (context.workoutContext?.clarifyQuestion && !context.workoutContext?.readyToLog)
         || (context.workoutContext?.persistedWorkoutId && !context.workoutContext?.correctionRequested && !context.workoutContext?.deleteRequested)
@@ -370,6 +404,11 @@ export function normalizeCoachResponse(value, context = {}) {
     ) return false
     return true
   })
+  const resolvedExplicitActions = filteredExplicitActions.map((action) => canonicalizeExplicitPersistenceAction(action, {
+    strictAIFirst,
+    canonicalMealPersistenceActions,
+    canonicalWorkoutPersistenceActions,
+  }))
 
   const explicitMealPersistenceAction = filteredExplicitActions.find(isMealPersistenceAction)
   const explicitWorkoutPersistenceAction = filteredExplicitActions.find(isWorkoutPersistenceAction)
@@ -394,7 +433,7 @@ export function normalizeCoachResponse(value, context = {}) {
     ...deterministicMealActions,
     ...deterministicWorkoutActions,
     ...deterministicClarifyActions,
-    ...filteredExplicitActions,
+    ...resolvedExplicitActions,
   ]
     .map(normalizeMealAction)
     .filter((action) => !(strictAIFirst && isAnswerOnlyMealTurn && isMealPersistenceAction(action)))
@@ -419,15 +458,6 @@ export function normalizeCoachResponse(value, context = {}) {
 
   const originalReply =
     typeof value.reply === "string" && value.reply.trim() ? value.reply.trim() : ""
-  const singleCandidatePersistenceAction = candidatePersistenceActions.length === 1
-    ? normalizeMealAction(candidatePersistenceActions[0])
-    : null
-  const singleMealCandidatePersistenceAction = candidateMealPersistenceActions.length === 1
-    ? normalizeMealAction(candidateMealPersistenceActions[0])
-    : null
-  const singleWorkoutCandidatePersistenceAction = candidateWorkoutPersistenceActions.length === 1
-    ? normalizeMealAction(candidateWorkoutPersistenceActions[0])
-    : null
   const normalizedOriginalReply = cleanReplyText(originalReply)
   const replyLooksQuestionLike = Boolean(
     originalReply
@@ -441,74 +471,6 @@ export function normalizeCoachResponse(value, context = {}) {
     && /\balready\b/.test(normalizedOriginalReply)
     && /\b(?:workout|pushup|pushups|rep|reps|set|sets|bench|squat|run|running|marathon)\b/.test(normalizedOriginalReply)
   )
-  if (
-    preferAIFirst
-    && originalReply
-    && replyClaimsPersistence(originalReply)
-    && !actions.some(isPersistenceAction)
-    && singleCandidatePersistenceAction
-    && !(strictAIFirst && isAnswerOnlyMealTurn && isMealPersistenceAction(singleCandidatePersistenceAction))
-  ) {
-    actions = [
-      ...actions,
-      singleCandidatePersistenceAction,
-    ]
-      .map(normalizeMealAction)
-      .filter(shouldAllowAction)
-      .slice(0, 8)
-  }
-  const shouldRecoverSingleMealActionFromBadReply = Boolean(
-    preferAIFirst
-    && strictAIFirst
-    && originalReply
-    && !actions.some(isMealPersistenceAction)
-    && !hasValidatedMealPersistence
-    && singleMealCandidatePersistenceAction
-    && context.mealContext?.readyToLog
-    && (replyLooksQuestionLike || replyLooksLikeWrongWorkoutAlreadyLogged)
-  )
-  let forceRecoveredMealReply = false
-  if (shouldRecoverSingleMealActionFromBadReply) {
-    actions = [
-      ...actions,
-      singleMealCandidatePersistenceAction,
-    ]
-      .map(normalizeMealAction)
-      .filter(shouldAllowAction)
-      .slice(0, 8)
-    forceRecoveredMealReply = true
-  }
-  const workoutCompletionReplyAcknowledged = replyAcknowledgesWorkoutCompletion(originalReply, context.workoutContext)
-  const recoverableWorkoutPersistenceAction = (
-    singleCandidatePersistenceAction && isWorkoutPersistenceAction(singleCandidatePersistenceAction)
-      ? singleCandidatePersistenceAction
-      : singleWorkoutCandidatePersistenceAction
-  )
-  const shouldRecoverSingleWorkoutActionDuringMealClarification = Boolean(
-    preferAIFirst
-    && originalReply
-    && !actions.some(isPersistenceAction)
-    && !hasValidatedWorkoutPersistence
-    && recoverableWorkoutPersistenceAction
-    && context.workoutContext?.readyToLog
-    && String(context.mealContext?.pendingClarification?.type || "") === "quantity"
-    && replyAddressesMealQuantityClarification(originalReply, context.mealContext)
-    && (
-      workoutCompletionReplyAcknowledged
-      || (strictAIFirst && !replyClaimsPersistence(originalReply))
-    )
-  )
-  let prependRecoveredWorkoutSummary = false
-  if (shouldRecoverSingleWorkoutActionDuringMealClarification) {
-    actions = [
-      ...actions,
-      recoverableWorkoutPersistenceAction,
-    ]
-      .map(normalizeMealAction)
-      .filter(shouldAllowAction)
-      .slice(0, 8)
-    prependRecoveredWorkoutSummary = strictAIFirst && !workoutCompletionReplyAcknowledged
-  }
   const shouldOverrideWrongMealClarifyReply = Boolean(
     preferAIFirst
     && strictAIFirst
@@ -596,11 +558,7 @@ export function normalizeCoachResponse(value, context = {}) {
     summarizeCoachAction(actions[0]) ||
     "Tell me what happened or what you want to change, and I'll help you sort the next move."
 
-  if (forceRecoveredMealReply) {
-    reply = summarizeCoachActions(actions)
-      || summarizeCoachAction(singleMealCandidatePersistenceAction)
-      || reply
-  } else if (forceMealClarifyReply) {
+  if (forceMealClarifyReply) {
     reply = hintMealClarify || reply
   }
 
@@ -613,13 +571,6 @@ export function normalizeCoachResponse(value, context = {}) {
     reply = summarizeCoachActions(actions)
       || summarizeCoachAction(actions.find(isMealPersistenceAction))
       || reply
-  }
-
-  if (prependRecoveredWorkoutSummary) {
-    const workoutSummaryPrefix = summarizeCoachAction(recoverableWorkoutPersistenceAction)
-    if (workoutSummaryPrefix && !cleanReplyText(reply).includes(cleanReplyText(workoutSummaryPrefix))) {
-      reply = `${workoutSummaryPrefix} ${reply}`.trim()
-    }
   }
 
   const hasMealPersistenceAction = actions.some(isMealPersistenceAction)
