@@ -230,6 +230,49 @@ async function waitForBodyText(page, predicates, timeout = 30000) {
   return page.locator("body").textContent().catch(() => "")
 }
 
+async function assistantReplyTexts(page) {
+  return page.evaluate(() => (
+    [...document.querySelectorAll("[data-message-role='assistant'], .whitespace-pre-wrap")]
+      .map((node) => String(node.innerText || node.textContent || "").replace(/\s+/g, " ").trim())
+      .filter(Boolean)
+      .filter((text) => !/^coach is thinking through that/i.test(text))
+  )).catch(() => [])
+}
+
+async function waitForAssistantReply(page, expectedTerms = [], timeout = 45000) {
+  const beforeTexts = await assistantReplyTexts(page)
+  const beforeCount = beforeTexts.length
+  const previousLatest = beforeTexts.at(-1) || ""
+  const normalizedExpectedTerms = expectedTerms.map((value) => String(value || "").toLowerCase())
+
+  await page.waitForFunction(({ expectedTerms: checks, previousLatestText, priorCount }) => {
+    const assistantTexts = [...document.querySelectorAll("[data-message-role='assistant'], .whitespace-pre-wrap")]
+      .map((node) => String(node.innerText || node.textContent || "").replace(/\s+/g, " ").trim())
+      .filter(Boolean)
+      .filter((text) => !/^coach is thinking through that/i.test(text))
+    const latest = assistantTexts.at(-1) || ""
+    if (!latest) return false
+
+    const busy = [...document.querySelectorAll("button")]
+      .map((node) => String(node.innerText || node.textContent || "").replace(/\s+/g, " ").trim().toLowerCase())
+      .some((text) => text.includes("working"))
+    if (busy) return false
+
+    const changed = assistantTexts.length > priorCount || latest !== previousLatestText
+    if (!changed) return false
+
+    const normalizedLatest = latest.toLowerCase()
+    return checks.every((check) => normalizedLatest.includes(check))
+  }, {
+    expectedTerms: normalizedExpectedTerms,
+    previousLatestText: previousLatest,
+    priorCount: beforeCount,
+  }, { timeout })
+
+  const afterTexts = await assistantReplyTexts(page)
+  return afterTexts.at(-1) || ""
+}
+
 function latestReportLine(label, value, details = {}) {
   return {
     label,
@@ -302,21 +345,20 @@ try {
       await clearCoachChat(page)
 
       await sendCoachMessage(page, "whats the macros for 100g chicken breast")
-      const chickenReply = await waitForBodyText(page, ["chicken", "143", "protein"], 45000)
+      const chickenReply = await waitForAssistantReply(page, ["chicken", "protein"], 45000)
       assertCheck(/chicken/i.test(String(chickenReply || "")) && /\b143\b/i.test(String(chickenReply || "")), "Coach chicken macro reply was not visible.")
       assertCheck(!/couldn't reach the live coach/i.test(String(chickenReply || "")), "Coach chicken macro reply hit the live-failure fallback.")
       report.checks.push(latestReportLine("ui_coach_macro_chicken", "passed", { reply: String(chickenReply || "").slice(0, 240) }))
 
       await sendCoachMessage(page, "whats the macros for a standard serve of caesar salad")
-      const caesarReply = await waitForBodyText(page, ["caesar", "360", "protein"], 45000)
+      const caesarReply = await waitForAssistantReply(page, ["caesar", "protein"], 45000)
       assertCheck(/caesar/i.test(String(caesarReply || "")) && /\b360\b/i.test(String(caesarReply || "")), "Coach caesar macro reply was not visible.")
       assertCheck(!/couldn't reach the live coach/i.test(String(caesarReply || "")), "Coach caesar macro reply hit the live-failure fallback.")
       report.checks.push(latestReportLine("ui_coach_macro_caesar", "passed", { reply: String(caesarReply || "").slice(0, 240) }))
 
       if (runMutableFlow) {
         await sendCoachMessage(page, "i had 2 eggs")
-        await page.waitForTimeout(3500)
-        const mealReply = await page.locator("[data-message-role='assistant'], .whitespace-pre-wrap").last().textContent().catch(() => "")
+        const mealReply = await waitForAssistantReply(page, [], 45000)
         assertCheck(/saved to today'?s nutrition|how many|logged/i.test(String(mealReply || "")), "Live meal logging flow did not produce a usable reply.")
         report.checks.push(latestReportLine("ui_coach_log_two_eggs", "passed", { reply: String(mealReply || "").slice(0, 240) }))
       }
