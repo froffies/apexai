@@ -25,6 +25,7 @@ test("normalizeCoachResponse builds a deterministic meal persistence action from
     mealContext: {
       readyToLog: true,
       alreadyLogged: false,
+      wantsLogging: true,
       summary: "17 fried eggs cooked in 100g salted butter, plus 250ml Earl Grey tea with no milk and no sugar",
       persistedMealId: "",
       correctionRequested: false,
@@ -48,6 +49,7 @@ test("normalizeCoachResponse upgrades deterministic meal actions into updates fo
     mealContext: {
       readyToLog: true,
       alreadyLogged: false,
+      wantsLogging: true,
       summary: "3 eggs, plus 250ml Earl Grey tea with no milk and no sugar",
       persistedMealId: "meal_fix",
       correctionRequested: true,
@@ -102,6 +104,7 @@ test("normalizeCoachResponse does not auto-persist a ready meal on the AI-first 
     mealContext: {
       readyToLog: true,
       alreadyLogged: false,
+      wantsLogging: true,
       summary: "17 fried eggs cooked in 100g salted butter, plus 250ml Earl Grey tea with no milk and no sugar",
       persistedMealId: "",
       correctionRequested: false,
@@ -134,6 +137,7 @@ test("normalizeCoachResponse canonicalizes AI-requested meal persistence from se
     mealContext: {
       readyToLog: true,
       alreadyLogged: false,
+      wantsLogging: true,
       summary: "17 fried eggs cooked in 100g salted butter, plus 250ml Earl Grey tea with no milk and no sugar",
       persistedMealId: "",
       correctionRequested: false,
@@ -436,6 +440,7 @@ test("normalizeCoachResponse blocks AI workout persistence when a persisted work
     mealContext: {
       readyToLog: true,
       alreadyLogged: false,
+      wantsLogging: true,
       clarifyQuestion: "",
       persistedMealId: "meal_1",
       correctionRequested: true,
@@ -778,6 +783,7 @@ test("normalizeCoachResponse does not rebuild duplicate deterministic meal or wo
     mealContext: {
       readyToLog: true,
       alreadyLogged: false,
+      wantsLogging: true,
       summary: "18 eggs",
       clarifyQuestion: "",
       persistedMealId: "",
@@ -937,6 +943,7 @@ test("normalizeCoachResponse strict AI-first does not auto-persist from parser c
     mealContext: {
       readyToLog: true,
       alreadyLogged: false,
+      wantsLogging: true,
       summary: "17 fried eggs cooked in 100g salted butter, plus 250ml Earl Grey tea with no milk and no sugar",
       persistedMealId: "",
       correctionRequested: false,

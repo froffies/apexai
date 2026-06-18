@@ -21,6 +21,7 @@ test("coach logging rules build a deterministic meal action from ready session s
     mealSession: {
       readyToLog: true,
       alreadyLogged: false,
+      wantsLogging: true,
       summary: "200g chicken, 1 cup rice, and 1 tbsp olive oil",
       persistedMealId: "",
       correctionRequested: false,
@@ -54,6 +55,7 @@ test("coach logging rules can estimate a deterministic meal action from session 
     mealSession: {
       readyToLog: true,
       alreadyLogged: false,
+      wantsLogging: true,
       summary: "17 fried eggs cooked in 100g salted butter, plus 250ml Earl Grey tea with no milk and no sugar",
       persistedMealId: "",
       correctionRequested: false,
@@ -115,6 +117,7 @@ test("coach logging rules keep verified provenance when a meal resolves entirely
     mealSession: {
       readyToLog: true,
       alreadyLogged: false,
+      wantsLogging: true,
       summary: "2 eggs",
       items: [
         {
@@ -196,6 +199,29 @@ test("coach logging rules do not auto-persist a ready meal when wantsLogging is 
   assert.equal(action, null)
 })
 
+test("coach logging rules do not auto-persist a ready meal when wantsLogging is missing", () => {
+  const action = buildDeterministicMealAction({
+    mealSession: {
+      readyToLog: true,
+      alreadyLogged: false,
+      mealConversation: true,
+      summary: "500ml coffee",
+      items: [
+        {
+          baseName: "coffee",
+          label: "Coffee",
+          category: "drink",
+          quantity: { amount: 500, unit: "ml", text: "500ml" },
+          exclusions: [],
+        },
+      ],
+    },
+    prompt: "500ml coffee",
+  })
+
+  assert.equal(action, null)
+})
+
 test("coach logging rules keep NZ verified provenance when a meal resolves from the curated NZ catalogue", () => {
   const weetbix = verifiedFoods.find((food) => food.id === "d1056")
   assert.ok(weetbix)
@@ -204,6 +230,7 @@ test("coach logging rules keep NZ verified provenance when a meal resolves from 
     mealSession: {
       readyToLog: true,
       alreadyLogged: false,
+      wantsLogging: true,
       summary: "100g Weet-Bix",
       items: [
         {
@@ -463,6 +490,7 @@ test("coach logging rules preserve grouped same-food preparations and all relate
     mealSession: {
       readyToLog: true,
       alreadyLogged: false,
+      wantsLogging: true,
       summary: "12 fried eggs cooked in 100g unsalted butter, plus 4 hard boiled eggs, plus 2 raw eggs",
       persistedMealId: "",
       correctionRequested: false,
@@ -521,6 +549,7 @@ test("coach logging rules strip trailing log directives from persisted meal acti
     mealSession: {
       readyToLog: true,
       alreadyLogged: false,
+      wantsLogging: true,
       summary: "1 serve eggs bacon, plus 1 slice toast, plus 1l water can you log all that",
       persistedMealId: "",
       correctionRequested: false,

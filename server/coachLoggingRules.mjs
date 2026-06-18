@@ -983,7 +983,7 @@ function buildSingleDeterministicMealAction({
   if ((!mealSession?.readyToLog && !looseEstimateAllowed) || mealSession?.alreadyLogged || mealSession?.suppressed || (mealSession?.answerOnly && !allowAnswerOnly)) return null
   const shouldPersist =
     looseEstimateAllowed
-    || mealSession?.wantsLogging !== false
+    || mealSession?.wantsLogging === true
     || mealSession?.correctionRequested
     || mealSession?.referenceMeal
     || (allowAnswerOnly && mealSession?.answerOnly)
