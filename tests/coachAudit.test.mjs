@@ -473,6 +473,7 @@ test("summarizeCoachAuditRecords tracks processing mode and estimate-heavy turns
         meal_session: {
           processingMode: "legacy",
           fallbackReason: "legacy_gate",
+          legacyGateClause: "non_graph_assistant_turn_present",
         },
       },
       actions: [{
@@ -492,5 +493,6 @@ test("summarizeCoachAuditRecords tracks processing mode and estimate-heavy turns
   assert.equal(summary.by_processing_mode.graph_native, 1)
   assert.equal(summary.by_processing_mode.legacy, 1)
   assert.equal(summary.by_fallback_reason.legacy_gate, 1)
+  assert.equal(summary.by_legacy_gate_clause.non_graph_assistant_turn_present, 1)
   assert.equal(summary.by_route["tool-assisted"], 1)
 })

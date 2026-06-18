@@ -427,6 +427,11 @@ if (freshAuditSummary) {
     (entry) => entry.label
   ).map(([label]) => [label, freshAuditSummary.by_fallback_reason[label]]))
 
+  printSection("Fresh legacy gate clauses", countBy(
+    Object.entries(freshAuditSummary.by_legacy_gate_clause || {}).map(([label]) => ({ label })),
+    (entry) => entry.label
+  ).map(([label]) => [label, freshAuditSummary.by_legacy_gate_clause[label]]))
+
   console.log("\nFresh deployment rates")
   for (const [name, value] of freshAlertRows) {
     console.log(`  ${name}: ${formatPercent(value)}`)

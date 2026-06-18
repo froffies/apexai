@@ -57,6 +57,7 @@ const RELATION_PATTERNS = [
 const GENERIC_DRINK_BASES = new Set(["tea", "coffee", "juice", "water", "milk", "smoothie", "shake"])
 const AMBIGUOUS_BARE_COUNT_BASES = new Set(["oat", "pasta", "rice", "salad"])
 const COMPACT_QUANTITY_UNITS = new Set(["g", "kg", "ml", "l"])
+let lastLegacyGateClause = ""
 
 const baseSession = () => ({
   ...legacyEmptyMealSession(),
@@ -67,6 +68,7 @@ const baseSession = () => ({
   graphNative: false,
   processingMode: "idle",
   fallbackReason: "",
+  legacyGateClause: "",
   intentGraph: null,
   candidateFragments: { meal: [], workout: [], general: [] },
   nextClarificationReference: "",
@@ -457,6 +459,7 @@ function isActiveGraphGroupedFollowUp(currentMessage = "", existingSession = nul
 function shouldUseLegacy(conversation, currentMessage, existingSession) {
   const normalizedCurrent = cleanText(currentMessage)
   if (isMixedMealWorkoutStart(currentMessage, existingSession) || isWorkoutOnlyFollowUpTurn(currentMessage, existingSession)) {
+    lastLegacyGateClause = ""
     return false
   }
   const joined = cleanText([...conversation.map((entry) => entry.content || ""), currentMessage].join(" "))
@@ -480,40 +483,45 @@ function shouldUseLegacy(conversation, currentMessage, existingSession) {
     || graphNativeFriendlyDaypartTurn
     || graphNativeFriendlyPersistedFollowUp
   )
-  return Boolean(
-    (activeSession && !activeGraphSession)
-    ||
-    activeGraphGroupedFollowUp
-    ||
-    (existingSession?.persisted && !graphNativeFriendlyPersistedFollowUp)
-    || (!activeGraphSession && existingSession?.mealConversation && !graphNativeFriendlyPersistedFollowUp)
-    || (!activeGraphSession && existingSession?.meal_groups?.length)
-    || existingSession?.declaredTotals?.length
-    || existingSession?.pendingAttachments?.length
-    || existingSession?.pendingQuantities?.length
-    || existingSession?.correctionRequested
-    || existingSession?.deleteRequested
-    || (!activeGraphSession && conversation.some((entry) => entry.role === "assistant") && !graphNativeFriendlyPersistedFollowUp)
-    || (!activeGraphSession && conversation.filter((entry) => entry.role === "user").length > 1 && !graphNativeFriendlyPersistedFollowUp)
-    || (!activeGraphSession && !MEAL_START_PATTERN.test(cleanText(currentMessage)) && !implicitGraphNativeTurn)
-    || TIME_REFERENCE_PATTERN.test(cleanText(currentMessage))
-    || INLINE_CORRECTION_PATTERN.test(cleanText(currentMessage))
-    || PACKAGED_UNIT_PATTERN.test(cleanText(currentMessage))
-    || (!activeGraphSession && quantitySignals > 1 && !graphNativeFriendlyDaypartTurn && !graphNativeAdditiveFreshTurn)
-    || (!activeGraphSession && measuredAmountSignals > 1 && !graphNativeFriendlyDaypartTurn && !graphNativeAdditiveFreshTurn)
-    || (!activeGraphSession && mentionsDrink(currentMessage) && !simpleFoodDrinkStart && !graphNativeFriendlyDrinkStart && !graphNativeFriendlyFreshTurn && !implicitGraphNativeTurn)
-    || (!activeGraphSession && /\b(?:with|without|cooked in|fried in|no sugar|no milk)\b/i.test(cleanText(currentMessage)) && !graphNativeFriendlyFreshTurn && !graphNativeFriendlyPersistedFollowUp)
-    || (!graphNativeCorrectionFollowUp && CORRECTION_PREFIX.test(cleanText(currentMessage)))
-    || GROUPED_COMPLEX_PATTERN.test(joined)
-    || (!activeGraphSession && COMPLEX_PATTERN.test(joined) && !graphNativeFriendlyDaypartTurn)
-    || (!activeGraphSession && assistantMealTurns > 1)
-    || (!activeGraphSession && currentClauses.length > 1 && !simpleFoodDrinkStart && !graphNativeFriendlyFreshTurn && !graphNativeFriendlyDaypartTurn && !graphNativeAdditiveFreshTurn)
-    || (!activeGraphSession && currentClauses.length > 3)
-    || (activeGraphSession && /\bthat were\b|\bwere just\b/.test(normalizedCurrent))
-    || (activeGraphSession && /\b\d+\s+of the\b.*\bwere\b/i.test(normalizedCurrent))
-    || (activeGraphSession && /\b(?:the\s+)?rest\b.*\b(?:were|was)\b/i.test(normalizedCurrent))
-    || (activeGraphSession && /^\s*the\s+\w+.*\bhad\b/i.test(normalizedCurrent))
-  )
+  const clauses = [
+    ["active_non_graph_session", activeSession && !activeGraphSession],
+    ["active_graph_grouped_follow_up", activeGraphGroupedFollowUp],
+    ["persisted_not_friendly_follow_up", existingSession?.persisted && !graphNativeFriendlyPersistedFollowUp],
+    ["non_graph_meal_conversation", !activeGraphSession && existingSession?.mealConversation && !graphNativeFriendlyPersistedFollowUp],
+    ["non_graph_meal_groups", !activeGraphSession && existingSession?.meal_groups?.length],
+    ["declared_totals", existingSession?.declaredTotals?.length],
+    ["pending_attachments", existingSession?.pendingAttachments?.length],
+    ["pending_quantities", existingSession?.pendingQuantities?.length],
+    ["correction_requested", existingSession?.correctionRequested],
+    ["delete_requested", existingSession?.deleteRequested],
+    ["non_graph_assistant_turn_present", !activeGraphSession && conversation.some((entry) => entry.role === "assistant") && !graphNativeFriendlyPersistedFollowUp],
+    ["non_graph_multi_user_turn", !activeGraphSession && conversation.filter((entry) => entry.role === "user").length > 1 && !graphNativeFriendlyPersistedFollowUp],
+    ["non_graph_not_meal_start", !activeGraphSession && !MEAL_START_PATTERN.test(cleanText(currentMessage)) && !implicitGraphNativeTurn],
+    ["time_reference", TIME_REFERENCE_PATTERN.test(cleanText(currentMessage))],
+    ["inline_correction", INLINE_CORRECTION_PATTERN.test(cleanText(currentMessage))],
+    ["packaged_unit", PACKAGED_UNIT_PATTERN.test(cleanText(currentMessage))],
+    ["non_graph_multi_quantity_signal", !activeGraphSession && quantitySignals > 1 && !graphNativeFriendlyDaypartTurn && !graphNativeAdditiveFreshTurn],
+    ["non_graph_multi_measured_signal", !activeGraphSession && measuredAmountSignals > 1 && !graphNativeFriendlyDaypartTurn && !graphNativeAdditiveFreshTurn],
+    ["non_graph_drink_mention", !activeGraphSession && mentionsDrink(currentMessage) && !simpleFoodDrinkStart && !graphNativeFriendlyDrinkStart && !graphNativeFriendlyFreshTurn && !implicitGraphNativeTurn],
+    ["non_graph_modifier_phrase", !activeGraphSession && /\b(?:with|without|cooked in|fried in|no sugar|no milk)\b/i.test(cleanText(currentMessage)) && !graphNativeFriendlyFreshTurn && !graphNativeFriendlyPersistedFollowUp],
+    ["correction_prefix", !graphNativeCorrectionFollowUp && CORRECTION_PREFIX.test(cleanText(currentMessage))],
+    ["grouped_complex_pattern", GROUPED_COMPLEX_PATTERN.test(joined)],
+    ["non_graph_complex_pattern", !activeGraphSession && COMPLEX_PATTERN.test(joined) && !graphNativeFriendlyDaypartTurn],
+    ["non_graph_multi_assistant_meal_turn", !activeGraphSession && assistantMealTurns > 1],
+    ["non_graph_multi_clause", !activeGraphSession && currentClauses.length > 1 && !simpleFoodDrinkStart && !graphNativeFriendlyFreshTurn && !graphNativeFriendlyDaypartTurn && !graphNativeAdditiveFreshTurn],
+    ["non_graph_many_clauses", !activeGraphSession && currentClauses.length > 3],
+    ["graph_session_that_were", activeGraphSession && /\bthat were\b|\bwere just\b/.test(normalizedCurrent)],
+    ["graph_session_n_of_the_were", activeGraphSession && /\b\d+\s+of the\b.*\bwere\b/i.test(normalizedCurrent)],
+    ["graph_session_rest_were", activeGraphSession && /\b(?:the\s+)?rest\b.*\b(?:were|was)\b/i.test(normalizedCurrent)],
+    ["graph_session_the_x_had", activeGraphSession && /^\s*the\s+\w+.*\bhad\b/i.test(normalizedCurrent)],
+  ]
+  const hit = clauses.find(([, condition]) => Boolean(condition))
+  if (hit) {
+    lastLegacyGateClause = hit[0]
+    return true
+  }
+  lastLegacyGateClause = ""
+  return false
 }
 
 function isWorkoutOnlyFollowUpTurn(currentMessage = "", existingSession = null) {
@@ -541,16 +549,18 @@ function preserveExistingSessionForIgnoredTurn(conversation = [], currentMessage
       general: safeArray(intentGraph.generalFragments, 16),
     },
     graphNative: Boolean(existingSession?.graphNative),
+    legacyGateClause: "",
   }
 }
 
-function markLegacySession(session, reason = "legacy_gate") {
+function markLegacySession(session, reason = "legacy_gate", legacyGateClause = "") {
   if (!session || typeof session !== "object") return session
   return {
     ...session,
     graphNative: false,
     processingMode: "legacy",
     fallbackReason: String(reason || "legacy_gate"),
+    legacyGateClause: String(legacyGateClause || ""),
   }
 }
 
@@ -1701,7 +1711,7 @@ export function buildMealStateFromConversation(recentMessages = [], currentMessa
     return preserveExistingSessionForIgnoredTurn(conversation, resolvedMessage, existingSession)
   }
   if (shouldUseLegacy(conversation, resolvedMessage, existingSession)) {
-    return markLegacySession(buildLegacyMealStateFromConversation(normalizedRecentMessages, resolvedMessage, existingSession), "legacy_gate")
+    return markLegacySession(buildLegacyMealStateFromConversation(normalizedRecentMessages, resolvedMessage, existingSession), "legacy_gate", lastLegacyGateClause)
   }
 
   const state = baseSession()
@@ -1743,6 +1753,7 @@ export function buildMealStateFromConversation(recentMessages = [], currentMessa
       thread_messages: state.thread_messages,
       intentGraph: state.intentGraph,
       candidateFragments: state.candidateFragments,
+      legacyGateClause: "",
     }
   }
 
@@ -1785,6 +1796,7 @@ export function buildMealStateFromConversation(recentMessages = [], currentMessa
   state.graphNative = true
   state.processingMode = "graph_native"
   state.fallbackReason = ""
+  state.legacyGateClause = ""
   return state
 }
 
@@ -1803,7 +1815,7 @@ export function buildMealContext(recentMessages = [], currentMessage = "", exist
     return preserveExistingSessionForIgnoredTurn(conversation, resolvedMessage, existingSession)
   }
   if (shouldUseLegacy(conversation, resolvedMessage, existingSession)) {
-    return markLegacySession(buildLegacyMealContext(normalizedRecentMessages, resolvedMessage, existingSession), "legacy_gate")
+    return markLegacySession(buildLegacyMealContext(normalizedRecentMessages, resolvedMessage, existingSession), "legacy_gate", lastLegacyGateClause)
   }
   const state = buildMealStateFromConversation(normalizedRecentMessages, resolvedMessage, existingSession)
   if (!state.mealConversation && !state.suppressed) return null

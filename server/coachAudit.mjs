@@ -188,6 +188,7 @@ function sanitizeMealSession(state = {}) {
     currentMealType: String(state.currentMealType || ""),
     processingMode: String(state.processingMode || state.processing_mode || ""),
     fallbackReason: redactSensitiveText(state.fallbackReason || state.fallback_reason || "", 120),
+    legacyGateClause: redactSensitiveText(state.legacyGateClause || state.legacy_gate_clause || "", 120),
     pendingClarification: state.pendingClarification && typeof state.pendingClarification === "object"
       ? {
           type: String(state.pendingClarification.type || ""),
@@ -772,6 +773,7 @@ export function summarizeCoachAuditRecords(records = []) {
     by_route: {},
     by_processing_mode: {},
     by_fallback_reason: {},
+    by_legacy_gate_clause: {},
     repeated_clarifications: {},
     common_unknown_inputs: {},
   }
@@ -785,6 +787,7 @@ export function summarizeCoachAuditRecords(records = []) {
     const mealStateAfter = record.state_after?.meal_session || {}
     const processingMode = cleanText(mealStateAfter.processingMode || mealStateAfter.processing_mode).toLowerCase()
     const fallbackReason = cleanText(mealStateAfter.fallbackReason || mealStateAfter.fallback_reason)
+    const legacyGateClause = cleanText(mealStateAfter.legacyGateClause || mealStateAfter.legacy_gate_clause)
     if (processingMode) {
       summary.by_processing_mode[processingMode] = (summary.by_processing_mode[processingMode] || 0) + 1
       if (processingMode === "graph_native") summary.graph_native_turns += 1
@@ -792,6 +795,9 @@ export function summarizeCoachAuditRecords(records = []) {
     }
     if (fallbackReason) {
       summary.by_fallback_reason[fallbackReason] = (summary.by_fallback_reason[fallbackReason] || 0) + 1
+    }
+    if (legacyGateClause) {
+      summary.by_legacy_gate_clause[legacyGateClause] = (summary.by_legacy_gate_clause[legacyGateClause] || 0) + 1
     }
     const mealActions = [...record.persisted_actions, ...record.actions].filter((action) => action?.type === "log_meal" || action?.type === "update_meal_log")
     if (mealActions.some((action) => {

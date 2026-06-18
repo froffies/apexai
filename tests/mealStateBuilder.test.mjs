@@ -1364,12 +1364,33 @@ test("meal session exposes whether parsing stayed graph-native or fell back to l
   assert.equal(graphSession.processingMode, "graph_native")
   assert.equal(graphSession.graphNative, true)
   assert.equal(graphSession.fallbackReason, "")
+  assert.equal(graphSession.legacyGateClause, "")
   assert.equal(simpleGroupedSession.processingMode, "graph_native")
   assert.equal(simpleGroupedSession.graphNative, true)
   assert.equal(simpleGroupedSession.fallbackReason, "")
+  assert.equal(simpleGroupedSession.legacyGateClause, "")
   assert.equal(legacySession.processingMode, "legacy")
   assert.equal(legacySession.graphNative, false)
   assert.equal(legacySession.fallbackReason, "legacy_gate")
+  assert.equal(legacySession.legacyGateClause, "non_graph_not_meal_start")
+})
+
+test("meal session exposes the specific legacy gate clause for simple measured drink turns with assistant history", () => {
+  const assistantHistory = [
+    { role: "assistant", content: "Tell me what happened today, what you ate, what you trained, or what you want to change, and I'll help you sort the next move." },
+  ]
+
+  const legacyCoffeeSession = buildMealContext(assistantHistory, "500ml coffee", emptyMealSession())
+  const graphCoffeeSession = buildMealContext([], "500ml coffee", emptyMealSession())
+
+  assert.ok(legacyCoffeeSession)
+  assert.ok(graphCoffeeSession)
+  assert.equal(legacyCoffeeSession.processingMode, "legacy")
+  assert.equal(legacyCoffeeSession.fallbackReason, "legacy_gate")
+  assert.equal(legacyCoffeeSession.legacyGateClause, "non_graph_assistant_turn_present")
+  assert.equal(graphCoffeeSession.processingMode, "graph_native")
+  assert.equal(graphCoffeeSession.fallbackReason, "")
+  assert.equal(graphCoffeeSession.legacyGateClause, "")
 })
 
 test("meal session fuzzes two hundred randomized grouped meals without corrupting relationships", () => {
