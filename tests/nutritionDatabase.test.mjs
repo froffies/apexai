@@ -24,6 +24,12 @@ test("searchPhotoReferenceFoods can use curated photo dish profiles for complex 
   assert.ok(biryaniMatches.length > 0)
   assert.equal(biryaniMatches.some((food) => food.source_type === "photo_dish_profile"), true)
 
+  const eggsBenedictMatches = searchPhotoReferenceFoods("eggs benedict")
+  assert.equal(eggsBenedictMatches.some((food) => food.id === "photo_eggs_benedict"), true)
+
+  const charKwayTeowMatches = searchPhotoReferenceFoods("char kway teow")
+  assert.equal(charKwayTeowMatches.some((food) => food.id === "photo_char_kway_teow"), true)
+
   const samosaMatches = searchPhotoReferenceFoods("deep fried samosas")
   assert.equal(samosaMatches.some((food) => food.id === "photo_samosa"), true)
 
@@ -188,6 +194,56 @@ test("findBestFoodMatch falls back to a deterministic food-class estimate for un
   assert.equal(barramundi.protein_g, 24)
   assert.equal(barramundi.carbs_g, 0)
   assert.equal(barramundi.fat_g, 3)
+})
+
+test("findBestFoodMatch fixes long-tail AU/NZ meals and branded products that previously mis-scored or returned nothing", () => {
+  const cases = [
+    { query: "spinach and feta roll", expect: /spinach and feta roll/i, minCalories: 350 },
+    { query: "roast lamb roll", expect: /roast lamb roll/i, minCalories: 500 },
+    { query: "eggs benny", expect: /eggs benedict/i, minCalories: 600 },
+    { query: "eggs benedict", expect: /eggs benedict/i, minCalories: 600 },
+    { query: "butter chicken naan", expect: /butter chicken/i, minCalories: 800 },
+    { query: "chiko roll", expect: /chiko roll/i, minCalories: 400 },
+    { query: "custard square", expect: /custard square/i, minCalories: 350 },
+    { query: "lolly cake", expect: /lolly cake/i, minCalories: 350 },
+    { query: "meatbox", expect: /meat box/i, minCalories: 1000 },
+    { query: "char kway teow", expect: /char kway teow/i, minCalories: 650 },
+    { query: "mee goreng", expect: /mee goreng/i, minCalories: 650 },
+    { query: "nasi goreng", expect: /nasi goreng/i, minCalories: 650 },
+    { query: "roti canai", expect: /roti canai/i, minCalories: 300 },
+    { query: "banoffee pie", expect: /banoffee pie/i, minCalories: 400 },
+    { query: "vanilla slice", expect: /vanilla slice/i, minCalories: 350 },
+    { query: "custard tart", expect: /custard tart/i, minCalories: 250 },
+    { query: "hedgehog slice", expect: /hedgehog slice/i, minCalories: 350 },
+    { query: "oak chocolate milk", expect: /oak chocolate milk/i, minCarbs: 10 },
+    { query: "whittakers creamy milk", expect: /whittaker/i, minCalories: 500 },
+    { query: "meadow fresh trim milk", expect: /meadow fresh trim milk/i, maxCalories: 50 },
+    { query: "red bull", expect: /red bull/i, minCarbs: 20 },
+    { query: "powerade", expect: /powerade/i, minCarbs: 20 },
+    { query: "gatorade", expect: /gatorade/i, minCarbs: 30 },
+    { query: "blue v", expect: /blue v/i, minCarbs: 45 },
+    { query: "ice break", expect: /ice break/i, minProtein: 10 },
+    { query: "quest bar", expect: /quest/i, minProtein: 18 },
+    { query: "chobani fit", expect: /chobani fit/i, minProtein: 12 },
+    { query: "yo pro", expect: /yo\s*pro/i, minProtein: 12 },
+    { query: "biscoff", expect: /biscoff/i, minCalories: 450 },
+    { query: "shapes bbq", expect: /shapes bbq/i, minCalories: 450 },
+    { query: "twisties", expect: /twisties/i, minCalories: 450 },
+    { query: "cheezels", expect: /cheezels/i, minCalories: 450 },
+    { query: "grain waves", expect: /grain waves/i, minCalories: 450 },
+    { query: "ccs", expect: /cc'?s/i, minCalories: 450 },
+  ]
+
+  for (const testCase of cases) {
+    const match = findBestFoodMatch(testCase.query)
+    assert.ok(match, `Expected a nutrition match for "${testCase.query}"`)
+    assert.match(String(match.name || ""), testCase.expect, `Unexpected top match for "${testCase.query}": ${String(match.name || "")}`)
+    assert.equal(match.source_type, "estimated_internal_profile")
+    if (Number.isFinite(testCase.minCalories)) assert.ok(Number(match.calories || 0) >= testCase.minCalories, `Expected calories >= ${testCase.minCalories} for "${testCase.query}", got ${Number(match.calories || 0)}`)
+    if (Number.isFinite(testCase.maxCalories)) assert.ok(Number(match.calories || 0) <= testCase.maxCalories, `Expected calories <= ${testCase.maxCalories} for "${testCase.query}", got ${Number(match.calories || 0)}`)
+    if (Number.isFinite(testCase.minProtein)) assert.ok(Number(match.protein_g || 0) >= testCase.minProtein, `Expected protein >= ${testCase.minProtein} for "${testCase.query}", got ${Number(match.protein_g || 0)}`)
+    if (Number.isFinite(testCase.minCarbs)) assert.ok(Number(match.carbs_g || 0) >= testCase.minCarbs, `Expected carbs >= ${testCase.minCarbs} for "${testCase.query}", got ${Number(match.carbs_g || 0)}`)
+  }
 })
 
 test("findBestFoodMatch handles ambiguous AU/NZ slang, typos, partial names, and branded foods", () => {

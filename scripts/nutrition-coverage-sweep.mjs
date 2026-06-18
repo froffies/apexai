@@ -2,6 +2,7 @@ import fs from "node:fs"
 import path from "node:path"
 import process from "node:process"
 import { createClient } from "@supabase/supabase-js"
+import { findBestFoodMatch } from "../src/lib/nutritionDatabase.js"
 
 const rootDir = process.cwd()
 
@@ -97,54 +98,70 @@ const CASES = [
   { category: "brands_takeaway", query: "tim tam original", expectName: /tim tam original/i, allowedSourceTypes: ["nz_curated_catalogue"] },
   { category: "brands_takeaway", query: "pams wedges", expectName: /pams.*wedges/i, allowedSourceTypes: ["nz_curated_catalogue"] },
   { category: "brands_takeaway", query: "sausage sizzle", expectName: /sausage sizzle/i },
+  { category: "long_tail", query: "spinach and feta roll", expectName: /spinach and feta roll/i, allowedSourceTypes: ["estimated_internal_profile"], minCalories: 350 },
+  { category: "long_tail", query: "eggs benny", expectName: /eggs benedict/i, allowedSourceTypes: ["estimated_internal_profile"], minCalories: 600 },
+  { category: "long_tail", query: "butter chicken naan", expectName: /butter chicken/i, allowedSourceTypes: ["estimated_internal_profile"], minCalories: 800 },
+  { category: "long_tail", query: "char kway teow", expectName: /char kway teow/i, allowedSourceTypes: ["estimated_internal_profile"], minCalories: 650 },
+  { category: "long_tail", query: "oak chocolate milk", expectName: /oak chocolate milk/i, allowedSourceTypes: ["estimated_internal_profile"], minCarbs: 10 },
+  { category: "long_tail", query: "meadow fresh trim milk", expectName: /meadow fresh trim milk/i, allowedSourceTypes: ["estimated_internal_profile"] },
+  { category: "long_tail", query: "quest bar", expectName: /quest/i, allowedSourceTypes: ["estimated_internal_profile"] },
 ]
 
 loadDotEnvIntoProcess()
 
+const sweepMode = String(process.env.NUTRITION_SWEEP_MODE || "http").trim().toLowerCase()
 const baseUrl = String(process.env.NUTRITION_SWEEP_BASE_URL || "http://127.0.0.1:8787").trim().replace(/\/$/, "")
 const headers = await buildAuthHeaders()
 const failures = []
 const categoryTotals = new Map()
 const categoryPasses = new Map()
 
-for (const testCase of CASES) {
-  categoryTotals.set(testCase.category, (categoryTotals.get(testCase.category) || 0) + 1)
-  let result
-  try {
-    result = await postJson(baseUrl, "/api/nutrition/search", { query: testCase.query }, headers)
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    failures.push(`${testCase.query}: request failed before response (${message}). Start the local coach server or set NUTRITION_SWEEP_BASE_URL to a live backend.`)
-    continue
-  }
-  const top = Array.isArray(result.data?.results) ? result.data.results[0] : null
-  if (!result.ok) {
-    failures.push(`${testCase.query}: request failed with ${result.status} (${result.data?.error || "unknown error"})`)
-    continue
-  }
-  if (!top) {
-    failures.push(`${testCase.query}: returned no results`)
-    continue
-  }
+function validateTopResult(testCase, top) {
+  if (!top) return `${testCase.query}: returned no results`
   if (testCase.expectName && !testCase.expectName.test(String(top.name || ""))) {
-    failures.push(`${testCase.query}: expected top name ${testCase.expectName}, got "${top.name || ""}"`)
-    continue
+    return `${testCase.query}: expected top name ${testCase.expectName}, got "${top.name || ""}"`
   }
   if (testCase.allowedSourceTypes && !testCase.allowedSourceTypes.includes(String(top.source_type || ""))) {
-    failures.push(`${testCase.query}: expected source type in [${testCase.allowedSourceTypes.join(", ")}], got "${top.source_type || ""}"`)
-    continue
+    return `${testCase.query}: expected source type in [${testCase.allowedSourceTypes.join(", ")}], got "${top.source_type || ""}"`
   }
   if (Number.isFinite(testCase.minCalories) && Number(top.calories || 0) < testCase.minCalories) {
-    failures.push(`${testCase.query}: expected calories >= ${testCase.minCalories}, got ${Number(top.calories || 0)}`)
-    continue
+    return `${testCase.query}: expected calories >= ${testCase.minCalories}, got ${Number(top.calories || 0)}`
   }
   if (Number.isFinite(testCase.minCarbs) && Number(top.carbs_g || 0) < testCase.minCarbs) {
-    failures.push(`${testCase.query}: expected carbs >= ${testCase.minCarbs}, got ${Number(top.carbs_g || 0)}`)
+    return `${testCase.query}: expected carbs >= ${testCase.minCarbs}, got ${Number(top.carbs_g || 0)}`
+  }
+  return ""
+}
+
+for (const testCase of CASES) {
+  categoryTotals.set(testCase.category, (categoryTotals.get(testCase.category) || 0) + 1)
+  let top = null
+  if (sweepMode === "direct") {
+    top = findBestFoodMatch(testCase.query)
+  } else {
+    let result
+    try {
+      result = await postJson(baseUrl, "/api/nutrition/search", { query: testCase.query }, headers)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      failures.push(`${testCase.query}: request failed before response (${message}). Start the local coach server, set NUTRITION_SWEEP_BASE_URL to a live backend, or run with NUTRITION_SWEEP_MODE=direct.`)
+      continue
+    }
+    if (!result.ok) {
+      failures.push(`${testCase.query}: request failed with ${result.status} (${result.data?.error || "unknown error"})`)
+      continue
+    }
+    top = Array.isArray(result.data?.results) ? result.data.results[0] : null
+  }
+
+  const validationError = validateTopResult(testCase, top)
+  if (validationError) {
+    failures.push(validationError)
     continue
   }
 
   categoryPasses.set(testCase.category, (categoryPasses.get(testCase.category) || 0) + 1)
-  console.log(`PASS ${testCase.query}: ${top.name} [${top.source_type}] ${Math.round(Number(top.calories) || 0)} kcal`)
+  console.log(`PASS ${testCase.query}: ${top.name} [${top.source_type}] ${Math.round(Number(top.calories) || 0)} kcal (${sweepMode === "direct" ? "direct" : "http"})`)
 }
 
 if (failures.length) {

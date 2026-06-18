@@ -1224,6 +1224,55 @@ test("mixed thread keeps drink variant and sibling egg quantity during a pending
   assert.match(String(snapshots[2].mealSession.summary || ""), /450ml light milk, plus 14 scrambled eggs/i)
 })
 
+test("mixed thread keeps additive egg totals stable when a later split and wine quantity arrive together", () => {
+  const { snapshots } = replayCoachConversation([
+    user("i had 16 egg and some wine then did a pushup and had 1 more egg"),
+    assistant("Saved to Workouts: Pushup for 1 set of 1."),
+    user("did you log my eggs and wine?"),
+    assistant("How much wine did you have?"),
+    user("14 fried, 1 hard boiled, 2 scrambled in 100g of butter. 250ml of white wine"),
+    assistant("What were the fried eggs cooked in?"),
+    user("what do you mean?"),
+  ])
+
+  assert.match(String(snapshots[0].mealSession.summary || ""), /17 eggs/i)
+  assert.match(String(snapshots[0].mealSession.summary || ""), /\bwine\b/i)
+  assert.match(String(snapshots[0].mealSession.clarifyQuestion || ""), /how much wine/i)
+  assert.equal(snapshots[0].workoutSession.readyToLog, true)
+
+  assert.equal(snapshots[2].mealSession.readyToLog, false)
+  assert.match(String(snapshots[2].mealSession.summary || ""), /250ml white wine/i)
+  assert.match(String(snapshots[2].mealSession.summary || ""), /14 fried eggs/i)
+  assert.match(String(snapshots[2].mealSession.summary || ""), /1 hard boiled egg/i)
+  assert.match(String(snapshots[2].mealSession.summary || ""), /2 scrambled eggs cooked in 100g butter/i)
+  assert.match(String(snapshots[2].mealSession.clarifyQuestion || ""), /fried eggs cooked in/i)
+  assert.doesNotMatch(String(snapshots[2].mealSession.summary || ""), /fried wine|hard boiled wine|17 eggs cooked in 100g butter/i)
+  assert.equal(
+    snapshots[2].mealSession.items
+      .filter((item) => item.category === "food")
+      .reduce((total, item) => total + Number(item?.quantity?.amount || 0), 0),
+    17,
+  )
+
+  assert.equal(snapshots[3].mealSession.readyToLog, false)
+  assert.match(String(snapshots[3].mealSession.clarifyQuestion || ""), /fried eggs cooked in/i)
+  assert.doesNotMatch(String(snapshots[3].mealSession.summary || ""), /fried wine|hard boiled wine/i)
+})
+
+test("graph-native additive food fragments accumulate for weighted and count-friendly foods", () => {
+  const steak = replayCoachConversation([
+    user("i had 200g steak and then 100g more steak"),
+  ])
+  assert.equal(steak.mealSession.readyToLog, true)
+  assert.equal(normalizeValueText(steak.mealSession.summary), "300g steak")
+
+  const burgers = replayCoachConversation([
+    user("i had 2 burgers and 1 more burger"),
+  ])
+  assert.equal(burgers.mealSession.readyToLog, true)
+  assert.equal(normalizeValueText(burgers.mealSession.summary), "3 burgers")
+})
+
 test("mixed thread meal suppression preserves pending cardio context for a later distance follow-up", () => {
   const { snapshots } = replayCoachConversation([
     user("i had burger and did a run"),
