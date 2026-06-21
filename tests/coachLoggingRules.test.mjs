@@ -175,6 +175,68 @@ test("coach logging rules keep verified provenance when a meal resolves entirely
   assert.equal(action?.macro_confidence, "high")
 })
 
+test("coach logging rules build a deterministic meal action from the actual coach session for i had 2 eggs", () => {
+  const state = buildCoachSessionState({
+    recentMessages: [],
+    currentMessage: "i had 2 eggs",
+    mealSession: emptyMealSessionState(),
+    workoutSession: emptyWorkoutSessionState(),
+    recentMeals: [],
+  })
+  const action = buildDeterministicMealAction({
+    mealSession: state.mealSession,
+    explicitActions: [],
+    prompt: "i had 2 eggs",
+  })
+
+  assert.equal(state.mealSession.readyToLog, true)
+  assert.equal(state.mealSession.wantsLogging, true)
+  assert.ok(action)
+  assert.equal(action.type, "log_meal")
+  assert.equal(action.food_name, "2 eggs")
+})
+
+test("coach logging rules build a deterministic meal action from the actual coach session for i had 1 burger", () => {
+  const state = buildCoachSessionState({
+    recentMessages: [],
+    currentMessage: "i had 1 burger",
+    mealSession: emptyMealSessionState(),
+    workoutSession: emptyWorkoutSessionState(),
+    recentMeals: [],
+  })
+  const action = buildDeterministicMealAction({
+    mealSession: state.mealSession,
+    explicitActions: [],
+    prompt: "i had 1 burger",
+  })
+
+  assert.equal(state.mealSession.readyToLog, true)
+  assert.equal(state.mealSession.wantsLogging, true)
+  assert.ok(action)
+  assert.equal(action.type, "log_meal")
+  assert.equal(action.food_name, "1 burger")
+})
+
+test("coach logging rules keep ambiguous single-item staples in clarification instead of inventing a meal action for i had 1 rice", () => {
+  const state = buildCoachSessionState({
+    recentMessages: [],
+    currentMessage: "i had 1 rice",
+    mealSession: emptyMealSessionState(),
+    workoutSession: emptyWorkoutSessionState(),
+    recentMeals: [],
+  })
+  const action = buildDeterministicMealAction({
+    mealSession: state.mealSession,
+    explicitActions: [],
+    prompt: "i had 1 rice",
+  })
+
+  assert.equal(state.mealSession.readyToLog, false)
+  assert.equal(state.mealSession.wantsLogging, true)
+  assert.equal(state.mealSession.clarifyQuestion, "How much rice did you have?")
+  assert.equal(action, null)
+})
+
 test("coach logging rules do not auto-persist a ready meal when wantsLogging is false", () => {
   const action = buildDeterministicMealAction({
     mealSession: {

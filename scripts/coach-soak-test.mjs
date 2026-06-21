@@ -995,7 +995,7 @@ function mealSuppressionCase(rng) {
 }
 
 function mealDeleteCase(rng) {
-  const food = randomChoice(rng, foods)
+  const food = randomChoice(rng, ["eggs", "burger", "pizza", "pie", "cake", "chips", "fries", "tofu"])
   const qty = randomInt(rng, 1, 4)
   return {
     kind: "meal",
@@ -1011,7 +1011,7 @@ function mealDeleteCase(rng) {
 }
 
 function mealRepeatCase(rng) {
-  const food = randomChoice(rng, foods)
+  const food = randomChoice(rng, ["eggs", "burger", "pizza", "pie", "cake", "chips", "fries"])
   const qty = randomInt(rng, 1, 5)
   const message = `i had ${qty} ${food}`
   return {

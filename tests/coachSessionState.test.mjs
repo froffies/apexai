@@ -200,6 +200,29 @@ test("coach session state treats additive follow-ups on a persisted meal as upda
   assert.match(next.mealSession.summary, /chips with gravy/i)
 })
 
+test("coach session state keeps a quantified drink reply from hijacking a pending fried-egg cooking-medium clarification", () => {
+  const { snapshots, mealSession } = replayCoachConversation([
+    user("i had eggs and milk"),
+    assistant("How many eggs did you have?"),
+    user("2 fried eggs"),
+    assistant("What were the fried eggs cooked in?"),
+    user("283ml milk no sugar"),
+    assistant("What were the fried eggs cooked in?"),
+    user("cooked in 15g butter"),
+  ])
+
+  assert.ok(mealSession)
+  assert.equal(snapshots[2].mealSession.clarifyQuestion, "What were the fried eggs cooked in?")
+  assert.equal(snapshots[2].mealSession.summary, "2 fried eggs, plus 283ml milk with no sugar")
+  assert.equal(
+    snapshots[2].mealSession.items.some((item) => item.attached_to?.includes("egg") && /milk/i.test(`${item.base_name} ${item.label}`)),
+    false,
+  )
+  assert.equal(mealSession.readyToLog, true)
+  assert.equal(mealSession.clarifyQuestion, "")
+  assert.equal(mealSession.summary, "2 fried eggs cooked in 15g butter, plus 283ml milk with no sugar")
+})
+
 test("coach session state keeps simple persisted ingredient refinements on the graph-native meal path", () => {
   const initial = replayCoachConversation([
     user("i had 1 burger"),

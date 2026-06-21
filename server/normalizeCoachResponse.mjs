@@ -536,6 +536,58 @@ export function normalizeCoachResponse(value, context = {}) {
         .slice(0, 8)
     }
   }
+  const canRecoverMealPersistenceAction = Boolean(
+    preferAIFirst
+    && strictAIFirst
+    && originalReply
+    && replyClaimsPersistence(originalReply)
+    && !actions.some(isMealPersistenceAction)
+    && !hasValidatedMealPersistence
+    && canonicalMealPersistenceActions.length
+    && context.mealContext?.readyToLog
+    && !context.mealContext?.alreadyLogged
+    && !context.mealContext?.suppressed
+    && !context.mealContext?.answerOnly
+    && !context.mealContext?.clarifyQuestion
+    && !context.mealContext?.pendingClarification
+    && !context.mealContext?.persistedMealId
+    && !context.mealContext?.correctionRequested
+    && !context.mealContext?.deleteRequested
+  )
+  if (canRecoverMealPersistenceAction) {
+    actions = [
+      ...actions,
+      ...canonicalMealPersistenceActions,
+    ]
+      .map(normalizeMealAction)
+      .filter(shouldAllowAction)
+      .slice(0, 8)
+  }
+  const canRecoverWorkoutPersistenceAction = Boolean(
+    preferAIFirst
+    && strictAIFirst
+    && originalReply
+    && replyClaimsPersistence(originalReply)
+    && !actions.some(isWorkoutPersistenceAction)
+    && !hasValidatedWorkoutPersistence
+    && canonicalWorkoutPersistenceActions.length
+    && context.workoutContext?.readyToLog
+    && !context.workoutContext?.alreadyLogged
+    && !context.workoutContext?.suppressed
+    && !context.workoutContext?.clarifyQuestion
+    && !context.workoutContext?.persistedWorkoutId
+    && !context.workoutContext?.correctionRequested
+    && !context.workoutContext?.deleteRequested
+  )
+  if (canRecoverWorkoutPersistenceAction) {
+    actions = [
+      ...actions,
+      ...canonicalWorkoutPersistenceActions,
+    ]
+      .map(normalizeMealAction)
+      .filter(shouldAllowAction)
+      .slice(0, 8)
+  }
   const hasPersistenceAction = actions.some(isPersistenceAction)
   const alreadyLoggedReply =
     Boolean(context.mealContext?.alreadyLogged)

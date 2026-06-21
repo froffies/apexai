@@ -174,6 +174,60 @@ test("graph-native meal session preserves logging intent across a quantity clari
   assert.equal(session.summary, "300g steak")
 })
 
+test("graph-native meal session keeps simple measured coffee follow-ups out of legacy after assistant history", () => {
+  const session = buildMealContext([
+    user("i had 2 eggs"),
+    assistant("Logged 2 eggs."),
+  ], "500ml coffee", emptyMealSession())
+
+  assert.ok(session)
+  assertGraphNativeSession(session)
+  assert.equal(session.processingMode, "graph_native")
+  assert.equal(session.fallbackReason, "")
+  assert.equal(session.readyToLog, true)
+  assert.equal(session.summary, "500ml coffee")
+})
+
+test("graph-native meal session keeps simple measured milk follow-ups out of legacy after assistant history", () => {
+  const session = buildMealContext([
+    user("i had 2 eggs"),
+    assistant("Logged 2 eggs."),
+  ], "500ml milk", emptyMealSession())
+
+  assert.ok(session)
+  assertGraphNativeSession(session)
+  assert.equal(session.processingMode, "graph_native")
+  assert.equal(session.fallbackReason, "")
+  assert.equal(session.readyToLog, true)
+  assert.equal(session.summary, "500ml milk")
+})
+
+test("graph-native meal session keeps simple measured chicken follow-ups out of legacy after assistant history", () => {
+  const session = buildMealContext([
+    user("i had 2 eggs"),
+    assistant("Logged 2 eggs."),
+  ], "i had 300g chicken breast", emptyMealSession())
+
+  assert.ok(session)
+  assertGraphNativeSession(session)
+  assert.equal(session.processingMode, "graph_native")
+  assert.equal(session.fallbackReason, "")
+  assert.equal(session.readyToLog, true)
+  assert.equal(session.summary, "300g chicken breast")
+})
+
+test("complex daypart meals still stay legacy after assistant history", () => {
+  const session = buildMealContext([
+    user("i had 2 eggs"),
+    assistant("Logged 2 eggs."),
+  ], "breakfast was 2 eggs, lunch was 200g steak", emptyMealSession())
+
+  assert.ok(session)
+  assert.equal(session.processingMode, "legacy")
+  assert.equal(session.fallbackReason, "legacy_gate")
+  assert.equal(session.legacyGateClause, "non_graph_assistant_turn_present")
+})
+
 test("graph-native meal session keeps simple daypart groups out of legacy fallback", () => {
   const session = buildMealContext([], "breakfast was 2 eggs, lunch was 200g salad", emptyMealSession())
 
@@ -1375,19 +1429,20 @@ test("meal session exposes whether parsing stayed graph-native or fell back to l
   assert.equal(legacySession.legacyGateClause, "non_graph_not_meal_start")
 })
 
-test("meal session exposes the specific legacy gate clause for simple measured drink turns with assistant history", () => {
+test("meal session keeps simple measured drink turns graph-native even with assistant history", () => {
   const assistantHistory = [
     { role: "assistant", content: "Tell me what happened today, what you ate, what you trained, or what you want to change, and I'll help you sort the next move." },
   ]
 
-  const legacyCoffeeSession = buildMealContext(assistantHistory, "500ml coffee", emptyMealSession())
+  const followUpCoffeeSession = buildMealContext(assistantHistory, "500ml coffee", emptyMealSession())
   const graphCoffeeSession = buildMealContext([], "500ml coffee", emptyMealSession())
 
-  assert.ok(legacyCoffeeSession)
+  assert.ok(followUpCoffeeSession)
   assert.ok(graphCoffeeSession)
-  assert.equal(legacyCoffeeSession.processingMode, "legacy")
-  assert.equal(legacyCoffeeSession.fallbackReason, "legacy_gate")
-  assert.equal(legacyCoffeeSession.legacyGateClause, "non_graph_assistant_turn_present")
+  assertGraphNativeSession(followUpCoffeeSession)
+  assert.equal(followUpCoffeeSession.processingMode, "graph_native")
+  assert.equal(followUpCoffeeSession.fallbackReason, "")
+  assert.equal(followUpCoffeeSession.legacyGateClause, "")
   assert.equal(graphCoffeeSession.processingMode, "graph_native")
   assert.equal(graphCoffeeSession.fallbackReason, "")
   assert.equal(graphCoffeeSession.legacyGateClause, "")

@@ -1105,6 +1105,49 @@ test("normalizeCoachResponse strict AI-first canonicalizes an explicit persisten
   assert.equal(payload.actions[0].calories, 240)
 })
 
+test("normalizeCoachResponse strict AI-first recovers a fresh meal save when the AI reply claims persistence but omits the action", () => {
+  const payload = normalizeCoachResponse({
+    reply: "Got it. I've logged your chicken.",
+    actions: [],
+    warnings: [],
+  }, {
+    preferAIFirst: true,
+    strictAIFirst: true,
+    mealContext: {
+      readyToLog: true,
+      alreadyLogged: false,
+      suppressed: false,
+      answerOnly: false,
+      clarifyQuestion: "",
+      pendingClarification: null,
+      persistedMealId: "",
+      correctionRequested: false,
+      deleteRequested: false,
+      summary: "1 chicken",
+      wantsLogging: true,
+    },
+    canonicalPersistenceActions: [{
+      type: "log_meal",
+      meal_type: "snack",
+      food_name: "1 chicken",
+      quantity: "1 meal",
+      calories: 165,
+      protein_g: 31,
+      carbs_g: 0,
+      fat_g: 3.6,
+      estimated: true,
+      nutrition_source: "Estimated from AI-identified foods and internal AU/NZ nutrition fallbacks",
+      nutrition_source_type: "estimated_internal_profile",
+      macro_confidence: "low",
+    }],
+  })
+
+  assert.equal(payload.actions.length, 1)
+  assert.equal(payload.actions[0].type, "log_meal")
+  assert.equal(payload.actions[0].food_name, "1 chicken")
+  assert.equal(payload.reply, "Got it. I've logged your chicken.")
+})
+
 test("normalizeCoachResponse strict AI-first keeps a good AI clarify reply instead of replacing it with parser clarify hints", () => {
   const payload = normalizeCoachResponse({
     reply: "Got it. How much light milk did you have?",

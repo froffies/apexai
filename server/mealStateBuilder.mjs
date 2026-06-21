@@ -223,6 +223,12 @@ function normalizeConversation(recentMessages = [], currentMessage = "", existin
     return [...safeArray(existingSession.thread_messages, 18), { role: "user", content: String(currentMessage || "") }]
   }
   const history = pruneTrailingNutritionQuestionHistory(recentMessages, currentMessage, existingSession)
+  if (isGraphNativeSimpleMeasuredFollowUp(history, currentMessage, existingSession)) {
+    return [
+      ...history.filter((entry) => entry?.role === "assistant").map((entry) => ({ role: entry.role, content: String(entry.content || "") })),
+      { role: "user", content: String(currentMessage || "") },
+    ]
+  }
   return [...history, { role: "user", content: String(currentMessage || "") }]
 }
 
@@ -429,6 +435,26 @@ function isGraphNativeFriendlyPersistedFollowUp(currentMessage = "", existingSes
   )
 }
 
+function isGraphNativeSimpleMeasuredFollowUp(conversation = [], currentMessage = "", existingSession = null) {
+  if (existingSession?.active || existingSession?.persisted) return false
+  const normalizedCurrent = cleanText(currentMessage)
+  if (!normalizedCurrent) return false
+  if (!MEAL_START_PATTERN.test(normalizedCurrent) && !isSimpleMeasuredMealFragment(currentMessage)) return false
+  if (detectQuestionOnlyTurn(normalizedCurrent)) return false
+  if (isWorkoutish(normalizedCurrent)) return false
+  if (TIME_REFERENCE_PATTERN.test(normalizedCurrent)) return false
+  if (CORRECTION_PREFIX.test(normalizedCurrent) || INLINE_CORRECTION_PATTERN.test(normalizedCurrent)) return false
+  if (PACKAGED_UNIT_PATTERN.test(normalizedCurrent)) return false
+  if (COMPLEX_PATTERN.test(normalizedCurrent)) return false
+  if (splitGraphClauses(currentMessage).length !== 1) return false
+  if (/\b(?:with|without|cooked in|fried in|no sugar|no milk)\b/i.test(normalizedCurrent)) return false
+  const quantity = extractQuantity(currentMessage) || extractEmbeddedQuantity(currentMessage)
+  if (!quantity) return false
+  const baseName = canonicalBaseName(baseNameFromText(currentMessage))
+  if (!baseName && quantity.unit !== "egg") return false
+  return true
+}
+
 function isActiveGraphGroupedFollowUp(currentMessage = "", existingSession = null) {
   const normalizedCurrent = cleanText(currentMessage)
   if (!existingSession?.active || !existingSession?.graphNative) return false
@@ -476,10 +502,12 @@ function shouldUseLegacy(conversation, currentMessage, existingSession) {
   const graphNativeImplicitMeasuredTurn = isGraphNativeImplicitMeasuredTurn(conversation, currentMessage, existingSession)
   const graphNativeFriendlyDaypartTurn = isGraphNativeFriendlyDaypartTurn(conversation, currentMessage, existingSession)
   const graphNativeFriendlyPersistedFollowUp = isGraphNativeFriendlyPersistedFollowUp(currentMessage, existingSession)
+  const graphNativeSimpleMeasuredFollowUp = isGraphNativeSimpleMeasuredFollowUp(conversation, currentMessage, existingSession)
   const activeGraphGroupedFollowUp = isActiveGraphGroupedFollowUp(currentMessage, existingSession)
   const graphNativeCorrectionFollowUp = isGraphNativeCorrectionFollowUp(currentMessage, existingSession)
   const implicitGraphNativeTurn = (
     graphNativeImplicitMeasuredTurn
+    || graphNativeSimpleMeasuredFollowUp
     || graphNativeFriendlyDaypartTurn
     || graphNativeFriendlyPersistedFollowUp
   )
@@ -494,7 +522,7 @@ function shouldUseLegacy(conversation, currentMessage, existingSession) {
     ["pending_quantities", existingSession?.pendingQuantities?.length],
     ["correction_requested", existingSession?.correctionRequested],
     ["delete_requested", existingSession?.deleteRequested],
-    ["non_graph_assistant_turn_present", !activeGraphSession && conversation.some((entry) => entry.role === "assistant") && !graphNativeFriendlyPersistedFollowUp],
+    ["non_graph_assistant_turn_present", !activeGraphSession && conversation.some((entry) => entry.role === "assistant") && !graphNativeFriendlyPersistedFollowUp && !graphNativeSimpleMeasuredFollowUp],
     ["non_graph_multi_user_turn", !activeGraphSession && conversation.filter((entry) => entry.role === "user").length > 1 && !graphNativeFriendlyPersistedFollowUp],
     ["non_graph_not_meal_start", !activeGraphSession && !MEAL_START_PATTERN.test(cleanText(currentMessage)) && !implicitGraphNativeTurn],
     ["time_reference", TIME_REFERENCE_PATTERN.test(cleanText(currentMessage))],
@@ -1240,11 +1268,24 @@ function applyAlternatePendingReply(state, pending, parsed) {
   if (!parsed || !pendingReference) return false
 
   const pendingTarget = findRootByReference(state, pendingReference)
+  const parsedAlternateTarget = (
+    parsed.kind === "item" || parsed.kind === "item_with_attachment"
+  )
+    ? findRootByBaseName(state, parsed.item?.base_name || "")
+    : null
+  const isAlternateDrinkQuantityReply = Boolean(
+    parsedAlternateTarget
+    && itemReference(parsedAlternateTarget) !== pendingReference
+    && parsedAlternateTarget.category === "drink"
+    && parsed.item?.category === "drink"
+    && parsed.item?.quantity
+  )
 
   if (
     pending?.type === "ingredient"
     && (parsed.kind === "item" || parsed.kind === "item_with_attachment")
     && (parsed.item?.category === "ingredient" || isIngredient(parsed.item?.base_name || ""))
+    && !isAlternateDrinkQuantityReply
   ) {
     return false
   }
@@ -1699,8 +1740,10 @@ export function buildMealStateFromConversation(recentMessages = [], currentMessa
   const resolvedMessage = resolveInlineCorrection(currentMessage)
   const normalizedRecentMessages = pruneTrailingNutritionQuestionHistory(recentMessages, resolvedMessage, existingSession)
   const conversation = normalizeConversation(normalizedRecentMessages, resolvedMessage, existingSession)
+  const graphNativeSimpleMeasuredFollowUp = isGraphNativeSimpleMeasuredFollowUp(conversation, resolvedMessage, existingSession)
   const implicitLoggingTurn = (
     isGraphNativeImplicitMeasuredTurn(conversation, resolvedMessage, existingSession)
+    || graphNativeSimpleMeasuredFollowUp
     || isGraphNativeFriendlyDaypartTurn(conversation, resolvedMessage, existingSession)
     || isGraphNativeFriendlyPersistedFollowUp(resolvedMessage, existingSession)
   )
