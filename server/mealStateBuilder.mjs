@@ -232,6 +232,8 @@ function normalizeConversation(recentMessages = [], currentMessage = "", existin
   return [...history, { role: "user", content: String(currentMessage || "") }]
 }
 
+// ─── Graph-Native Guard Functions ────────────────────────────────────────────
+
 function isSimpleFoodDrinkStart(currentMessage = "") {
   const normalizedCurrent = cleanText(currentMessage)
   if (!MEAL_START_PATTERN.test(normalizedCurrent)) return false
@@ -481,6 +483,8 @@ function isActiveGraphGroupedFollowUp(currentMessage = "", existingSession = nul
   if (!currentBase) return true
   return !baseNamesCompatible(primaryRoot.base_name || primaryRoot.baseName || "", currentBase)
 }
+
+// ─── Legacy Gate ────────────────────────────────────────────────────────────
 
 function shouldUseLegacy(conversation, currentMessage, existingSession) {
   const normalizedCurrent = cleanText(currentMessage)
@@ -888,6 +892,8 @@ function findVariantDrinkTarget(state, text = "") {
   return target
 }
 
+// ─── Graph Parsing ──────────────────────────────────────────────────────────
+
 function parseItemFragment(text = "", state) {
   const raw = stripLead(text)
   const normalized = cleanText(raw)
@@ -1037,6 +1043,8 @@ function accumulateQuantity(target = {}, nextItem = {}) {
     modifier: "",
   }
 }
+
+// ─── Graph Merge ────────────────────────────────────────────────────────────
 
 function mergeRoot(state, nextItem) {
   const pendingTarget = state.pendingClarification?.targetReference ? findRootByReference(state, state.pendingClarification.targetReference) : null
@@ -1262,6 +1270,8 @@ function resolveGroupedSplitPendingQuantity(state, fragments = []) {
   state.nextClarificationReference = ""
   return true
 }
+
+// ─── Pending Reply Resolution ───────────────────────────────────────────────
 
 function applyAlternatePendingReply(state, pending, parsed) {
   const pendingReference = cleanText(pending?.targetReference || "")
@@ -1643,6 +1653,8 @@ function buildMealGroups(state) {
   }))
 }
 
+// ─── Turn Processing ────────────────────────────────────────────────────────
+
 function processGraphTurn(state, turn) {
   const text = String(turn.content || "")
   const normalized = cleanText(text)
@@ -1735,6 +1747,8 @@ function processGraphTurn(state, turn) {
 export function emptyMealSession() {
   return baseSession()
 }
+
+// ─── Public API ──────────────────────────────────────────────────────────────
 
 export function buildMealStateFromConversation(recentMessages = [], currentMessage = "", existingSession = null) {
   const resolvedMessage = resolveInlineCorrection(currentMessage)

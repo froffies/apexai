@@ -1,20 +1,8 @@
 import { coachMealConfidenceNote } from "../src/lib/nutritionHelpers.js"
 import { findBestFoodMatch } from "../src/lib/nutritionDatabase.js"
+import { safeArray, safeNumber, titleCase, roundMacro as _roundMacro, escapeRegex as _escapeRegex } from "./utils.mjs"
 
-export function safeArray(value, limit = 8) {
-  return Array.isArray(value) ? value.slice(0, limit) : []
-}
-
-export function safeNumber(value) {
-  const parsed = Number(String(value ?? "").replace(/,/g, ""))
-  return Number.isFinite(parsed) ? parsed : null
-}
-
-export function titleCase(text) {
-  return String(text || "")
-    .trim()
-    .replace(/\w\S*/g, (word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-}
+export { safeArray, safeNumber, titleCase }
 
 const COUNT_UNITS = new Set(["egg", "slice", "cup", "tin", "can", "block", "bunch", "serve", "bowl", "plate", "mug", "tbsp", "tsp"])
 const MASS_UNITS = new Map([["g", 1], ["kg", 1000], ["oz", 28.3495], ["lb", 453.592]])
@@ -24,9 +12,12 @@ const TRAILING_LOG_COMMAND_PATTERN = /\s+\b(?:(?:can|could)\s+you|please|just)?\
 
 const PORTION_PATTERN = /(?<amount>\d+(?:\.\d+)?)\s*(?:large|medium|small|fresh|squeezed|salted|unsalted|wholemeal|wholegrain|rye)?\s*(?<unit>kg|g|oz|lb|lbs|pounds?|ml|l|tbsp|tablespoons?|tsp|teaspoons?|cups?|slices?|tins?|cans?|blocks?|bunch(?:es)?|serves?|servings?|bowls?|plates?|mugs?|eggs?)\b/i
 
-function roundMacro(value) {
-  return Math.round((Number(value) || 0) * 10) / 10
-}
+// ─── Math & Unit Utilities ───────────────────────────────────────────────────
+
+function roundMacro(value) { return _roundMacro(value) }
+function escapeRegex(value) { return _escapeRegex(value) }
+
+// ─── Portion & Quantity ─────────────────────────────────────────────────────
 
 function normalizeUnit(unit) {
   const text = String(unit || "").trim().toLowerCase()
@@ -128,10 +119,6 @@ function baseNameMatches(candidate, baseName) {
     return Math.max(best, score)
   }, 0)
   return sharedWords
-}
-
-function escapeRegex(value) {
-  return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 }
 
 function hasWholeFoodTerm(baseName, term) {
@@ -493,6 +480,8 @@ export function normalizeAction(action) {
   return action && typeof action === "object" && typeof action.type === "string" ? action : null
 }
 
+// ─── Persistence Signals ─────────────────────────────────────────────────────
+
 export function replyClaimsPersistence(reply) {
   const text = String(reply || "")
     .replace(/â€™/g, "'")
@@ -512,6 +501,8 @@ export function isMealPersistenceAction(action) {
 export function isWorkoutPersistenceAction(action) {
   return action?.type === "log_workout" || action?.type === "update_workout_log" || action?.type === "delete_workout_log"
 }
+
+// ─── Macro Helpers ───────────────────────────────────────────────────────────
 
 export function hasMealMacros(action) {
   return ["calories", "protein_g", "carbs_g", "fat_g"].every((key) => Number.isFinite(Number(action?.[key])))
@@ -616,6 +607,8 @@ function formatNutritionStatusAmount(metric, value) {
   return `${roundMacro(value || 0)}${metric.label} ${metric.noun}`.trim()
 }
 
+// ─── Deterministic Replies ───────────────────────────────────────────────────
+
 export function buildDeterministicNutritionStatusReply(args = {}) {
   const metric = extractNutritionStatusMetric(args.message)
   if (!metric) return ""
@@ -668,6 +661,8 @@ function cleanFoodMacroLookupTerm(value = "") {
     .replace(/^(?:standard|typical|usual)\s+/i, "")
     .trim()
 }
+
+// ─── Food Lookup & Matching ──────────────────────────────────────────────────
 
 export function extractFoodMacroLookupTerm(message = "") {
   const text = String(message || "").trim().replace(/[’]/g, "'")
@@ -878,6 +873,8 @@ export function deterministicAlreadyLoggedReply(session, kind = "meal") {
     ? `I already saved ${summary} in today's nutrition log. If you want to change it, tell me what to update.`
     : `I already saved ${summary} in Workouts. If you want to change it, tell me what to update.`
 }
+
+// ─── Deterministic Actions ───────────────────────────────────────────────────
 
 export function buildDeterministicMealDeletionAction(mealSession) {
   if (!mealSession?.deleteRequested || !String(mealSession?.persistedMealId || "").trim()) return null

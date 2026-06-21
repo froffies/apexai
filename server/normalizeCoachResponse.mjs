@@ -16,14 +16,12 @@ import {
   summarizeCoachAction,
   summarizeCoachActions,
 } from "./coachLoggingRules.mjs"
+import { cleanText, escapeRegex } from "./utils.mjs"
 
 function cleanReplyText(value = "") {
-  return String(value || "").toLowerCase().replace(/[’']/g, "'").replace(/\s+/g, " ").trim()
+  return cleanText(value)
 }
 
-function escapeRegex(value = "") {
-  return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-}
 
 function isNutritionQuestionWithQuantity(userMessage = "") {
   const normalized = String(userMessage || "").toLowerCase().replace(/['']/g, "'").replace(/\s+/g, " ").trim()

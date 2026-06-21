@@ -1,4 +1,5 @@
 import { buildMealContext as buildLegacyMealContext, detectQuestionOnlyTurn, emptyMealSession as emptyLegacyMealSession } from "./mealStateBuilder.mjs"
+import { cleanText, safeArray, titleCase } from "./utils.mjs"
 
 const MEAL_EXPLICIT_START_PATTERN = /^(?:please\s+)?(?:(?:i\s+)?(?:had|ate|drank)|log|track|save|add|include)\b/i
 const MEAL_CORRECTION_PATTERN = /\b(?:actually|correction|change(?:\s+that)?|update(?:\s+that)?|make that|not\b|instead|sorry|i meant)\b/i
@@ -96,17 +97,8 @@ const FUTURE_MEAL_INTENT_PATTERN = /\b(?:(?:i\s*(?:am|['’]m)?\s*)?(?:going\s+t
 const FUTURE_WORKOUT_INTENT_PATTERN = /\b(?:(?:i\s*(?:am|['’]m)?\s*)?(?:going\s+to|gonna)\s+(?:do|train|work\s*out|run|walk|cycle|bike|swim|bench|squat|deadlift|lift)|(?:i(?:['’]ll)?|i\s+will|will)\s+(?:do|train|work\s*out|run|walk|cycle|bike|swim|bench|squat|deadlift|lift))\b/i
 const PURE_DELETE_OR_SUPPRESS_PATTERN = /^(?:actually\s+|sorry\s+|please\s+|just\s+)*(?:(?:don't|dont|do not|stop)\s+(?:log|save|track|record|add)|(?:delete|remove|undo|erase))(?:\s+(?:it|that|this|log|session|workout))?$/i
 
-function cleanText(value) {
-  return String(value || "")
-    .toLowerCase()
-    .replace(/[’']/g, "'")
-    .replace(/\s+/g, " ")
-    .trim()
-}
 
-function safeArray(value, limit = 8) {
-  return Array.isArray(value) ? value.slice(0, limit) : []
-}
+// ─── Text Utilities ─────────────────────────────────────────────────────────
 
 function parseCountWord(value = "") {
   const normalized = cleanText(value)
@@ -147,11 +139,6 @@ function stripCorrectionLead(text) {
   return normalized
 }
 
-function titleCase(text) {
-  return String(text || "")
-    .trim()
-    .replace(/\w\S*/g, (word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-}
 
 function safeRecentMessages(value, limit = 18) {
   return Array.isArray(value) ? value.filter((entry) => typeof entry?.content === "string").slice(-limit) : []
@@ -160,6 +147,8 @@ function safeRecentMessages(value, limit = 18) {
 function buildThreadMessages(recentMessages = [], currentMessage = "") {
   return [...safeRecentMessages(recentMessages, 18), { role: "user", content: String(currentMessage || "") }]
 }
+
+// ─── Session Normalization ───────────────────────────────────────────────────
 
 function normalizeMealSession(session = {}) {
   return {
@@ -585,6 +574,8 @@ function hasStrongWorkoutSignal(text = "", parsedWorkout = null) {
   )
 }
 
+// ─── Domain Classification ───────────────────────────────────────────────────
+
 function classifyCoachClauseDomain({
   clause,
   mealSession,
@@ -674,6 +665,8 @@ function classifyCoachClauseDomain({
 
   return { domain: "general", mealPreview, parsedWorkout, mealLike, workoutLike, directiveOnly, nutritionQuestion, workoutQuestion, deleteOrSuppress, correction }
 }
+
+// ─── Turn Intent Graph ───────────────────────────────────────────────────────
 
 function buildTurnIntentGraph({
   currentMessage = "",
@@ -1132,6 +1125,8 @@ function normalizeSplitPreparationFollowUp(message = "") {
       : `${count} were ${prepA}, the rest were ${prepB}`
   })
 }
+
+// ─── Meal Session State ──────────────────────────────────────────────────────
 
 function buildMealSessionState(recentMessages = [], currentMessage = "", existingSession = null, recentMeals = []) {
   const prior = normalizeMealSession(existingSession)
@@ -1965,6 +1960,8 @@ function suppressionTargetsWorkout(message = "", existingSession = null, mealSes
   return true
 }
 
+// ─── Workout Session State ───────────────────────────────────────────────────
+
 function buildWorkoutSessionState(recentMessages = [], currentMessage = "", existingSession = null, mealSession = null) {
   const prior = normalizeWorkoutSession(existingSession)
   const normalizedCurrent = cleanText(currentMessage)
@@ -2189,6 +2186,10 @@ export function emptyWorkoutSessionState() {
       candidateActivities: [],
     }
   }
+
+// ─── Public API ──────────────────────────────────────────────────────────────
+
+// ─── Public API ──────────────────────────────────────────────────────────────
 
 export function buildCoachSessionState({
   recentMessages = [],

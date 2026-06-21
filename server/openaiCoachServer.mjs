@@ -28,11 +28,15 @@ import {
   deterministicClarifyActionFromSession,
   extractFoodMacroLookupTerm,
   formatDeterministicMealAnswer,
+  isPersistenceAction,
   summarizeCoachAction,
 } from "./coachLoggingRules.mjs"
 import { normalizeCoachResponse } from "./normalizeCoachResponse.mjs"
 import { buildFoodPhotoEstimate, buildReviewedFoodPhotoEstimate } from "./nutritionPhotoAnalysis.mjs"
 import { normalizeVisionImageDataUrl } from "./visionImagePrep.mjs"
+import { safeArray, safeNumber, roundMacro } from "./utils.mjs"
+
+// ─── Environment & Configuration ─────────────────────────────────────────────
 
 function loadDotEnv() {
   const envPath = path.join(process.cwd(), ".env")
@@ -435,6 +439,8 @@ Rules:
 - clarification_question should be short and specific when needed, otherwise empty.
 `
 
+// ─── HTTP Utilities ──────────────────────────────────────────────────────────
+
 function jsonHeaders(origin = fallbackCorsOrigin) {
   return {
     "Content-Type": "application/json",
@@ -541,9 +547,8 @@ function readRequestBody(request, maxBytes = defaultRequestBodyLimitBytes) {
   })
 }
 
-function safeArray(value, limit) {
-  return Array.isArray(value) ? value.slice(0, limit) : []
-}
+
+// ─── Conversation Utilities ──────────────────────────────────────────────────
 
 function safeRecentArray(value, limit) {
   return Array.isArray(value) ? value.slice(-limit) : []
@@ -556,6 +561,8 @@ function buildCoachConversationWindow(recentMessages = [], currentMessage = "", 
     ...(assistantReply ? [{ role: "assistant", content: String(assistantReply || "") }] : []),
   ]
 }
+
+// ─── Deterministic Fallback ──────────────────────────────────────────────────
 
 function buildDeterministicFallbackPayload({
   offlineDeterministicActions = [],
@@ -718,19 +725,7 @@ function buildDeterministicFallbackPayload({
   }
 }
 
-function isPersistenceAction(action) {
-  return [
-    "log_meal",
-    "update_meal_log",
-    "delete_meal_log",
-    "log_workout",
-    "update_workout_log",
-    "delete_workout_log",
-    "create_workout_plan",
-    "create_meal_plan",
-    "update_targets",
-  ].includes(String(action?.type || ""))
-}
+// ─── Audit Helpers ───────────────────────────────────────────────────────────
 
 function createAuditLogId() {
   return `audit_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
@@ -779,6 +774,8 @@ function assertString(value, label, maxLength) {
     throw error
   }
 }
+
+// ─── Request Validation ──────────────────────────────────────────────────────
 
 function validateCoachBody(body) {
   assertObject(body, "request body")
@@ -930,6 +927,8 @@ function validateCoachAuditEventBody(body) {
   }
 }
 
+// ─── Error Handling ──────────────────────────────────────────────────────────
+
 function createHttpError(status, message, options = {}) {
   const error = new Error(message)
   error.status = status
@@ -1002,6 +1001,8 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+// ─── Vision / OpenAI ─────────────────────────────────────────────────────────
+
 async function createVisionCompletion(requestBody) {
   let lastError = null
   for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -1037,6 +1038,8 @@ function sendError(response, request, error, fallbackMessage) {
     requestResponseOrigin(request)
   )
 }
+
+// ─── Auth ────────────────────────────────────────────────────────────────────
 
 async function verifyBearerUser(request) {
   if (!serverSupabase) {
@@ -1078,14 +1081,9 @@ async function verifyRequestAuth(request, { optional = false } = {}) {
   return verifyBearerUser(request)
 }
 
-function safeNumber(value, fallback = 0) {
-  const parsed = Number(value)
-  return Number.isFinite(parsed) ? parsed : fallback
-}
 
-function roundMacro(value) {
-  return Math.round(safeNumber(value) * 10) / 10
-}
+
+// ─── Food Matching & Cache ───────────────────────────────────────────────────
 
 function normalizeComparableFoodText(value = "") {
   return String(value || "")
@@ -1511,6 +1509,8 @@ function normalizeSingleOpenFoodFactsProduct(product, sourceType = "barcode_labe
     source_type: sourceType,
   }))[0] || null
 }
+
+// ─── Route Handlers ──────────────────────────────────────────────────────────
 
 async function handleCoach(request, response) {
   const user = await verifyRequestAuth(request)
@@ -2479,6 +2479,8 @@ async function handleCoachAuditList(request, response) {
     capabilities: auditCapabilities,
   }, requestResponseOrigin(request))
 }
+
+// ─── Server Bootstrap ────────────────────────────────────────────────────────
 
 const server = http.createServer(async (request, response) => {
   const corsAllowed = applyCors(request)

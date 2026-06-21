@@ -28,47 +28,47 @@ const COUNT_WORD_MAP = {
   twelve: 12,
 }
 
-function cleanText(value = "") {
+function trimText(value = "") {
   return String(value || "").trim().replace(/\s+/g, " ")
 }
 
 function normalizeConfidence(value, fallback = "medium") {
-  const normalized = cleanText(value).toLowerCase()
+  const normalized = trimText(value).toLowerCase()
   return PHOTO_CONFIDENCE_LEVELS.has(normalized) ? normalized : fallback
 }
 
 function normalizeCategory(value = "") {
-  const normalized = cleanText(value).toLowerCase()
+  const normalized = trimText(value).toLowerCase()
   if (normalized === "drink" || normalized === "ingredient") return normalized
   return "food"
 }
 
 function normalizeQuantity(value = "", fallback = "1 serve") {
-  const normalized = cleanText(value)
+  const normalized = trimText(value)
   return normalized || fallback
 }
 
 function normalizePreparation(value = "") {
-  const normalized = cleanText(value)
+  const normalized = trimText(value)
   return normalized ? normalized.toLowerCase() : ""
 }
 
 function countFromToken(value = "") {
-  const normalized = cleanText(value).toLowerCase()
+  const normalized = trimText(value).toLowerCase()
   if (!normalized) return 0
   if (/^\d+$/.test(normalized)) return Number(normalized)
   return COUNT_WORD_MAP[normalized] || 0
 }
 
 function extractCountFromText(text = "") {
-  const normalized = cleanText(text).toLowerCase()
+  const normalized = trimText(text).toLowerCase()
   if (!normalized) return 0
   const match = normalized.match(/\b(\d+|a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b/)
   return countFromToken(match?.[1] || "")
 }
 
 function isGenericPhotoFoodName(value = "") {
-  const normalized = cleanText(value).toLowerCase()
+  const normalized = trimText(value).toLowerCase()
   return /^(?:\d+\s*)?item(?:\s+\d+)?$/.test(normalized)
     || normalized === "food"
     || normalized === "meal"
@@ -97,11 +97,11 @@ function buildQuantityPayload(value = "") {
 }
 
 function stripLeadingArticle(value = "") {
-  return cleanText(value).replace(/^(?:a|an|the)\s+/i, "")
+  return trimText(value).replace(/^(?:a|an|the)\s+/i, "")
 }
 
 function normalizePhotoFoodName(value = "") {
-  return cleanText(value)
+  return trimText(value)
     .replace(/\bitem\s+\d+\b/gi, "")
     .replace(/^\d+\s*[\).\:-]\s*/g, "")
     .replace(/^(?:\d+(?:\.\d+)?\s*(?:kg|g|oz|lb|lbs|pounds?|ml|l|cups?|bowls?|plates?|mugs?|tablespoons?|tbsp|teaspoons?|tsp|serves?|servings?|pieces?|piece|slices?|sprigs?)?|\b(?:a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve))\s+(?:(?:large|medium|small)\s+)?/i, "")
@@ -114,18 +114,18 @@ function normalizePhotoFoodName(value = "") {
 
 function inferPhotoFoodNameFromAssumptions(assumptions = []) {
   for (const assumption of assumptions) {
-    const text = cleanText(assumption)
+    const text = trimText(assumption)
     if (!text) continue
     const onlyVisible = text.match(/^([A-Za-z][A-Za-z\s'-]+?)\s+is\s+the\s+only\s+item\s+visible\.?$/i)
-    if (onlyVisible?.[1]) return cleanText(onlyVisible[1])
+    if (onlyVisible?.[1]) return trimText(onlyVisible[1])
     const appearsToBe = text.match(/^(?:it|this|the food)\s+(?:looks like|appears to be)\s+([A-Za-z][A-Za-z\s'-]+?)[.]?$/i)
-    if (appearsToBe?.[1]) return cleanText(appearsToBe[1])
+    if (appearsToBe?.[1]) return trimText(appearsToBe[1])
   }
   return ""
 }
 
 function parseSimpleSummaryItem(summary = "", assumptions = []) {
-  const text = cleanText(summary).replace(/[.!?]+$/g, "")
+  const text = trimText(summary).replace(/[.!?]+$/g, "")
   if (!text) return null
   if (/\b(?:pizza|burger|cheeseburger|butter chicken|chicken curry|biryani|samosa|triangular pastries?|dosa|idli|caesar salad|halloumi salad|poke bowl|burrito bowl|breakfast burrito|pad thai|laksa|ramen|pho|tacos?|kebab|souvlaki|gyro|hsp|halal snack pack|dumplings?|gyoza|wontons?|dim sims?|schnitzel|fish and chips|fish & chips|fried chicken and chips|roast chicken meal|banh mi|hand roll|meat pie|sausage roll)\b/i.test(text)) {
     return null
@@ -158,8 +158,8 @@ function parseSimpleSummaryItem(summary = "", assumptions = []) {
 }
 
 function defaultQuantityForSummaryTerm(term = "", summaryText = "") {
-  const normalized = cleanText(term).toLowerCase()
-  const summary = cleanText(summaryText).toLowerCase()
+  const normalized = trimText(term).toLowerCase()
+  const summary = trimText(summaryText).toLowerCase()
   const count = extractCountFromText(summary)
   if (!normalized) return "1 serve"
   if (/^\d/.test(normalized)) return normalized
@@ -235,7 +235,7 @@ function defaultQuantityForSummaryTerm(term = "", summaryText = "") {
 }
 
 function parseNamedPhotoDishFromSummary(summary = "", assumptions = [], confidence = "low") {
-  const text = cleanText(summary).replace(/[.!?]+$/g, "")
+  const text = trimText(summary).replace(/[.!?]+$/g, "")
   if (!text) return null
 
   const normalized = text.toLowerCase()
@@ -454,7 +454,7 @@ function parseNamedPhotoDishFromSummary(summary = "", assumptions = [], confiden
 
   if (!rule) return null
 
-  const name = cleanText(rule.resolveName())
+  const name = trimText(rule.resolveName())
   if (!name) return null
 
   return {
@@ -470,7 +470,7 @@ function parseNamedPhotoDishFromSummary(summary = "", assumptions = [], confiden
 }
 
 function parseCompositeSummaryItems(summary = "", assumptions = []) {
-  const text = cleanText(summary).replace(/[.!?]+$/g, "")
+  const text = trimText(summary).replace(/[.!?]+$/g, "")
   if (!text) return []
 
   const normalized = text
@@ -518,7 +518,7 @@ function singularizeFoodName(value = "") {
 function buildItemLabel(item) {
   const quantity = normalizeQuantity(item.quantity, "")
   const preparation = normalizePreparation(item.preparation)
-  const lowerName = cleanText(item.name).toLowerCase()
+  const lowerName = trimText(item.name).toLowerCase()
   if (!quantity) return [preparation, lowerName].filter(Boolean).join(" ").trim()
   if (!lowerName) return [quantity, preparation].filter(Boolean).join(" ").trim()
 
@@ -534,12 +534,12 @@ function buildItemLabel(item) {
 function buildMealSummary(items, fallback = "") {
   const labels = items.map((item) => buildItemLabel(item)).filter(Boolean)
   if (labels.length) return labels.join(", plus ")
-  return cleanText(fallback)
+  return trimText(fallback)
 }
 
 function buildPhotoSourceSummary(breakdown = [], confidence = "low") {
   const sources = [...new Set(
-    breakdown.map((item) => cleanText(item.source)).filter(Boolean)
+    breakdown.map((item) => trimText(item.source)).filter(Boolean)
   )]
 
   if (confidence === "high") {
@@ -569,8 +569,8 @@ function deriveMacroConfidence(breakdown = []) {
 
 function isLowImpactEstimatedPhotoItem(item = {}) {
   if (String(item.source_type || "").trim() !== "estimated_internal_profile") return false
-  const name = cleanText(item.name || item.matched_food_name || "").toLowerCase()
-  const category = cleanText(item.category || "").toLowerCase()
+  const name = trimText(item.name || item.matched_food_name || "").toLowerCase()
+  const category = trimText(item.category || "").toLowerCase()
   const calories = Number(item.calories || 0)
   return (
     calories <= 35
@@ -630,13 +630,13 @@ function primaryPhotoReviewReason(reasons = []) {
 
 function buildPhotoDishClusterText(analysis = {}, breakdown = []) {
   return [
-    cleanText(analysis.summary || ""),
-    cleanText(analysis.portion || ""),
+    trimText(analysis.summary || ""),
+    trimText(analysis.portion || ""),
     ...safeArray(analysis.items, 12).flatMap((item) => [item?.name, item?.base_name, item?.notes]),
     ...safeArray(analysis.assumptions, 8),
     ...safeArray(breakdown, 12).flatMap((item) => [item?.name, item?.matched_food_name]),
   ]
-    .map((value) => cleanText(value).toLowerCase())
+    .map((value) => trimText(value).toLowerCase())
     .filter(Boolean)
     .join(" ")
 }
@@ -934,7 +934,7 @@ function summarizePhotoBreakdown(items = []) {
 
 export function normalizeFoodPhotoAnalysis(raw = {}) {
   const value = raw && typeof raw === "object" ? raw : {}
-  const assumptions = safeArray(value.assumptions, 8).map((entry) => cleanText(entry)).filter(Boolean)
+  const assumptions = safeArray(value.assumptions, 8).map((entry) => trimText(entry)).filter(Boolean)
   const inferredFoodName = inferPhotoFoodNameFromAssumptions(assumptions)
   const rawItems = safeArray(value.items, 12)
   const recoveryConfidence = deriveOverallPhotoConfidence(
@@ -945,7 +945,7 @@ export function normalizeFoodPhotoAnalysis(raw = {}) {
     .map((item, index) => {
       const rawCandidateName = item?.name || item?.label || ""
       const rawSummaryName = item?.summary || item?.description || ""
-      const preferredCandidateName = isGenericPhotoFoodName(rawCandidateName) && cleanText(rawSummaryName)
+      const preferredCandidateName = isGenericPhotoFoodName(rawCandidateName) && trimText(rawSummaryName)
         ? rawSummaryName
         : rawCandidateName
       const candidateName = normalizePhotoFoodName(preferredCandidateName || rawSummaryName || `Item ${index + 1}`)
@@ -963,7 +963,7 @@ export function normalizeFoodPhotoAnalysis(raw = {}) {
         preparation,
         category: normalizeCategory(item?.category),
         confidence: normalizeConfidence(item?.confidence, "medium"),
-        notes: cleanText(item?.notes || ""),
+        notes: trimText(item?.notes || ""),
       }
     })
     .filter((item) => item.base_name)
@@ -988,7 +988,7 @@ export function normalizeFoodPhotoAnalysis(raw = {}) {
     items: normalizedItems,
     overall_confidence: deriveOverallPhotoConfidence(normalizedItems, value.overall_confidence),
     needs_clarification: Boolean(value.needs_clarification && normalizedItems.length > 0),
-    clarification_question: cleanText(value.clarification_question || ""),
+    clarification_question: trimText(value.clarification_question || ""),
     assumptions,
   }
 }
@@ -1009,7 +1009,7 @@ function normalizeReviewedPhotoAnalysis(raw = {}) {
         preparation: normalizePreparation(item?.preparation || ""),
         category: normalizeCategory(item?.category),
         confidence: normalizeConfidence(item?.confidence, "medium"),
-        notes: cleanText(item?.notes || ""),
+        notes: trimText(item?.notes || ""),
       }
     })
     .filter(Boolean)
@@ -1041,7 +1041,7 @@ async function estimatePreparedPhotoAnalysis(analysis = {}, options = {}, { manu
   }
 
   const lookupFoods = typeof options.lookupFoods === "function" ? options.lookupFoods : async () => []
-  const mealType = cleanText(options.mealType || "").toLowerCase()
+  const mealType = trimText(options.mealType || "").toLowerCase()
   const candidateFoodMatches = {}
 
   for (const item of analysis.items) {

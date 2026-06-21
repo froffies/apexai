@@ -1,5 +1,7 @@
 import fs from "node:fs"
 import path from "node:path"
+import { cleanText, safeArray, safeNumber } from "./utils.mjs"
+import { replyClaimsPersistence } from "./coachLoggingRules.mjs"
 
 const AUDIT_STORAGE_PREFIX = "coach_audit:"
 const AUDIT_SCHEMA_VERSION = 1
@@ -52,22 +54,8 @@ const adminEmailAllowlist = parseCsv(
 )
 const adminIdAllowlist = parseCsv(process.env.COACH_AUDIT_ADMIN_IDS)
 
-function cleanText(value) {
-  return String(value || "")
-    .toLowerCase()
-    .replace(/[’']/g, "'")
-    .replace(/\s+/g, " ")
-    .trim()
-}
 
-function safeArray(value, limit = 16) {
-  return Array.isArray(value) ? value.slice(0, limit) : []
-}
 
-function safeNumber(value, fallback = 0) {
-  const parsed = Number(value)
-  return Number.isFinite(parsed) ? parsed : fallback
-}
 
 function redactSensitiveText(value, maxLength = 1200) {
   const text = String(value || "")
@@ -547,9 +535,6 @@ export function buildCoachAuditFlags(entry = {}) {
   return flags
 }
 
-function replyClaimsPersistence(reply) {
-  return /\b(logged|saved|tracked|added|recorded|updated|deleted)\b/i.test(String(reply || ""))
-}
 
 function replyIsConditionalPersistenceOffer(reply) {
   const text = cleanText(reply)
