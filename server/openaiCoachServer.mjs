@@ -1523,7 +1523,8 @@ async function handleCoach(request, response) {
   let incomingAuditMeta = normalizeIncomingAuditMeta()
   let stateBefore = sanitizeCoachStateSnapshot({})
 
-  const queueAuditRecord = (record) => {
+  // -- Audit helper: queues a record without blocking the response --
+    const queueAuditRecord = (record) => {
     if (!auditCapabilities.writable || !user?.id) return
     void persistCoachAuditRecord(adminSupabase, user, record).catch((error) => {
       console.warn(`Coach audit logging failed: ${error instanceof Error ? error.message : "unknown error"}`)
@@ -1576,6 +1577,7 @@ async function handleCoach(request, response) {
       }
     }
 
+    // -- Response helper: finalises payload, queues audit record, sends JSON --
     let canonicalMealActionsForPayload = []
     const sendCoachPayload = (payload, routeType) => {
       const finalPayload = finalizeCoachPayload(payload, {
@@ -1627,6 +1629,7 @@ async function handleCoach(request, response) {
       }, requestResponseOrigin(request))
     }
 
+    // -- Deterministic routing: no-client and offline-deterministic early exits --
     const mealDeleteAction = buildDeterministicMealDeletionAction(mealContext)
     const workoutDeleteAction = buildDeterministicWorkoutDeletionAction(workoutContext)
     const mealHasPendingWork = Boolean(
@@ -1847,6 +1850,7 @@ async function handleCoach(request, response) {
       return
     }
 
+    // -- AI path: build payload, call GPT-4o, normalise response --
     const aiValidatedActions = validatedActions
     const aiCanonicalPersistenceActions = candidatePersistenceActions
     const payload = {
@@ -1941,22 +1945,23 @@ async function handleCoach(request, response) {
       }, "ai-assisted")
     } catch (aiError) {
       const fallback = buildDeterministicFallbackPayload({
-      offlineDeterministicActions,
-      nutritionStatusReply,
-      foodMacroReply,
-      mealClarifyHint,
-      workoutClarifyHint,
-      mealContext,
-      workoutContext,
-      mealAlreadyLoggedGuard,
-      workoutAlreadyLoggedGuard,
-      mealSuppressedGuard,
-      workoutSuppressedGuard,
-      body,
-    })
+        offlineDeterministicActions,
+        nutritionStatusReply,
+        foodMacroReply,
+        mealClarifyHint,
+        workoutClarifyHint,
+        mealContext,
+        workoutContext,
+        mealAlreadyLoggedGuard,
+        workoutAlreadyLoggedGuard,
+        mealSuppressedGuard,
+        workoutSuppressedGuard,
+        body,
+      })
       sendCoachPayload(fallback.payload, fallback.routeType)
     }
     return
+  // -- Outer error handler: records failed turns to audit log --
   } catch (error) {
     if (auditCapabilities.writable && user?.id) {
       const failureRecord = {
