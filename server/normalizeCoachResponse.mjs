@@ -25,6 +25,15 @@ function escapeRegex(value = "") {
   return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 }
 
+function isNutritionQuestionWithQuantity(userMessage = "") {
+  const normalized = String(userMessage || "").toLowerCase().replace(/['']/g, "'").replace(/\s+/g, " ").trim()
+  if (!normalized) return false
+  const nutritionQuestionPattern = /\b(?:how\s+(?:many|much)|what(?:'s|\s+is|\s+are)\s+the?|calories\s+in|macros?\s+(?:in|for|of)|nutrition\s+(?:in|for|of)|protein\s+in|carbs?\s+in|fat\s+in)\b/i
+  if (!nutritionQuestionPattern.test(normalized)) return false
+  return /\b\d+\s*(?:g|kg|ml|l|oz|lb|cal|kcal|kj|gram|grams|serving|serves?|cup|tbsp|tsp|piece|slice)\b/i.test(normalized)
+    || /\b(?:per\s+(?:100g|gram|serve|serving|cup))\b/i.test(normalized)
+}
+
 function tokenVariants(value = "") {
   const normalized = cleanReplyText(value)
   if (!normalized) return []
@@ -375,6 +384,9 @@ export function normalizeCoachResponse(value, context = {}) {
     if (context.workoutContext?.alreadyLogged && isWorkoutPersistenceAction(action)) return false
     if (context.mealContext?.suppressed && isMealPersistenceAction(action)) return false
     if (context.workoutContext?.suppressed && isWorkoutPersistenceAction(action)) return false
+    // Block update_targets when the user message is a nutrition question with a quantity.
+    // The AI misreads the quantity (e.g. "100g") as a target value to set.
+    if (action?.type === "update_targets" && isNutritionQuestionWithQuantity(context.prompt || "")) return false
     if (
       !strictAIFirst
       && isMealPersistenceAction(action)

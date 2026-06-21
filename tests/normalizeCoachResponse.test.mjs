@@ -1421,3 +1421,43 @@ test("normalizeCoachResponse strict AI-first drops invented meal persistence on 
   assert.equal(payload.actions.length, 0)
   assert.equal(payload.reply, "That meal has an estimated total of 294 calories, with 19g of protein, 1.7g of carbs, and 23.4g of fat.")
 })
+
+test("normalizeCoachResponse strips update_targets action when user message is a nutrition question with a quantity", () => {
+  // The AI misread "100g" in "how many calories in 100g of chicken breast" as a target value.
+  const payload = normalizeCoachResponse({
+    reply: "100g of chicken breast has around 165 calories, 31g protein, and 3.6g fat.",
+    actions: [{ type: "update_targets", daily_calories: 100 }],
+    warnings: [],
+  }, {
+    prompt: "how many calories in 100g of chicken breast",
+  })
+
+  assert.equal(payload.actions.length, 0)
+  assert.ok(payload.reply.includes("chicken"))
+})
+
+test("normalizeCoachResponse strips update_targets action for per-100g nutrition questions", () => {
+  const payload = normalizeCoachResponse({
+    reply: "Salmon has around 208 calories per 100g with 20g protein.",
+    actions: [{ type: "update_targets", daily_calories: 200 }],
+    warnings: [],
+  }, {
+    prompt: "what are the macros in 200g of salmon",
+  })
+
+  assert.equal(payload.actions.length, 0)
+})
+
+test("normalizeCoachResponse allows update_targets when user explicitly asks to change their target", () => {
+  // This is a genuine target update request, not a nutrition question - should NOT be stripped.
+  const payload = normalizeCoachResponse({
+    reply: "Done, I've updated your daily calorie target to 2200.",
+    actions: [{ type: "update_targets", daily_calories: 2200 }],
+    warnings: [],
+  }, {
+    prompt: "change my daily calorie goal to 2200",
+  })
+
+  assert.equal(payload.actions.length, 1)
+  assert.equal(payload.actions[0].type, "update_targets")
+})
