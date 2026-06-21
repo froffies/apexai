@@ -1148,6 +1148,55 @@ test("normalizeCoachResponse strict AI-first recovers a fresh meal save when the
   assert.equal(payload.reply, "Got it. I've logged your chicken.")
 })
 
+test("normalizeCoachResponse recovers missing lunch action when AI only returned breakfast", () => {
+  const payload = normalizeCoachResponse({
+    reply: "Logged your breakfast and lunch.",
+    actions: [{
+      type: "log_meal",
+      meal_type: "breakfast",
+      food_name: "2 eggs",
+      calories: 148,
+      protein_g: 12.6,
+      carbs_g: 1.1,
+      fat_g: 10.2,
+    }],
+    warnings: [],
+  }, {
+    prompt: "breakfast was 2 eggs, lunch was 200g rice",
+    strictAIFirst: true,
+    preferAIFirst: true,
+    canonicalPersistenceActions: [
+      {
+        type: "log_meal",
+        meal_type: "breakfast",
+        food_name: "2 eggs",
+        quantity: "2 eggs",
+        calories: 148,
+        protein_g: 12.6,
+        carbs_g: 1.1,
+        fat_g: 10.2,
+        nutrition_source: "Estimated from AI-identified foods and internal AU/NZ nutrition fallbacks",
+      },
+      {
+        type: "log_meal",
+        meal_type: "lunch",
+        food_name: "200g rice",
+        quantity: "200g rice",
+        calories: 316,
+        protein_g: 6.2,
+        carbs_g: 69.4,
+        fat_g: 0.4,
+        nutrition_source: "Estimated from AI-identified foods and internal AU/NZ nutrition fallbacks",
+      },
+    ],
+  })
+
+  const mealActions = payload.actions.filter((action) => action.type === "log_meal")
+  assert.equal(mealActions.length, 2)
+  assert.ok(mealActions.some((action) => action.meal_type === "breakfast"))
+  assert.ok(mealActions.some((action) => action.meal_type === "lunch"))
+})
+
 test("normalizeCoachResponse strict AI-first keeps a good AI clarify reply instead of replacing it with parser clarify hints", () => {
   const payload = normalizeCoachResponse({
     reply: "Got it. How much light milk did you have?",

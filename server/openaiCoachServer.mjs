@@ -392,6 +392,7 @@ Core rules:
 - If response_hints.answer_only_meal_hint is present, use those meal macros as trusted context for answer-only questions about the current meal, but still return no persistence action unless the user explicitly asks to save it.
 - Never say something was saved, logged, updated, or deleted unless your returned actions actually do that.
 - For log_meal and update_meal_log actions, always include calories, protein_g, carbs_g, fat_g, quantity, and nutrition_source.
+- When the user mentions multiple distinct meals in a single message such as "breakfast was X, lunch was Y", return a separate log_meal action for each meal. Never combine multiple meals into a single action, and set meal_type correctly on each one.
 - If a user reports pain, injury, or medical symptoms, do not diagnose. Suggest speaking with a professional.
 `
 

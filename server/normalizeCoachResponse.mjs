@@ -419,6 +419,22 @@ export function normalizeCoachResponse(value, context = {}) {
     canonicalMealPersistenceActions,
     canonicalWorkoutPersistenceActions,
   }))
+  const explicitMealTypes = new Set(
+    resolvedExplicitActions
+      .filter(isMealPersistenceAction)
+      .map((action) => String(action?.meal_type || "").trim().toLowerCase())
+      .filter(Boolean)
+  )
+  const missingCanonicalMealActions = explicitMealTypes.size
+    ? canonicalMealPersistenceActions.filter((action) => {
+        const mealType = String(action?.meal_type || "").trim().toLowerCase()
+        return mealType && !explicitMealTypes.has(mealType)
+      })
+    : []
+  const resolvedActionsWithRecovery = [
+    ...resolvedExplicitActions,
+    ...missingCanonicalMealActions,
+  ]
 
   const explicitMealPersistenceAction = filteredExplicitActions.find(isMealPersistenceAction)
   const explicitWorkoutPersistenceAction = filteredExplicitActions.find(isWorkoutPersistenceAction)
@@ -443,7 +459,7 @@ export function normalizeCoachResponse(value, context = {}) {
     ...deterministicMealActions,
     ...deterministicWorkoutActions,
     ...deterministicClarifyActions,
-    ...resolvedExplicitActions,
+    ...resolvedActionsWithRecovery,
   ]
     .map(normalizeMealAction)
     .filter((action) => !(strictAIFirst && isAnswerOnlyMealTurn && isMealPersistenceAction(action)))
