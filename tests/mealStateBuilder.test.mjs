@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { buildMealContext, emptyMealSession } from "../server/mealStateBuilder.mjs"
+import { buildMealContext, buildMealStateFromConversation, emptyMealSession } from "../server/mealStateBuilder.mjs"
 
 function user(content) {
   return { role: "user", content }
@@ -8,6 +8,29 @@ function user(content) {
 
 function assistant(content) {
   return { role: "assistant", content }
+}
+
+function activeLegacyMealSession() {
+  return {
+    ...emptyMealSession(),
+    active: true,
+    graphNative: false,
+    items: [
+      {
+        base_name: "coffee",
+        label: "Coffee",
+        category: "drink",
+        quantity: { amount: 250, unit: "ml" },
+        preparation: [],
+        modifiers: [],
+        exclusions: [],
+        attached_to: null,
+        relation: null,
+        variant_key: "",
+        meal_type: "",
+      },
+    ],
+  }
 }
 
 function replayMealConversation(conversation, recentLimit = 20) {
@@ -226,6 +249,44 @@ test("complex daypart meals still stay legacy after assistant history", () => {
   assert.equal(session.processingMode, "legacy")
   assert.equal(session.fallbackReason, "legacy_gate")
   assert.equal(session.legacyGateClause, "non_graph_assistant_turn_present")
+})
+
+test("active legacy meal session allows simple scrambled egg fresh starts back onto the graph-native path", () => {
+  const session = buildMealStateFromConversation([], "i had 2 scrambled eggs", activeLegacyMealSession())
+
+  assert.ok(session)
+  assertGraphNativeSession(session)
+  assert.equal(session.graphNative, true)
+  assert.equal(session.processingMode, "graph_native")
+  assert.equal(session.legacyGateClause, "")
+})
+
+test("active legacy meal session allows simple measured chicken fresh starts back onto the graph-native path", () => {
+  const session = buildMealStateFromConversation([], "i had 300g chicken breast", activeLegacyMealSession())
+
+  assert.ok(session)
+  assertGraphNativeSession(session)
+  assert.equal(session.graphNative, true)
+  assert.equal(session.processingMode, "graph_native")
+  assert.equal(session.legacyGateClause, "")
+})
+
+test("active legacy meal session keeps referenced corrections on the legacy path", () => {
+  const session = buildMealStateFromConversation([], "the eggs were actually fried not scrambled", activeLegacyMealSession())
+
+  assert.ok(session)
+  assert.equal(session.processingMode, "legacy")
+  assert.equal(session.graphNative, false)
+  assert.equal(session.legacyGateClause, "active_non_graph_session")
+})
+
+test("active legacy meal session keeps multi-clause fresh starts on the legacy path", () => {
+  const session = buildMealStateFromConversation([], "i had 2 eggs and 200g steak", activeLegacyMealSession())
+
+  assert.ok(session)
+  assert.equal(session.processingMode, "legacy")
+  assert.equal(session.graphNative, false)
+  assert.equal(session.legacyGateClause, "active_non_graph_session")
 })
 
 test("graph-native meal session keeps simple daypart groups out of legacy fallback", () => {

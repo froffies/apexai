@@ -457,6 +457,22 @@ function isGraphNativeSimpleMeasuredFollowUp(conversation = [], currentMessage =
   return true
 }
 
+function isGraphNativeFreshStartOnLegacySession(currentMessage = "", existingSession = null) {
+  if (!existingSession?.active || existingSession?.graphNative) return false
+  const normalizedCurrent = cleanText(currentMessage)
+  if (!normalizedCurrent) return false
+  if (!MEAL_START_PATTERN.test(normalizedCurrent)) return false
+  if (VAGUE_REFERENCE_PATTERN.test(normalizedCurrent)) return false
+  if (/\b(?:that|it|this|same|rest|the)\b/i.test(normalizedCurrent)) return false
+  if (CORRECTION_PREFIX.test(normalizedCurrent)) return false
+  if (/\b(?:delete|remove|undo|erase)\b(?:\s+(?:it|that|this|meal))?/i.test(normalizedCurrent)) return false
+  if (INLINE_CORRECTION_PATTERN.test(normalizedCurrent)) return false
+  if (TIME_REFERENCE_PATTERN.test(normalizedCurrent)) return false
+  if (PACKAGED_UNIT_PATTERN.test(normalizedCurrent)) return false
+  if (splitGraphClauses(currentMessage).length !== 1) return false
+  return true
+}
+
 function isActiveGraphGroupedFollowUp(currentMessage = "", existingSession = null) {
   const normalizedCurrent = cleanText(currentMessage)
   if (!existingSession?.active || !existingSession?.graphNative) return false
@@ -507,6 +523,7 @@ function shouldUseLegacy(conversation, currentMessage, existingSession) {
   const graphNativeFriendlyDaypartTurn = isGraphNativeFriendlyDaypartTurn(conversation, currentMessage, existingSession)
   const graphNativeFriendlyPersistedFollowUp = isGraphNativeFriendlyPersistedFollowUp(currentMessage, existingSession)
   const graphNativeSimpleMeasuredFollowUp = isGraphNativeSimpleMeasuredFollowUp(conversation, currentMessage, existingSession)
+  const graphNativeFreshStartOnLegacySession = isGraphNativeFreshStartOnLegacySession(currentMessage, existingSession)
   const activeGraphGroupedFollowUp = isActiveGraphGroupedFollowUp(currentMessage, existingSession)
   const graphNativeCorrectionFollowUp = isGraphNativeCorrectionFollowUp(currentMessage, existingSession)
   const implicitGraphNativeTurn = (
@@ -516,7 +533,7 @@ function shouldUseLegacy(conversation, currentMessage, existingSession) {
     || graphNativeFriendlyPersistedFollowUp
   )
   const clauses = [
-    ["active_non_graph_session", activeSession && !activeGraphSession],
+    ["active_non_graph_session", activeSession && !activeGraphSession && !graphNativeFreshStartOnLegacySession],
     ["active_graph_grouped_follow_up", activeGraphGroupedFollowUp],
     ["persisted_not_friendly_follow_up", existingSession?.persisted && !graphNativeFriendlyPersistedFollowUp],
     ["non_graph_meal_conversation", !activeGraphSession && existingSession?.mealConversation && !graphNativeFriendlyPersistedFollowUp],
