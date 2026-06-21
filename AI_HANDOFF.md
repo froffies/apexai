@@ -1,19 +1,19 @@
 # ApexAI AI Handoff
 
-Last updated: 2026-06-07
+Last updated: 2026-06-21
 
 ## Current Status
 
-ApexAI is now running with an AI-first coach logging path in production.
+ApexAI is running an AI-first coach flow in production.
 
-The live coach flow is:
+The live flow is:
 
 1. User sends natural language.
-2. The AI decides what the message means and what action to take.
-3. The backend validates the action shape and persistence safety.
-4. The app persists only valid actions and keeps the reply conversational.
+2. The backend builds meal/workout candidate state and validated deterministic hints.
+3. OpenAI produces the conversational reply plus structured actions.
+4. The backend canonicalizes the response, strips invented persistence, recovers safe missing actions when it can prove them, and persists only valid actions.
 
-This is no longer the original parser-first "traffic cop" architecture.
+The app is not parser-first anymore, but it still keeps deterministic validation and fallback rails for reliability.
 
 ## Current Architecture
 
@@ -25,38 +25,43 @@ Primary live files:
 - `server/normalizeCoachResponse.mjs`
 - `server/coachSessionState.mjs`
 - `server/coachLoggingRules.mjs`
+- `server/mealStateBuilder.mjs`
 - `src/lib/coachSessionMerge.js`
 
-What these do now:
+Current responsibilities:
 
-- `openaiCoachServer.mjs`
-  - builds the coach payload for OpenAI
-  - passes candidate fragments, session state, validated actions, and compact persistence hints
-  - preserves deterministic fallback only as a safety rail when the upstream AI call fails
-- `normalizeCoachResponse.mjs`
+- `server/openaiCoachServer.mjs`
+  - builds the OpenAI payload from the current turn, session state, candidate fragments, validated deterministic hints, and compact persistence context
+  - falls back to deterministic reply/action generation only when the live AI call fails or the backend must protect persistence integrity
+- `server/normalizeCoachResponse.mjs`
   - canonicalizes AI output into safe backend actions
   - strips invented persistence
-  - recovers valid clarify or persistence actions when the AI reply is good but incomplete
-- `coachSessionState.mjs`
-  - now acts as candidate/session construction, not the final conversational decider
-  - still handles session continuity and fragmented meal/workout state
-- `coachLoggingRules.mjs`
-  - validates/log-shapes persistence actions
-  - provides deterministic fallback actions when the AI path is unavailable
-- `coachSessionMerge.js`
-  - applies persisted meal/workout results cleanly across turns
-  - keeps mixed meal/workout threads stable after saves
+  - recovers safe clarify/persist actions when the AI reply is directionally correct but the structured action is missing
+  - this now includes explicit recovery paths for omitted meal/workout persistence actions when the backend already has a validated canonical action
+- `server/coachSessionState.mjs`
+  - builds meal and workout candidate session state, rather than acting as the final route decider
+  - keeps mixed meal/workout threads stable across fragmented multi-turn conversations
+- `server/coachLoggingRules.mjs`
+  - validates and shapes deterministic persistence actions
+  - now fails closed on ordinary meal persistence intent: routine ready states do not auto-persist unless `wantsLogging === true` or another explicit allowed path applies
+- `server/mealStateBuilder.mjs`
+  - is the graph-native front door for meal parsing
+  - records `legacyGateClause` whenever `shouldUseLegacy()` routes a turn into the legacy fallback
+  - includes the `isGraphNativeSimpleMeasuredFollowUp()` exemption so simple measured fresh-topic turns such as `500ml coffee` can stay graph-native even after prior assistant history
+- `src/lib/coachSessionMerge.js`
+  - merges persisted meal/workout results back into frontend state after successful logging
 
-### Legacy and fallback
+### Legacy fallback
 
-The old parser-first stack is preserved here:
+The historical parser-first code is preserved under:
 
 - `server/archive/legacy-coach/`
 
-Important note:
+The live backend still intentionally uses:
 
-- `server/mealStateBuilderLegacy.mjs` still exists in the live repo and is still used as a fallback for more complex meal sessions.
-- `server/mealStateBuilder.mjs` is the graph-native front door and owns more of the common/simple flows than before, but it has not fully eliminated legacy fallback.
+- `server/mealStateBuilderLegacy.mjs`
+
+This is still the active fallback for more complex multi-clause meal inputs. That is currently by design, not an unknown gap. The graph-native parser owns common/simple turns first; the legacy parser handles harder continuity and clause-heavy cases when `shouldUseLegacy()` decides the graph-native path is unsafe.
 
 ## Current Product Shape
 
@@ -72,13 +77,13 @@ Main surfaces:
 Major shipped systems:
 
 - local-first app state with optional Supabase auth/cloud sync
-- AI-first coach logging with deterministic safe fallback
+- AI-first coach logging with deterministic validation/fallback rails
 - workout planning, active workout logging, and history
-- meal logging, meal builder, barcode scan, recents, favourites, recipes
+- meal logging, recents, favourites, recipes, barcode scan, and photo analysis
 - onboarding with starter targets and plans
-- recovery-aware recommendations and progression engine
-- telemetry ingestion and audit tooling
-- iOS-capable Capacitor wrapper
+- recovery-aware recommendations and progression logic
+- telemetry ingestion and coach audit tooling
+- Capacitor mobile wrapper
 
 ## Important Files
 
@@ -105,106 +110,86 @@ Major shipped systems:
 - `tests/coachSessionState.test.mjs`
 - `tests/mealStateBuilder.test.mjs`
 - `tests/coachLoggingRules.test.mjs`
+- `tests/nutritionDatabase.test.mjs`
 - `e2e/app-smoke.spec.js`
 - `e2e/cloud-auth.spec.js`
 - `scripts/coach-chaos-test.mjs`
 - `scripts/coach-soak-test.mjs`
+- `scripts/nutrition-smoke-test.mjs`
+- `scripts/live-production-verify.mjs`
+
+## Monitoring Thresholds
+
+Current checked thresholds in `scripts/coach-monitor-report.mjs`:
+
+- `legacy_fallback_rate`: target `30%`
+- `nutrition_low_confidence_search_rate`: target `60%`
+- `coach_failure_rate`: target `5%`
+
+The telemetry report also tracks photo review rate, telemetry error rate, nutrition search empties, and barcode fallback rate.
 
 ## Validation Status
 
-Current verified results in this workspace:
+Current verified baseline in this workspace:
 
-- `npm run lint` passed
-- `npm test` passed `251/251`
-- `npm run typecheck` passed
-- `npm run build` passed
-- `npm run test:coach-chaos` passed
+- `npm test` passes `339/339`
+- `npm run typecheck` passes
+- `npm run lint` passes
+- `npm run build` passes
+- `npm run test:coach-chaos` passes
   - meals: `300`
   - workouts: `150`
   - mixed: `100`
-- `npx playwright test` passed `78/78`
-  - skipped: `0`
-- `npm audit --audit-level=moderate` passed
-  - `0 vulnerabilities`
 
 ## Live Validation Status
 
-Hosted soak is green against:
+Hosted app:
 
-- app: `https://apexai-bay.vercel.app`
+- frontend: `https://apexai-bay.vercel.app`
 - coach API: `https://apexai-coach.onrender.com/api/coach`
 
-Latest full live soak result:
+Recently confirmed live checks in this workspace:
 
-- target: `live`
-- clean streak: `10/10`
-- total runs attempted: `10`
-- total conversations tested: `550`
-- failures before clean streak: `0`
+- full live verify passed against the deployed frontend/backend pair
+- Render `/health` exposed the expected commit hash during the latest deployment check
 
-Latest short post-fix live confirmation:
-
-- target: `live`
-- clean streak: `3/3`
-- total conversations tested: `165`
-- failures before clean streak: `0`
-
-Artifacts are written under:
+Generated verification artifacts are written under:
 
 - `tmp/coach-soak-runs/`
-- `tmp/targeted-live-human-report.json`
+- `tmp/live-verification/`
 
-## What Was Recently Fixed
+## Recently Confirmed Fixes
 
-Recent important coach fixes included:
+Recent important confirmed fixes include:
 
-- mixed meal/workout threads now keep meal and workout domains isolated instead of polluting each other
-- inline corrections like `200g chicken no wait half a pound` no longer save verbatim junk
-- grouped egg preparation refinements no longer garble the meal state
-- workout-only follow-ups no longer mutate meal clarifications
-- deterministic fallback now preserves mixed persistence plus clarification together when the upstream AI call fails
-- cloud-auth onboarding/profile Playwright flow now keys off the real UI state instead of trusting the URL alone
+- simple measured fresh-topic follow-ups after assistant history can stay graph-native instead of being forced into the legacy gate
+- meal persistence now fails closed unless explicit logging intent is present, closing the `wantsLogging` safety gap
+- `normalizeCoachResponse` can recover safe omitted persistence actions when the AI says it saved something but drops the structured action payload
+- quantified drink follow-ups no longer hijack pending fried-egg cooking-medium clarifications
+- inline correction handling no longer saves literal correction text such as `no wait`
+- mixed meal/workout threads keep meal/workout domains separate more reliably during fragmented follow-ups
 
 ## Package / Dependency Status
 
-- `@base44/sdk` and related dead scaffold dependencies were removed
+- `@base44/sdk` and related dead scaffold dependencies were removed earlier
 - the old axios vulnerability chain from that scaffold is gone
-- current `npm audit --audit-level=moderate` result is `0 vulnerabilities`
+- Vite and transitive audit fixes are now tracked in the lockfile/package manifest
 
 ## Known Honest Caveats
 
-These are the important remaining truths:
+Important current truths:
 
-1. The coach is operationally AI-first, but not every parsing subsystem is fully AI-native.
-   - `mealStateBuilderLegacy.mjs` still handles some harder meal conversations.
+1. The coach is AI-first, not AI-only.
+   - deterministic validation and fallback behavior are still intentional safety rails
 
-2. The system still has a deterministic safety net.
-   - if the upstream AI call fails, the backend falls back to deterministic actions/replies
-   - this is intentional for reliability
+2. `server/mealStateBuilderLegacy.mjs` still handles some complex multi-clause meal cases.
+   - that fallback is still live and intentional
 
-3. Complex multi-turn meal continuity is improved, but the hardest grouped/split/modifier-heavy conversations are still where legacy fallback is most likely.
+3. Macro quality is strongest for trusted catalogue/barcode/reference matches.
+   - lower-confidence searches and estimated profiles are still possible for harder or niche foods
 
-4. Production quality now depends partly on OpenAI + hosted uptime.
-   - the app is resilient when AI fails
-   - but the most natural behavior still comes from the live AI-assisted path
-
-## Recommended Next Steps
-
-If another AI continues from here, the highest-value work is:
-
-1. Shrink `mealStateBuilderLegacy.mjs` further by moving more active multi-turn meal continuity into the graph-native path.
-
-2. Keep reducing places where session logic shapes the result before the model sees it.
-
-3. Add stronger observability around:
-   - AI call failures
-   - fallback route frequency
-   - clarify loop frequency
-   - persistence mismatch recovery
-
-4. Keep the live soak as the real quality bar.
-   - local soak validates session logic
-   - live soak validates the actual hosted AI-first behavior
+4. Production quality still depends partly on hosted AI availability.
+   - the app is resilient when the upstream AI fails, but the most natural replies still come from the live AI-assisted path
 
 ## How To Run
 
@@ -221,14 +206,17 @@ npm run ai:server
 
 ## Useful Verification Commands
 
-Core backend checks:
+Core validation:
 
 ```powershell
+npm run typecheck
 npm run lint
 npm test
-npm run typecheck
 npm run build
 npm run test:coach-chaos
+npm run test:coach-soak
+npm run test:nutrition-smoke
+npm run test:live-verify
 ```
 
 Full browser suite with cloud auth:
@@ -237,13 +225,4 @@ Full browser suite with cloud auth:
 $env:E2E_SUPABASE_EMAIL="test@example.com"
 $env:E2E_SUPABASE_PASSWORD="secret"
 npx playwright test
-```
-
-Full live soak:
-
-```powershell
-$env:E2E_SUPABASE_EMAIL="test@example.com"
-$env:E2E_SUPABASE_PASSWORD="secret"
-$env:COACH_SOAK_TARGET="live"
-npm run test:coach-soak
 ```

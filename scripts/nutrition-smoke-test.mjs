@@ -70,9 +70,9 @@ function buildBaseUrlCandidates() {
 }
 
 async function isReachableHealth(baseUrl) {
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
     const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 5000)
+    const timeout = setTimeout(() => controller.abort(), 15000)
     try {
       const response = await fetch(`${baseUrl}/health`, { signal: controller.signal })
       if (response.ok) return true
@@ -81,8 +81,8 @@ async function isReachableHealth(baseUrl) {
     } finally {
       clearTimeout(timeout)
     }
-    if (attempt === 0) {
-      await new Promise((resolve) => setTimeout(resolve, 400))
+    if (attempt < 2) {
+      await new Promise((resolve) => setTimeout(resolve, 1200))
     }
   }
   return false

@@ -10,3 +10,4 @@ server-data/
 *.log
 vite-dev.log
 vite-dev.err.log
+tmp/
