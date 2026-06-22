@@ -16,10 +16,35 @@ import {
   summarizeCoachAction,
   summarizeCoachActions,
 } from "./coachLoggingRules.mjs"
+import { looksLikeCoachMemoryReference } from "../src/lib/coachConversationMemory.js"
 import { cleanText, escapeRegex } from "./utils.mjs"
 
 function cleanReplyText(value = "") {
   return cleanText(value)
+}
+
+function isGenericCoachFallbackReply(reply = "") {
+  const normalized = cleanReplyText(reply)
+  if (!normalized) return true
+  return normalized === "tell me what happened today, what you ate, what you trained, or what you want to change, and i'll help you sort the next move."
+    || normalized === "hey. tell me what happened today, what you ate, what you trained, or what you want to change, and i'll help you sort the next move."
+    || normalized === "give me a bit more detail on the meal, training, or goal you're working with, and i'll help you map the next step."
+}
+
+function buildRecoveredMemoryReply(prompt = "", recalledMessages = []) {
+  const assistantMessage = [...safeArray(recalledMessages, 8)]
+    .reverse()
+    .find((message) => String(message?.role || "").trim().toLowerCase() === "assistant" && String(message?.content || "").trim())
+  if (!assistantMessage) return ""
+
+  const content = String(assistantMessage.content || "").trim()
+  if (!content) return ""
+
+  const normalizedPrompt = cleanReplyText(prompt)
+  if (/\b(?:what did you say|what was that|what was your advice|what advice|remind me|again)\b/.test(normalizedPrompt)) {
+    return `Earlier, I said: ${content}`
+  }
+  return `Earlier we covered this: ${content}`
 }
 
 
@@ -635,6 +660,23 @@ export function normalizeCoachResponse(value, context = {}) {
     summarizeCoachActions(actions) ||
     summarizeCoachAction(actions[0]) ||
     "Tell me what happened or what you want to change, and I'll help you sort the next move."
+
+  const canRecoverMemoryReply = Boolean(
+    preferAIFirst
+    && strictAIFirst
+    && !actions.length
+    && !mealHasPendingWork
+    && !workoutHasPendingWork
+    && looksLikeCoachMemoryReference(context.prompt || "")
+    && safeArray(context.recalledMessages, 8).some((message) => (
+      String(message?.role || "").trim().toLowerCase() === "assistant"
+      && String(message?.content || "").trim()
+    ))
+    && (!originalReply || isGenericCoachFallbackReply(originalReply))
+  )
+  if (canRecoverMemoryReply) {
+    reply = buildRecoveredMemoryReply(context.prompt, context.recalledMessages) || reply
+  }
 
   if (forceMealClarifyReply) {
     reply = hintMealClarify || reply

@@ -318,6 +318,7 @@ Core rules:
 - Use coach_context when it is relevant. It contains today's targets, recent logging context, readiness, and current plans.
 - Use recent_messages, recalled_messages, meal_context, workout_context, recent_meals, recent_workouts, validated_actions, response_hints, and candidate_fragments together. The user may be continuing a fragmented thread, correcting themselves, or mixing food and training in one sentence.
 - recalled_messages contains older but relevant coach-chat snippets selected from the user's saved conversation history. Use it when the user refers back to something from earlier today or previous days, but prefer recent_messages if they conflict.
+- If the user explicitly asks what you said earlier or what advice you gave before, answer from recalled_messages directly when the answer is present there. Do not ask for more detail when the recalled context already contains the answer.
 - candidate_fragments contains the server's clause-level mixed-turn decomposition. Use it as a context hint for how the turn may split across meal and workout domains, not as absolute truth.
 - meal_context and workout_context are heuristic server-built session hints, not absolute truth. If they conflict with recent_messages, trust the actual conversation first and use the hints to stay oriented.
 - previous_meal_session and previous_workout_session are the raw client-held sessions from before this turn was parsed. Use them to understand continuity, especially if the new heuristic session looks incomplete or oddly shaped.
@@ -1950,6 +1951,7 @@ async function handleCoach(request, response) {
         ...normalizeCoachResponse(parsed, {
           prompt: body.message,
           recentMessages: contextualRecentMessages,
+          recalledMessages,
           recentMeals: safeArray(body.meals, 12),
           recentWorkouts: safeArray(body.workouts, 12),
           mealContext,

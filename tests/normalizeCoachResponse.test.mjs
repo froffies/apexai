@@ -1543,3 +1543,22 @@ test("normalizeCoachResponse allows update_targets when user explicitly asks to 
   assert.equal(payload.actions.length, 1)
   assert.equal(payload.actions[0].type, "update_targets")
 })
+
+test("normalizeCoachResponse recovers explicit memory questions from recalled assistant context", () => {
+  const payload = normalizeCoachResponse({
+    reply: "Give me a bit more detail on the meal, training, or goal you're working with, and I'll help you map the next step.",
+    actions: [],
+    warnings: [],
+  }, {
+    preferAIFirst: true,
+    strictAIFirst: true,
+    prompt: "What was that shoulder pain advice again?",
+    recalledMessages: [
+      { role: "user", content: "My shoulder hurts when I bench press" },
+      { role: "assistant", content: "Keep the load lighter, tuck your elbows a bit, and pause if it feels sharp." },
+    ],
+  })
+
+  assert.equal(payload.actions.length, 0)
+  assert.match(payload.reply, /keep the load lighter/i)
+})

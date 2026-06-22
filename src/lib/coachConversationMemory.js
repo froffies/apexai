@@ -1,4 +1,4 @@
-const RECALL_CUE_PATTERN = /\b(?:remember|earlier|before|previous(?:ly)?|last time|last week|yesterday|an hour ago|hours ago|days ago|we talked|we spoke|you said|you told me|your advice|carry on|continue|pick up where we left off|same as before|back to that)\b/i
+const RECALL_CUE_PATTERN = /\b(?:remember|earlier|before|previous(?:ly)?|last time|last week|yesterday|an hour ago|hours ago|days ago|we talked|we spoke|you said|you told me|your advice|what did you say|what was that|what advice|remind me|carry on|continue|pick up where we left off|same as before|back to that)\b/i
 const FOLLOW_UP_CUE_PATTERN = /^(?:and|also|plus|then|but|so|it|that|same|continue|go on|what about|about that|as for|the rest)\b/i
 const ASSISTANT_REFERENCE_PATTERN = /\b(?:you said|you told me|your advice|what were you saying|what did you say)\b/i
 const TOKEN_SPLIT_PATTERN = /[^a-z0-9]+/i

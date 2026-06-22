@@ -61,6 +61,7 @@ test("coach conversation memory stays empty for unrelated fresh prompts", () => 
 test("coach conversation memory flags explicit historical-reference cues", () => {
   assert.equal(looksLikeCoachMemoryReference("continue from earlier"), true)
   assert.equal(looksLikeCoachMemoryReference("what did you say before about my shoulder?"), true)
+  assert.equal(looksLikeCoachMemoryReference("what was that shoulder pain advice again?"), true)
   assert.equal(looksLikeCoachMemoryReference("how many calories are in oats?"), false)
 })
 
