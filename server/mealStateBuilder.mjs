@@ -256,7 +256,7 @@ function isGraphNativeFriendlyDrinkStart(currentMessage = "") {
   if (!MEAL_START_PATTERN.test(normalizedCurrent)) return false
   if (detectQuestionOnlyTurn(normalizedCurrent)) return false
   if (TIME_REFERENCE_PATTERN.test(normalizedCurrent)) return false
-  if (new RegExp(`\\b(?:\\d+(?:\\.\\d+)?|${[...QUANTITY_WORDS.keys()].join("|")})\\b`, "i").test(normalizedCurrent)) return false
+  if (/\b\d+(?:\.\d+)?\s*(?:ml|l|g|kg|oz|lb)\b/i.test(normalizedCurrent)) return false
   if (INLINE_CORRECTION_PATTERN.test(normalizedCurrent) || PACKAGED_UNIT_PATTERN.test(normalizedCurrent)) return false
   if (isWorkoutish(normalizedCurrent)) return false
   if (COMPLEX_PATTERN.test(normalizedCurrent)) return false

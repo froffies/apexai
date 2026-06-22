@@ -184,6 +184,24 @@ test("graph-native meal session treats simple measured turns without a log verb 
   assert.equal(session.summary, "500ml coffee")
 })
 
+test("graph-native meal session handles bare unquantified drink mention without falling back to legacy", () => {
+  const session = buildMealContext([], "i had a coffee", emptyMealSession())
+
+  assert.ok(session)
+  assert.equal(session.processingMode, "graph_native")
+  assert.equal(session.legacyGateClause, "")
+  assert.equal(session.wantsLogging, true)
+})
+
+test("graph-native meal session handles bare beer mention without falling back to legacy", () => {
+  const session = buildMealContext([], "had a beer", emptyMealSession())
+
+  assert.ok(session)
+  assert.equal(session.processingMode, "graph_native")
+  assert.equal(session.legacyGateClause, "")
+  assert.equal(session.wantsLogging, true)
+})
+
 test("graph-native meal session preserves logging intent across a quantity clarification", () => {
   const { session } = replayMealConversation([
     user("had steak"),
