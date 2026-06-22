@@ -28,7 +28,7 @@ const COUNT_REQUIRED = new Set(["egg"])
 const COUNT_FRIENDLY_BASES = new Set(["egg", "pie", "pizza", "burger", "cake", "fry", "fries", "chip", "chips", "taco", "cookie", "biscuit", "slider", "sandwich", "wrap", "steak"])
 const STOPWORDS = new Set(["i", "had", "have", "ate", "drank", "also", "just", "then", "but", "the", "a", "an", "my", "for", "to", "at", "with", "and", "plus", "of", "it", "that", "this", "was", "were", "is", "are", "did", "do", "done", "log", "track", "save", "add", "include", "today", "later", "tomorrow", "tonight"])
 
-const MEAL_START_PATTERN = /^(?:please\s+)?(?:(?:i\s+)?(?:had|ate|drank)|log|track|save|add|include)\b/i
+const MEAL_START_PATTERN = /^(?:please\s+)?(?:just\s+)?(?:(?:i\s+)?(?:had|ate|drank)|log|track|save|add|include)\b/i
 const CORRECTION_PREFIX = /^(?:actually|sorry|correction|no\s+wait|wait|i meant|make that|change that(?: to)?|update that(?: to)?|instead)\b/i
 const SUPPRESS_PATTERN = /\b(?:don't|dont|do not|stop|no)\s+(?:log|save|track|record|add)\b/i
 const MEAL_LOG_QUERY_PATTERN = /^(?:what(?:'s|s| is)?|show|list|see|view|display)\b.*\b(?:today'?s?|todays?|my)\b.*\b(?:nutrition|food|meal|meals|log)\b/i
@@ -1779,6 +1779,9 @@ export function buildMealStateFromConversation(recentMessages = [], currentMessa
     || isGraphNativeFriendlyPersistedFollowUp(resolvedMessage, existingSession)
   )
   if (!existingSession?.active && !existingSession?.persisted && isFutureMealIntent(resolvedMessage)) {
+    return baseSession()
+  }
+  if (!existingSession?.active && !existingSession?.persisted && /\b(?:nothing|anything|not\s+hungry|not\s+eating|skipped?|fasting?|fast(?:ed)?|no\s+food)\b/i.test(cleanText(resolvedMessage)) && !looksFoodish(resolvedMessage)) {
     return baseSession()
   }
   if (isWorkoutOnlyFollowUpTurn(resolvedMessage, existingSession)) {

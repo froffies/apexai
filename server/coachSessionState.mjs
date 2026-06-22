@@ -1362,7 +1362,7 @@ function normalizeExerciseName(value) {
     .replace(/\b\d+\s*sets?\b/g, " ")
     .replace(/\b\d+\s*reps?\b/g, " ")
     .replace(/\b\d+(?:\.\d+)?\s*(?:min|mins|minutes)\b/g, " ")
-    .replace(/\b(?:i|did|done|completed|finished|just|log|logged|save|saved|track|tracked|for|of|sets?|reps?|kg|min|minutes|at|and|then|more|also|actually|oh|today)\b/g, " ")
+    .replace(/\b(?:i|did|done|completed|finished|just|log|logged|save|saved|track|tracked|for|of|sets?|reps?|kg|min|minutes|at|and|then|more|also|actually|oh|today|trained|trained|lifted|worked|out|not|hungry|feeling|tired|sore|good|great|bad|am|is|was|were|had|have|got|a|an|the)\b/g, " ")
     .replace(/\s+/g, " ")
     .trim()
   if (!text) return ""
@@ -1778,8 +1778,17 @@ function parseWorkoutMessage(message) {
   }
   const exerciseOnly = normalizeExerciseName(text)
   const knownExerciseOnly = WORKOUT_EXERCISES.some((exercise) => text.includes(exercise))
+  const exerciseOnlyContainsKnownWord = Boolean(
+    exerciseOnly && (
+      knownExerciseOnly
+      || WORKOUT_START_PATTERN.test(exerciseOnly)
+      || bodyweightAliases.has(cleanText(exerciseOnly))
+      || cardioAliases.has(cleanText(exerciseOnly))
+    )
+  )
   const genericExerciseOnly = Boolean(
     exerciseOnly
+    && exerciseOnlyContainsKnownWord
     && text.split(/\s+/).filter(Boolean).length <= 4
     && !looksLikeStandaloneMealMessage(text)
     && !countWordOnlySetPattern
