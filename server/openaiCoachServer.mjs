@@ -315,7 +315,8 @@ Core rules:
 - Be practical, warm, direct, and adaptive.
 - Sound like a real coach, not a menu or a help screen.
 - Use coach_context when it is relevant. It contains today's targets, recent logging context, readiness, and current plans.
-- Use recent_messages, meal_context, workout_context, recent_meals, recent_workouts, validated_actions, response_hints, and candidate_fragments together. The user may be continuing a fragmented thread, correcting themselves, or mixing food and training in one sentence.
+- Use recent_messages, recalled_messages, meal_context, workout_context, recent_meals, recent_workouts, validated_actions, response_hints, and candidate_fragments together. The user may be continuing a fragmented thread, correcting themselves, or mixing food and training in one sentence.
+- recalled_messages contains older but relevant coach-chat snippets selected from the user's saved conversation history. Use it when the user refers back to something from earlier today or previous days, but prefer recent_messages if they conflict.
 - candidate_fragments contains the server's clause-level mixed-turn decomposition. Use it as a context hint for how the turn may split across meal and workout domains, not as absolute truth.
 - meal_context and workout_context are heuristic server-built session hints, not absolute truth. If they conflict with recent_messages, trust the actual conversation first and use the hints to stay oriented.
 - previous_meal_session and previous_workout_session are the raw client-held sessions from before this turn was parsed. Use them to understand continuity, especially if the new heuristic session looks incomplete or oddly shaped.
@@ -755,6 +756,18 @@ function normalizeRecentMessages(value, currentMessage, limit = 18) {
   return messages
 }
 
+function normalizeRecalledMessages(value, limit = 8) {
+  return safeRecentArray(value, limit)
+    .map((entry) => {
+      const role = String(entry?.role || "").trim().toLowerCase() === "assistant" ? "assistant" : "user"
+      const content = String(entry?.content || "").trim()
+      const timestamp = typeof entry?.timestamp === "string" ? entry.timestamp.trim() : ""
+      if (!content) return null
+      return timestamp ? { role, content, timestamp } : { role, content }
+    })
+    .filter(Boolean)
+}
+
 function assertObject(value, label) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     const error = new Error(`${label} must be an object`)
@@ -786,7 +799,7 @@ function validateCoachBody(body) {
   if (body.mealSession !== undefined && body.mealSession !== null) assertObject(body.mealSession, "mealSession")
   if (body.workoutSession !== undefined && body.workoutSession !== null) assertObject(body.workoutSession, "workoutSession")
   if (body.auditMeta !== undefined) assertObject(body.auditMeta, "auditMeta")
-  for (const key of ["recentMessages", "meals", "workouts", "workoutSets", "workoutPlans", "mealPlans", "recoveryLogs"]) {
+  for (const key of ["recentMessages", "recalledMessages", "meals", "workouts", "workoutSets", "workoutPlans", "mealPlans", "recoveryLogs"]) {
     if (body[key] !== undefined && !Array.isArray(body[key])) {
       const error = new Error(`${key} must be an array`)
       error.status = 400
@@ -1518,6 +1531,7 @@ async function handleCoach(request, response) {
   const startedAt = Date.now()
   let body = {}
   let contextualRecentMessages = []
+  let recalledMessages = []
   let mealContext = null
   let workoutContext = null
   let candidateFoodMatches = {}
@@ -1542,6 +1556,7 @@ async function handleCoach(request, response) {
     })
 
     contextualRecentMessages = normalizeRecentMessages(body.recentMessages, body.message, 18)
+    recalledMessages = normalizeRecalledMessages(body.recalledMessages, 8)
 
     const coachState = buildCoachSessionState({
       recentMessages: contextualRecentMessages,
@@ -1568,8 +1583,8 @@ async function handleCoach(request, response) {
     const directFoodMacroQuery = extractFoodMacroLookupTerm(body.message)
     const candidateFoodTerms = mealContext
       ? (directFoodMacroQuery ? [directFoodMacroQuery] : buildMealCandidateFoodTerms(mealContext))
-      : shouldHydrateCoachFoodMatches(body.message, body.recentMessages)
-        ? buildCoachCandidateFoodTerms(body.message, body.recentMessages)
+      : shouldHydrateCoachFoodMatches(body.message, [...recalledMessages, ...contextualRecentMessages])
+        ? buildCoachCandidateFoodTerms(body.message, [...recalledMessages, ...contextualRecentMessages])
         : []
     if (candidateFoodTerms.length) {
       const foodLookups = await Promise.all(candidateFoodTerms.map(async (term) => [term, (await lookupFoodsBroad(term)).slice(0, 6)]))
@@ -1860,6 +1875,7 @@ async function handleCoach(request, response) {
       profile: body.profile || {},
       coach_context: body.coachContext || {},
       recent_messages: contextualRecentMessages,
+      recalled_messages: recalledMessages,
       previous_meal_session: body.mealSession || null,
       previous_workout_session: body.workoutSession || null,
       recent_meals: safeArray(body.meals, 12),

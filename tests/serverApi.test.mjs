@@ -253,7 +253,16 @@ test("local API server exposes health, local nutrition, telemetry, and sanitized
       "Content-Type": "application/json",
       Origin: "http://127.0.0.1:5173",
     },
-    body: JSON.stringify({ message: "hello" }),
+    body: JSON.stringify({
+      message: "hello",
+      recalledMessages: [
+        {
+          role: "assistant",
+          content: "Three days ago we talked about your shoulder pain on bench.",
+          timestamp: "2026-06-19T08:00:00.000Z",
+        },
+      ],
+    }),
   })
   const coach = await coachResponse.json()
   assert.equal(coachResponse.status, 200)

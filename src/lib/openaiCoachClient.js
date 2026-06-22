@@ -21,6 +21,21 @@ function normalizeRecentMessages(value) {
     .filter((message) => message.content)
 }
 
+function normalizeRecalledMessages(value) {
+  if (!Array.isArray(value)) return []
+  return value
+    .slice(-8)
+    .map((message) => {
+      const normalized = {
+        role: String(message?.role || "").trim() || "user",
+        content: String(message?.content || "").trim(),
+      }
+      const timestamp = typeof message?.timestamp === "string" ? message.timestamp.trim() : ""
+      return timestamp ? { ...normalized, timestamp } : normalized
+    })
+    .filter((message) => message.content)
+}
+
 export async function requestOpenAICoach(payload) {
   if (import.meta.env.VITE_OPENAI_COACH_DISABLED === "true") return null
 
@@ -37,6 +52,9 @@ export async function requestOpenAICoach(payload) {
       : {}),
     ...(payload && Object.prototype.hasOwnProperty.call(payload, "recentMessages")
       ? { recentMessages: normalizeRecentMessages(payload.recentMessages) }
+      : {}),
+    ...(payload && Object.prototype.hasOwnProperty.call(payload, "recalledMessages")
+      ? { recalledMessages: normalizeRecalledMessages(payload.recalledMessages) }
       : {}),
   }
 

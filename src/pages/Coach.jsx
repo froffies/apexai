@@ -6,6 +6,7 @@ import PageHeader from "@/components/PageHeader"
 import SectionCard from "@/components/SectionCard"
 import WorkoutPlanCard from "@/components/WorkoutPlanCard"
 import { coachAuditEnabled, coachAuditNotice, sendCoachAuditEvent } from "@/lib/coachAuditClient"
+import { buildRecalledCoachMessages } from "@/lib/coachConversationMemory"
 import { reviewFoodPhotoEstimate, searchNutritionDatabase } from "@/lib/nutritionApiClient"
 import { recordTelemetry } from "@/lib/telemetry"
 import { requestOpenAICoach } from "@/lib/openaiCoachClient"
@@ -1989,6 +1990,10 @@ export default function Coach() {
 
       setThinking(true)
       startedThinking = true
+      const recalledMessages = buildRecalledCoachMessages(messages, content, {
+        recentLimit: 20,
+        recallLimit: 6,
+      })
       const coachResponse = await requestOpenAICoach({
         message: content,
         profile,
@@ -2014,6 +2019,7 @@ export default function Coach() {
         recoveryLogs: recoveryLogs.slice(0, 6),
         activeWorkout,
         recentMessages: messages.slice(-20),
+        recalledMessages,
         mealSession: hasMeaningfulMealSession(mealSession) ? mealSession : {},
         workoutSession: hasMeaningfulWorkoutSession(workoutSession) ? workoutSession : {},
         auditMeta: {
