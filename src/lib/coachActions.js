@@ -361,7 +361,8 @@ export function mergeWeeklyTrainingPlan(existingPlans = [], generatedPlans = [])
 
 export function shouldBuildWeeklySchedule(message) {
   const text = clean(message)
-  return /\b(this week|weekly plan|weekly schedule|schedule my week|reshuffle my week|reshuffle week|plan my week)\b/.test(text)
+  return /\b(this week|this weeks|this week's|weekly plan|weekly schedule|schedule my week|reshuffle my week|reshuffle week|plan my week)\b/.test(text)
+    || /\bplan\b.*\b(this week|this weeks|this week's)\b.*\b(training|workout|schedule|plan)\b/.test(text)
 }
 
 export function isProgressionQuestion(message) {
@@ -385,12 +386,17 @@ export function isMealPlanRequest(message) {
 
 export function isShowWorkoutRequest(message) {
   const text = clean(message)
-  return /(?:\b(show|see|view)\b.*\b(workout|plan|session)\b|\bwhat(?:'s| is) my workout\b|\bshow me the workout\b)/.test(text)
+  return /(?:\b(show|see|view)\b.*\b(workout|session|training)\b|\bwhat(?:'s| is) my workout\b|\bshow me the workout\b)/.test(text)
 }
 
 export function isShowMealPlanRequest(message) {
   const text = clean(message)
   return /(?:\b(show|see|view)\b.*\b(meal plan|food plan|meals)\b|\bwhat(?:'s| is) my meal plan\b)/.test(text)
+}
+
+export function isStartWorkoutRequest(message) {
+  const text = clean(message)
+  return /(?:\b(begin|start)\b.*\b(workout|session)\b|\blet'?s start\b.*\b(workout|session)?\b)/.test(text)
 }
 
 export function shouldUseLocalCoach(message, { activeWorkout = null, todaysPlan = null } = {}) {
@@ -400,8 +406,11 @@ export function shouldUseLocalCoach(message, { activeWorkout = null, todaysPlan 
     || parseRecoveryCheckIn(message)
     || parseActiveWorkoutUpdate(message, activeWorkout)
     || shouldBuildWeeklySchedule(message)
+    || isWorkoutPlanRequest(message)
+    || isMealPlanRequest(message)
     || (todaysPlan && parseWorkoutPlanEdit(message, todaysPlan))
     || (activeWorkout?.id && /\b(what'?s next|next set|next exercise|where am i up to)\b/.test(text))
+    || isStartWorkoutRequest(message)
     || isShowWorkoutRequest(message)
     || isShowMealPlanRequest(message)
   )

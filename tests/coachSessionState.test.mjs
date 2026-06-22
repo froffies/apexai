@@ -2266,6 +2266,9 @@ test("workout plan directives do not create a workout session or ask for reps", 
     "suggest a workout routine",
     "can you build me a workout",
     "make me a training plan",
+    "start today's workout",
+    "plan my week",
+    "plan this weeks training",
   ]
 
   for (const phrase of planningPhrases) {

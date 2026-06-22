@@ -3,7 +3,7 @@ import fs from "node:fs"
 import path from "node:path"
 import OpenAI from "openai"
 import { createClient } from "@supabase/supabase-js"
-import { mergeRecalledCoachMessages } from "../src/lib/coachConversationMemory.js"
+import { buildRecalledCoachReply, mergeRecalledCoachMessages } from "../src/lib/coachConversationMemory.js"
 import { searchBestFoodMatches, searchPhotoReferenceFoods, verifiedFoods } from "../src/lib/nutritionDatabase.js"
 import { coachMealConfidenceNote } from "../src/lib/nutritionHelpers.js"
 import { buildCoachSessionState } from "./coachSessionState.mjs"
@@ -580,6 +580,7 @@ function buildDeterministicFallbackPayload({
   workoutAlreadyLoggedGuard = false,
   mealSuppressedGuard = false,
   workoutSuppressedGuard = false,
+  recalledMessages = [],
   body = {},
 }) {
   if (!mealClarifyHint && !workoutClarifyHint && offlineDeterministicActions.length) {
@@ -720,7 +721,7 @@ function buildDeterministicFallbackPayload({
   return {
     routeType: "fallback",
     payload: {
-      reply: buildOfflineCoachFallbackReply(body.message),
+      reply: buildOfflineCoachFallbackReply(body.message, recalledMessages),
       actions: [],
       warnings: [],
       meal_session: mealContext,
@@ -1330,7 +1331,10 @@ function needsRecentChatContext(message) {
   return false
 }
 
-function buildOfflineCoachFallbackReply(message) {
+function buildOfflineCoachFallbackReply(message, recalledMessages = []) {
+  const recalledReply = buildRecalledCoachReply(message, recalledMessages)
+  if (recalledReply) return recalledReply
+
   const text = cleanLookupText(message)
   if (!text) {
     return "Tell me what happened today, what you ate, what you trained, or what you want to change, and I'll help you sort the next move."
@@ -1862,7 +1866,7 @@ async function handleCoach(request, response) {
       }
 
       sendCoachPayload({
-        reply: buildOfflineCoachFallbackReply(body.message),
+        reply: buildOfflineCoachFallbackReply(body.message, recalledMessages),
         actions: [],
         warnings: [],
         meal_session: mealContext,
@@ -1979,6 +1983,7 @@ async function handleCoach(request, response) {
         workoutAlreadyLoggedGuard,
         mealSuppressedGuard,
         workoutSuppressedGuard,
+        recalledMessages,
         body,
       })
       sendCoachPayload(fallback.payload, fallback.routeType)

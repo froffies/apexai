@@ -1,6 +1,6 @@
 import test from "node:test"
 import assert from "node:assert/strict"
-import { buildRecalledCoachMessages, looksLikeCoachMemoryReference, mergeRecalledCoachMessages } from "../src/lib/coachConversationMemory.js"
+import { buildRecalledCoachMessages, buildRecalledCoachReply, looksLikeCoachMemoryReference, mergeRecalledCoachMessages } from "../src/lib/coachConversationMemory.js"
 
 function user(content, timestamp) {
   return { role: "user", content, timestamp }
@@ -80,4 +80,13 @@ test("coach conversation memory merges recalled snippets ahead of recent history
   assert.equal(merged[0].content, "I had milk")
   assert.equal(merged[1].content, "How much milk did you have?")
   assert.equal(merged[2].content, "Recent reply")
+})
+
+test("coach conversation memory can build a direct reply from recalled assistant advice", () => {
+  const reply = buildRecalledCoachReply("What was that shoulder pain advice again?", [
+    user("My shoulder hurts when I bench press", "2026-06-18T08:00:00.000Z"),
+    assistant("Keep the load lighter, tuck your elbows a bit, and pause if it feels sharp.", "2026-06-18T08:00:20.000Z"),
+  ])
+
+  assert.match(reply, /keep the load lighter/i)
 })

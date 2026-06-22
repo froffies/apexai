@@ -5,6 +5,7 @@ import {
   buildMealPlan,
   isProgressionQuestion,
   isMealPlanRequest,
+  isStartWorkoutRequest,
   isShowMealPlanRequest,
   isShowWorkoutRequest,
   isWorkoutPlanRequest,
@@ -69,17 +70,23 @@ test("recovery check-ins and weekly schedule prompts are recognized", () => {
   assert.equal(recovery.sleep_hours, 5)
   assert.equal(recovery.readiness, "low")
   assert.equal(shouldBuildWeeklySchedule("Can you reshuffle my week?"), true)
+  assert.equal(shouldBuildWeeklySchedule("Plan this weeks training"), true)
 })
 
 test("only app-state-specific coach prompts stay local", () => {
   assert.equal(isWorkoutPlanRequest("Build me a workout for today"), true)
   assert.equal(isMealPlanRequest("Meal plan"), true)
   assert.equal(isShowWorkoutRequest("show me the workout"), true)
+  assert.equal(isShowWorkoutRequest("show me today's meal plan"), false)
   assert.equal(isShowMealPlanRequest("show me today's meal plan"), true)
   assert.equal(shouldUseLocalCoach("Plan my week"), true)
+  assert.equal(shouldUseLocalCoach("Plan this weeks training"), true)
   assert.equal(shouldUseLocalCoach("hello"), false)
-  assert.equal(shouldUseLocalCoach("Build me a workout for today"), false)
-  assert.equal(shouldUseLocalCoach("Meal plan"), false)
+  assert.equal(shouldUseLocalCoach("Build me a workout for today"), true)
+  assert.equal(shouldUseLocalCoach("Nothing. Build me a workout"), true)
+  assert.equal(isStartWorkoutRequest("Start today's workout"), true)
+  assert.equal(shouldUseLocalCoach("Start today's workout"), true)
+  assert.equal(shouldUseLocalCoach("Meal plan"), true)
   assert.equal(shouldUseLocalCoach("I had vegemite"), false)
   assert.equal(shouldUseLocalCoach("What are three breakfast ideas for me?"), false)
   assert.equal(shouldUseLocalCoach("5 tins of heinz baked beans and an entire block of chocolate"), false)

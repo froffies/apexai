@@ -641,6 +641,55 @@ test("coach falls back to an already-logged reply when the upstream AI call fail
   assert.doesNotMatch(secondCoach.reply || "", /tell me what happened today/i)
 })
 
+test("coach fallback can answer explicit memory questions from recalled assistant context when the upstream AI call fails", async (t) => {
+  const port = randomPort()
+  const serverProcess = spawn(process.execPath, [serverEntry], {
+    cwd,
+    env: {
+      ...process.env,
+      OPENAI_COACH_PORT: String(port),
+      OPENAI_COACH_REQUIRE_AUTH: "false",
+      OPENAI_COACH_CORS_ORIGIN: "http://127.0.0.1:5173",
+      OPENFOODFACTS_ENABLED: "false",
+      OPENAI_API_KEY: "test-key",
+      OPENAI_BASE_URL: "http://127.0.0.1:9/v1",
+      NODE_ENV: "production",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  })
+
+  t.after(async () => {
+    serverProcess.kill()
+  })
+
+  await waitForHealth(port)
+
+  const coachResponse = await fetch(`http://127.0.0.1:${port}/api/coach`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Origin: "http://127.0.0.1:5173",
+    },
+    body: JSON.stringify({
+      message: "What was that shoulder pain advice again?",
+      recentMessages: [],
+      recalledMessages: [
+        { role: "user", content: "My shoulder hurts when I bench press" },
+        { role: "assistant", content: "Keep the load lighter, tuck your elbows a bit, and pause if it feels sharp." },
+      ],
+      meals: [],
+      workouts: [],
+      workoutSets: [],
+      mealSession: {},
+      workoutSession: {},
+    }),
+  })
+  const coach = await coachResponse.json()
+  assert.equal(coachResponse.status, 200)
+  assert.equal(coach.actions?.length || 0, 0)
+  assert.match(coach.reply || "", /keep the load lighter/i)
+})
+
 test("deterministic coach route will not persist orphan numeric entities when a quantity clarification is still unresolved", async (t) => {
   const port = randomPort()
   const serverProcess = spawn(process.execPath, [serverEntry], {

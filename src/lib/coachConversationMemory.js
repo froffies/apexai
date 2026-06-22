@@ -192,3 +192,21 @@ export function mergeRecalledCoachMessages(recentMessages = [], recalledMessages
   }
   return merged.slice(-maxMessages)
 }
+
+export function buildRecalledCoachReply(currentMessage = "", recalledMessages = []) {
+  const normalizedCurrent = cleanText(currentMessage)
+  if (!normalizedCurrent || !looksLikeCoachMemoryReference(normalizedCurrent)) return ""
+
+  const assistantMessage = [...(Array.isArray(recalledMessages) ? recalledMessages.slice(-8) : [])]
+    .reverse()
+    .find((message) => String(message?.role || "").trim().toLowerCase() === "assistant" && String(message?.content || "").trim())
+  if (!assistantMessage) return ""
+
+  const content = String(assistantMessage.content || "").trim()
+  if (!content) return ""
+
+  if (/\b(?:what did you say|what was that|what was your advice|what advice|remind me|again)\b/.test(normalizedCurrent)) {
+    return `Earlier, I said: ${content}`
+  }
+  return `Earlier we covered this: ${content}`
+}

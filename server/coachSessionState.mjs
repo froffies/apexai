@@ -94,6 +94,7 @@ const MEAL_CONTINUATION_PATTERN = /^(?:and\s+)?(?:about|around|bout|roughly|appr
 const WORKOUT_CONTINUATION_PATTERN = /^(?:and\s+then\s+)?(?:\d+(?:\.\d+)?\s*(?:kg|reps?|sets?|x|min|mins|minutes|km|mi|miles?)\b|at\s+\d+(?:\.\d+)?\s*kg\b|for\s+\d+(?:\.\d+)?\s*(?:min|mins|minutes|km|mi|miles?)\b|\d+\s*more\s+sets?\b|same\s+(?:weight|exercise|thing)\b)/i
 const DIRECT_LOG_ALL_PATTERN = /\b(?:log|save|track|add)\s+(?:all\s+that|that|it)\b/i
 const WORKOUT_PLAN_DIRECTIVE_PATTERN = /^(?:(?:can\s+you|could\s+you|please|just|hey)\s+)?(?:build|create|make|give\s+me|suggest|recommend|design|plan|write|put\s+together|set\s+up)\s+(?:me\s+)?(?:a\s+|an\s+|my\s+)?(?:workout|training|exercise|gym|session|plan|programme|program|routine|split)\b/i
+const WORKOUT_PLAN_FOLLOWUP_PATTERN = /^(?:start|begin)\b.*\b(?:today'?s\s+)?(?:workout|session)\b|^(?:plan\s+my\s+week|plan\s+this\s+weeks?\s+training)\b/i
 const FUTURE_MEAL_INTENT_PATTERN = /\b(?:(?:i\s*(?:am|['’]m)?\s*)?(?:going\s+to|gonna)\s+(?:have|eat|drink)|(?:i(?:['’]ll)?|i\s+will|will)\s+(?:have|eat|drink))\b/i
 const FUTURE_WORKOUT_INTENT_PATTERN = /\b(?:(?:i\s*(?:am|['’]m)?\s*)?(?:going\s+to|gonna)\s+(?:do|train|work\s*out|run|walk|cycle|bike|swim|bench|squat|deadlift|lift)|(?:i(?:['’]ll)?|i\s+will|will)\s+(?:do|train|work\s*out|run|walk|cycle|bike|swim|bench|squat|deadlift|lift))\b/i
 const PURE_DELETE_OR_SUPPRESS_PATTERN = /^(?:actually\s+|sorry\s+|please\s+|just\s+)*(?:(?:don't|dont|do not|stop)\s+(?:log|save|track|record|add)|(?:delete|remove|undo|erase))(?:\s+(?:it|that|this|log|session|workout))?$/i
@@ -1385,6 +1386,7 @@ function extractWorkoutThread(recentMessages = [], currentMessage = "", existing
   const normalizedCurrent = cleanText(currentMessage)
   const history = safeRecentMessages(recentMessages, 18)
   if (!existingSession?.active && !existingSession?.persisted && isFutureWorkoutIntentMessage(currentMessage)) return []
+  if (WORKOUT_PLAN_DIRECTIVE_PATTERN.test(normalizedCurrent) || WORKOUT_PLAN_FOLLOWUP_PATTERN.test(normalizedCurrent)) return []
   const currentParsedWorkout = parseWorkoutMessage(currentMessage)
   const currentLooksMealLike = looksLikeStandaloneMealMessage(currentMessage)
   const hasExistingWorkoutContext = Boolean(existingSession?.active || existingSession?.persisted)
@@ -1565,6 +1567,7 @@ function parseWorkoutMessage(message) {
   const text = cleanText(message)
   if (!text) return null
   if (VAGUE_WORKOUT_REFERENCE_PATTERN.test(text)) return null
+  if (WORKOUT_PLAN_DIRECTIVE_PATTERN.test(text) || WORKOUT_PLAN_FOLLOWUP_PATTERN.test(text)) return null
   if (isMealQuantityFragment(message)) return null
   if (isFutureWorkoutIntentMessage(text)) return null
   if ((suppressionRequested(message) || workoutDeleteRequested(message)) && !deleteOrSuppressMentionsWorkoutTarget(message)) return null
@@ -2026,6 +2029,7 @@ function buildWorkoutSessionState(recentMessages = [], currentMessage = "", exis
     && (
       WORKOUT_QUESTION_PATTERN.test(normalizedCurrent)
       || WORKOUT_PLAN_DIRECTIVE_PATTERN.test(normalizedCurrent)
+      || WORKOUT_PLAN_FOLLOWUP_PATTERN.test(normalizedCurrent)
       || /\bwhat\s+should\s+i\s+train\b/i.test(normalizedCurrent)
       || /\bwhat\s+workout\s+should\s+i\s+do\b/i.test(normalizedCurrent)
     )

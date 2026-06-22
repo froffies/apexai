@@ -17,6 +17,7 @@ import {
   buildRecoveryAdjustedWorkoutPlan,
   buildWeeklyTrainingPlan,
   isMealPlanRequest,
+  isStartWorkoutRequest,
   isShowMealPlanRequest,
   isShowWorkoutRequest,
   isWorkoutPlanRequest,
@@ -1358,17 +1359,6 @@ export default function Coach() {
       }, { plan: weeklyPlan.plans[0] || null })
     }
 
-    if (isShowWorkoutRequest(content)) {
-      if (!todaysPlan) return localResult("I haven't mapped today's workout yet. Ask me to build it and I'll sort it out.", {
-        route_type: "fallback",
-        intent: "workout_question",
-      })
-      return localResult(`Here’s the workout I’ve got for ${todaysPlan.date || "today"}. Review it below or start when you're ready.`, {
-        route_type: "deterministic",
-        intent: "workout_question",
-      }, { plan: todaysPlan })
-    }
-
     if (isShowMealPlanRequest(content)) {
       if (!todaysMealPlan) return localResult("I haven't mapped today's meals yet. Ask me to build today's meal plan and I'll put one together.", {
         route_type: "fallback",
@@ -1378,6 +1368,17 @@ export default function Coach() {
         route_type: "deterministic",
         intent: "nutrition_question",
       })
+    }
+
+    if (isShowWorkoutRequest(content)) {
+      if (!todaysPlan) return localResult("I haven't mapped today's workout yet. Ask me to build it and I'll sort it out.", {
+        route_type: "fallback",
+        intent: "workout_question",
+      })
+      return localResult(`Here’s the workout I’ve got for ${todaysPlan.date || "today"}. Review it below or start when you're ready.`, {
+        route_type: "deterministic",
+        intent: "workout_question",
+      }, { plan: todaysPlan })
     }
 
     const planEdit = parseWorkoutPlanEdit(content, todaysPlan)
@@ -1392,7 +1393,7 @@ export default function Coach() {
       }, { plan: updatedPlan })
     }
 
-    if (/(begin|start).*(workout|session)|let'?s start/.test(lower)) {
+    if (isStartWorkoutRequest(content)) {
       if (!todaysPlan) return localResult("I don't have a workout ready to start yet. Ask me to build one first and I'll line it up.", {
         route_type: "fallback",
         intent: "workout_question",
