@@ -487,6 +487,7 @@ export function replyClaimsPersistence(reply) {
     .replace(/â€™/g, "'")
     .replace(/[’]/g, "'")
   return /\b(logged|saved|tracked|added|recorded|updated|deleted|removed)\b/i.test(text)
+    || /\b(logging|saving|tracking|adding|recording|updating|deleting|removing)\b/i.test(text)
     || /\b(?:i(?:'ll| will)|i can|let'?s)\s+(?:log|save|track|add|record|update|delete|remove)\b/i.test(text)
 }
 

@@ -1402,6 +1402,39 @@ test("normalizeCoachResponse strict AI-first recovers a meal clarify action from
   assert.equal(payload.reply, "You've mentioned having steak and tea. How much tea did you have?")
 })
 
+test("normalizeCoachResponse strict AI-first rewrites gerund persistence replies when meal clarification is still required", () => {
+  const payload = normalizeCoachResponse({
+    reply: "Logging your meal of 5 fried tofu and 373ml tea with no sugar. Let's get that in!",
+    actions: [],
+    warnings: [],
+  }, {
+    preferAIFirst: true,
+    strictAIFirst: true,
+    mealContext: {
+      readyToLog: false,
+      alreadyLogged: false,
+      clarifyQuestion: "What were the fried tofu cooked in?",
+      pendingClarification: {
+        type: "ingredient",
+        targetReference: "tofu",
+        targetBaseName: "tofu",
+        targetLabel: "Tofu",
+        relation: "cooked_in",
+      },
+    },
+    responseHints: {
+      clarify_hints: {
+        meal: "What were the fried tofu cooked in?",
+      },
+    },
+  })
+
+  assert.equal(payload.actions.length, 1)
+  assert.equal(payload.actions[0].type, "clarify")
+  assert.equal(payload.actions[0].message, "What were the fried tofu cooked in?")
+  assert.equal(payload.reply, "What were the fried tofu cooked in?")
+})
+
 test("normalizeCoachResponse strict AI-first recovers a workout clarify action from a paraphrased reps question", () => {
   const payload = normalizeCoachResponse({
     reply: "Great, you did 5 sets! How many reps did you complete for each set?",
