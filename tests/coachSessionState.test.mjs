@@ -2256,3 +2256,60 @@ test("coach session state handles forty mixed-intent conversations without loops
     template.assert({ mealSession, workoutSession, next })
   }
 })
+
+test("workout plan directives do not create a workout session or ask for reps", () => {
+  const planningPhrases = [
+    "build me a workout",
+    "give me a workout",
+    "create a workout for today",
+    "design a gym session",
+    "suggest a workout routine",
+    "can you build me a workout",
+    "make me a training plan",
+  ]
+
+  for (const phrase of planningPhrases) {
+    const { workoutSession } = buildCoachSessionState({
+      recentMessages: [],
+      currentMessage: phrase,
+      existingMealSession: null,
+      existingWorkoutSession: null,
+      recentMeals: [],
+      recentWorkouts: [],
+      profile: {},
+      coachContext: {},
+    })
+
+    assert.equal(
+      workoutSession,
+      null,
+      `Expected no workout session for planning directive: "${phrase}" but got exercise="${workoutSession?.exercise_name}"`
+    )
+  }
+})
+
+test("real workout logs still produce a workout session after planning directive fix", () => {
+  const realLogs = [
+    "i did 20 pushups",
+    "bench press 80kg 3x8",
+    "i ran 5km",
+  ]
+
+  for (const log of realLogs) {
+    const { workoutSession } = buildCoachSessionState({
+      recentMessages: [],
+      currentMessage: log,
+      existingMealSession: null,
+      existingWorkoutSession: null,
+      recentMeals: [],
+      recentWorkouts: [],
+      profile: {},
+      coachContext: {},
+    })
+
+    assert.ok(
+      workoutSession !== null,
+      `Expected workout session for real log: "${log}"`
+    )
+  }
+})
