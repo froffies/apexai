@@ -801,7 +801,7 @@ function workoutCandidateReadyFromParsed(parsed = null) {
   const isCardio = cleanText(parsed.muscle_group || "") === "cardio" || cardioAliases.has(cleanText(parsed.exercise_name || parsed.workout_type || ""))
   return isCardio
     ? Boolean(Number(parsed.duration_seconds || 0) > 0 || Number(parsed.distance_km || 0) > 0)
-    : Boolean(Number(parsed.reps || 0) > 0)
+    : Boolean(Number(parsed.reps || 0) > 0 && (weightOptionalForWorkout(parsed) || Number(parsed.weight_kg || 0) > 0))
 }
 
 function parsedWorkoutDetailScore(parsed = null) {
@@ -871,7 +871,7 @@ function reduceWorkoutFragments(graph, recentMessages, existingSession) {
     state.clarifyQuestion = buildWorkoutClarifyQuestion(state)
     state.readyToLog = state.muscle_group === "cardio"
       ? Boolean(state.exercise_name && (state.duration_seconds > 0 || state.distance_km > 0))
-      : Boolean(state.exercise_name && state.reps > 0)
+      : Boolean(state.exercise_name && state.reps > 0 && (weightOptionalForWorkout(state) || state.weight_kg > 0))
     nextSession = state
   }
 
@@ -1286,8 +1286,40 @@ const cardioAliases = new Map([
   ["stairmaster", "Stairmaster"],
 ])
 
+const bodyweightAliases = new Set([
+  "push up",
+  "pushup",
+  "push ups",
+  "pushups",
+  "pull up",
+  "pullup",
+  "pull ups",
+  "pullups",
+  "sit up",
+  "situp",
+  "sit ups",
+  "situps",
+  "burpee",
+  "burpees",
+  "dip",
+  "dips",
+  "lunge",
+  "lunges",
+  "squat",
+  "squats",
+  "plank",
+])
+
 function buildWorkoutClarificationKey(field) {
   return `workout:${field}`
+}
+
+function weightOptionalForWorkout(value = {}) {
+  const exercise = cleanText(value?.exercise_name || value?.workout_type || "")
+  if (!exercise) return false
+  return cleanText(value?.muscle_group || "") === "cardio"
+    || cardioAliases.has(exercise)
+    || bodyweightAliases.has(exercise)
 }
 
 function extractWorkoutClarificationTargets(message) {
@@ -1830,6 +1862,7 @@ function workoutMatchesPersistedSession(parsed = null, session = null) {
 function buildWorkoutClarifyQuestion(state) {
   const missingExerciseAttempts = state.clarificationCounts[buildWorkoutClarificationKey("exercise")] || 0
   const missingRepsAttempts = state.clarificationCounts[buildWorkoutClarificationKey("reps")] || 0
+  const missingWeightAttempts = state.clarificationCounts[buildWorkoutClarificationKey("weight")] || 0
   const missingDurationAttempts = state.clarificationCounts[buildWorkoutClarificationKey("duration")] || 0
 
   if (!state.exercise_name && missingExerciseAttempts < 2) return "What exercise or cardio did you do?"
@@ -1838,6 +1871,9 @@ function buildWorkoutClarifyQuestion(state) {
     return ""
   }
   if (!state.reps && missingRepsAttempts < 2) return `How many reps did you do${state.exercise_name ? ` for ${state.exercise_name}` : ""}?`
+  if (!weightOptionalForWorkout(state) && !state.weight_kg && missingWeightAttempts < 2) {
+    return `What weight did you use${state.exercise_name ? ` for ${state.exercise_name}` : ""}?`
+  }
   return ""
 }
 
@@ -2083,7 +2119,7 @@ function buildWorkoutSessionState(recentMessages = [], currentMessage = "", exis
   state.shouldStopClarifying = Boolean(!state.clarifyQuestion && state.clarificationAttempts >= 2)
   state.readyToLog = isCardio
     ? Boolean(state.exercise_name && (state.duration_seconds > 0 || state.distance_km > 0))
-    : Boolean(state.exercise_name && state.reps > 0)
+    : Boolean(state.exercise_name && state.reps > 0 && (weightOptionalForWorkout(state) || state.weight_kg > 0))
   const parsedWorkoutExercise = cleanText(currentParsedWorkout?.exercise_name || currentParsedWorkout?.workout_type || "")
   const startsFreshWorkout = Boolean(WORKOUT_START_PATTERN.test(normalizedCurrent) && parsedWorkoutExercise)
 

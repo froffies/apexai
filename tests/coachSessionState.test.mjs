@@ -1107,6 +1107,51 @@ test("coach session state keeps metric-only workout replies attached to the exis
   assert.equal(moreSetsTurn.workoutSession.correctionRequested, true)
 })
 
+test("coach session state keeps weighted lifts open until the weight arrives", () => {
+  const priorWorkout = {
+    ...emptyWorkoutSessionState(),
+    active: true,
+    workoutConversation: true,
+    exercise_name: "Bench Press",
+    workout_type: "Bench Press",
+    muscle_group: "full_body",
+    sets: 5,
+    reps: 0,
+    weight_kg: 0,
+    clarificationAttempts: 1,
+    clarificationCounts: { "workout:reps": 1 },
+    readyToLog: false,
+    clarifyQuestion: "How many reps did you do for Bench Press?",
+    summary: "Bench Press",
+    wantsLogging: true,
+    thread_messages: [
+      user("i did bench press"),
+      assistant("How many reps did you do for Bench Press?"),
+      user("5 sets"),
+    ],
+  }
+
+  const next = buildCoachSessionState({
+    recentMessages: [
+      user("i did bench press"),
+      assistant("Great job on the bench press! How many reps did you do?"),
+      user("5 sets"),
+      assistant("Great to see you're keeping up with your training! What weight and how many reps did you do for each set of bench press?"),
+    ],
+    currentMessage: "12 reps",
+    mealSession: emptyMealSessionState(),
+    workoutSession: priorWorkout,
+  })
+
+  assert.ok(next.workoutSession)
+  assert.equal(next.workoutSession.exercise_name, "Bench Press")
+  assert.equal(next.workoutSession.sets, 5)
+  assert.equal(next.workoutSession.reps, 12)
+  assert.equal(next.workoutSession.weight_kg, 0)
+  assert.equal(next.workoutSession.readyToLog, false)
+  assert.equal(next.workoutSession.clarifyQuestion, "What weight did you use for Bench Press?")
+})
+
 test("coach session state surfaces both meal and workout candidates when a numeric follow-up could belong to either domain", () => {
   const initial = buildCoachSessionState({
     recentMessages: [],
