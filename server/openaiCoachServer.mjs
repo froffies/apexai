@@ -3,6 +3,7 @@ import fs from "node:fs"
 import path from "node:path"
 import OpenAI from "openai"
 import { createClient } from "@supabase/supabase-js"
+import { mergeRecalledCoachMessages } from "../src/lib/coachConversationMemory.js"
 import { searchBestFoodMatches, searchPhotoReferenceFoods, verifiedFoods } from "../src/lib/nutritionDatabase.js"
 import { coachMealConfidenceNote } from "../src/lib/nutritionHelpers.js"
 import { buildCoachSessionState } from "./coachSessionState.mjs"
@@ -1557,6 +1558,9 @@ async function handleCoach(request, response) {
 
     contextualRecentMessages = normalizeRecentMessages(body.recentMessages, body.message, 18)
     recalledMessages = normalizeRecalledMessages(body.recalledMessages, 8)
+    if (recalledMessages.length) {
+      contextualRecentMessages = mergeRecalledCoachMessages(contextualRecentMessages, recalledMessages, 24)
+    }
 
     const coachState = buildCoachSessionState({
       recentMessages: contextualRecentMessages,

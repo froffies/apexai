@@ -178,3 +178,17 @@ export function buildRecalledCoachMessages(messages = [], currentMessage = "", {
     .slice(-recallLimit)
     .map((index) => olderMessages[index])
 }
+
+export function mergeRecalledCoachMessages(recentMessages = [], recalledMessages = [], maxMessages = 24) {
+  const merged = []
+  const seen = new Set()
+  for (const rawMessage of [...recalledMessages, ...recentMessages]) {
+    const message = normalizeMessage(rawMessage)
+    if (!message) continue
+    const key = `${message.role}|${message.timestamp || ""}|${cleanText(message.content)}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    merged.push(message)
+  }
+  return merged.slice(-maxMessages)
+}
