@@ -457,6 +457,31 @@ function isGraphNativeSimpleMeasuredFollowUp(conversation = [], currentMessage =
   return true
 }
 
+function isGraphNativeClarificationReply(conversation = [], currentMessage = "", existingSession = null) {
+  // Only applies when there is NO active session (the session was just created from conversation history)
+  if (existingSession?.active || existingSession?.persisted || existingSession?.graphNative) return false
+  const normalizedCurrent = cleanText(currentMessage)
+  if (!normalizedCurrent) return false
+  // Must look like a quantity or count reply, not a new meal statement
+  if (MEAL_START_PATTERN.test(normalizedCurrent)) return false
+  if (detectQuestionOnlyTurn(normalizedCurrent)) return false
+  if (isWorkoutish(normalizedCurrent)) return false
+  if (TIME_REFERENCE_PATTERN.test(normalizedCurrent)) return false
+  if (COMPLEX_PATTERN.test(normalizedCurrent)) return false
+  // The last assistant message must look like a clarification question
+  const lastAssistant = [...conversation].reverse().find((m) => m?.role === "assistant")
+  if (!lastAssistant) return false
+  const lastQ = cleanText(lastAssistant.content || "")
+  if (!lastQ) return false
+  const isClarifyQ = /\bhow\s+(?:much|many)\b|\bwhat\s+(?:type|kind|size|quantity)\b|\bdid\s+you\s+(?:have|eat|drink|use)\b/i.test(lastQ)
+  if (!isClarifyQ) return false
+  // Current message must be a bare quantity, count, or simple unit reply
+  const isQuantityReply = /^\d+(?:\.\d+)?\s*(?:g|kg|ml|l|oz|lb|grams?|litres?|liters?|cups?|tbsp|tsp|slices?|pieces?|serves?)?$/i.test(normalizedCurrent)
+  const isCountReply = /^\d+$/.test(normalizedCurrent)
+  const isSimpleReply = isQuantityReply || isCountReply || Boolean(extractQuantity(currentMessage) || extractEmbeddedQuantity(currentMessage))
+  return isSimpleReply
+}
+
 function isGraphNativeFreshStartOnLegacySession(currentMessage = "", existingSession = null) {
   if (!existingSession?.active || existingSession?.graphNative) return false
   const normalizedCurrent = cleanText(currentMessage)
@@ -523,6 +548,7 @@ function shouldUseLegacy(conversation, currentMessage, existingSession) {
   const graphNativeFriendlyDaypartTurn = isGraphNativeFriendlyDaypartTurn(conversation, currentMessage, existingSession)
   const graphNativeFriendlyPersistedFollowUp = isGraphNativeFriendlyPersistedFollowUp(currentMessage, existingSession)
   const graphNativeSimpleMeasuredFollowUp = isGraphNativeSimpleMeasuredFollowUp(conversation, currentMessage, existingSession)
+  const graphNativeClarificationReply = isGraphNativeClarificationReply(conversation, currentMessage, existingSession)
   const graphNativeFreshStartOnLegacySession = isGraphNativeFreshStartOnLegacySession(currentMessage, existingSession)
   const activeGraphGroupedFollowUp = isActiveGraphGroupedFollowUp(currentMessage, existingSession)
   const graphNativeCorrectionFollowUp = isGraphNativeCorrectionFollowUp(currentMessage, existingSession)
@@ -531,6 +557,7 @@ function shouldUseLegacy(conversation, currentMessage, existingSession) {
     || graphNativeSimpleMeasuredFollowUp
     || graphNativeFriendlyDaypartTurn
     || graphNativeFriendlyPersistedFollowUp
+    || graphNativeClarificationReply
   )
   const clauses = [
     ["active_non_graph_session", activeSession && !activeGraphSession && !graphNativeFreshStartOnLegacySession],
@@ -543,8 +570,8 @@ function shouldUseLegacy(conversation, currentMessage, existingSession) {
     ["pending_quantities", existingSession?.pendingQuantities?.length],
     ["correction_requested", existingSession?.correctionRequested],
     ["delete_requested", existingSession?.deleteRequested],
-    ["non_graph_assistant_turn_present", !activeGraphSession && conversation.some((entry) => entry.role === "assistant") && !graphNativeFriendlyPersistedFollowUp && !graphNativeSimpleMeasuredFollowUp],
-    ["non_graph_multi_user_turn", !activeGraphSession && conversation.filter((entry) => entry.role === "user").length > 1 && !graphNativeFriendlyPersistedFollowUp],
+    ["non_graph_assistant_turn_present", !activeGraphSession && conversation.some((entry) => entry.role === "assistant") && !graphNativeFriendlyPersistedFollowUp && !graphNativeSimpleMeasuredFollowUp && !graphNativeClarificationReply],
+    ["non_graph_multi_user_turn", !activeGraphSession && conversation.filter((entry) => entry.role === "user").length > 1 && !graphNativeFriendlyPersistedFollowUp && !graphNativeClarificationReply],
     ["non_graph_not_meal_start", !activeGraphSession && !MEAL_START_PATTERN.test(cleanText(currentMessage)) && !implicitGraphNativeTurn],
     ["time_reference", TIME_REFERENCE_PATTERN.test(cleanText(currentMessage))],
     ["inline_correction", INLINE_CORRECTION_PATTERN.test(cleanText(currentMessage))],
@@ -604,12 +631,28 @@ function preserveExistingSessionForIgnoredTurn(conversation = [], currentMessage
 
 function markLegacySession(session, reason = "legacy_gate", legacyGateClause = "") {
   if (!session || typeof session !== "object") return session
+  // Detect quantity-unit mismatch in legacy sessions: quantities bound to wrong items
+  // e.g. 50g bound to wine, 250ml bound to egg after multi-turn clarification failure
+  let lowConfidence = false
+  if (session.readyToLog && Array.isArray(session.items) && session.items.length > 1) {
+    const DRINK_BASES = new Set(["wine", "beer", "coffee", "tea", "juice", "milk", "water", "spirits", "alcohol", "cider", "sake", "whiskey", "vodka", "rum", "gin"])
+    const SOLID_UNITS = new Set(["g", "kg", "oz", "lb"])
+    const LIQUID_UNITS = new Set(["ml", "l"])
+    lowConfidence = session.items.some((item) => {
+      const base = String(item.base_name || "").toLowerCase().split(" ").pop()
+      const unit = String(item.quantity?.unit || "").toLowerCase()
+      if (DRINK_BASES.has(base) && SOLID_UNITS.has(unit)) return true
+      if (!DRINK_BASES.has(base) && LIQUID_UNITS.has(unit)) return true
+      return false
+    })
+  }
   return {
     ...session,
     graphNative: false,
     processingMode: "legacy",
     fallbackReason: String(reason || "legacy_gate"),
     legacyGateClause: String(legacyGateClause || ""),
+    ...(lowConfidence ? { lowConfidence: true } : {}),
   }
 }
 
@@ -1462,6 +1505,19 @@ function resolvePendingReply(state, text) {
       if (target.category === "drink") state.lastDrinkKey = cleanText(target.base_name)
       return true
     }
+    // Bare count reply: "4" after "ate egg" — resolve as count for countable food items
+    if (targetMatchesParsedItem && !parsed.item.quantity) {
+      const bareCount = Number(cleanText(text).trim())
+      const COUNTABLE_FOODS = new Set(["egg", "eggs", "slice", "slices", "piece", "pieces", "biscuit", "biscuits", "cookie", "cookies", "cracker", "crackers", "chip", "chips", "grape", "grapes", "strawberry", "strawberries", "olive", "olives", "nugget", "nuggets", "pancake", "pancakes", "waffle", "waffles"])
+      const baseLast = cleanText(target.base_name).split(" ").pop()
+      if (Number.isFinite(bareCount) && bareCount > 0 && (COUNTABLE_FOODS.has(baseLast) || COUNTABLE_FOODS.has(cleanText(target.base_name)))) {
+        target.quantity = { amount: bareCount, unit: baseLast === "eggs" ? "egg" : baseLast, text: String(bareCount), modifier: "" }
+        syncVariantKey(target)
+        state.pendingClarification = null
+        state.lastMainReference = itemReference(target)
+        return true
+      }
+    }
     if (targetMatchesParsedItem) {
       pending.invalidReply = true
       return true
@@ -1851,6 +1907,23 @@ export function buildMealStateFromConversation(recentMessages = [], currentMessa
   state.pendingClarification = buildPendingClarification(state, missing)
   state.nextClarificationReference = ""
   state.readyToLog = unresolvedRoots(state).length > 0 && missing.length === 0
+
+  // Detect quantity-unit mismatch caused by multi-turn clarification binding errors.
+  // e.g. 50g bound to wine, 250ml bound to egg. Flag for the AI to ignore meal_context
+  // and reconstruct from recent_messages instead.
+  if (state.readyToLog && state.items.length > 1) {
+    const DRINK_ITEMS = new Set(["wine", "beer", "coffee", "tea", "juice", "milk", "water", "spirit", "spirits", "alcohol"])
+    const SOLID_UNITS = new Set(["g", "kg", "oz", "lb"])
+    const LIQUID_UNITS = new Set(["ml", "l", "fl_oz"])
+    const hasMismatch = state.items.some((item) => {
+      const isDrinkItem = DRINK_ITEMS.has(cleanText(item.base_name).split(" ").pop()) || item.category === "drink"
+      const unit = String(item.quantity?.unit || "").toLowerCase()
+      if (isDrinkItem && SOLID_UNITS.has(unit)) return true
+      if (!isDrinkItem && LIQUID_UNITS.has(unit) && item.category !== "drink") return true
+      return false
+    })
+    if (hasMismatch) state.lowConfidence = true
+  }
   state.summary = summarizeState(state)
   state.meal_groups = buildMealGroups(state)
   state.clarifyQuestion = state.readyToLog

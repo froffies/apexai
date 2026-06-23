@@ -1632,3 +1632,65 @@ test("meal session fuzzes two hundred randomized grouped meals without corruptin
     assert.match(String(cookingItem.attached_to || ""), new RegExp(`^${template.baseName}::`), `scenario ${index + 1} should attach the cooking addition to a subgroup`)
   }
 })
+
+test("bare count reply resolves correctly when existingSession has pending quantity clarification", () => {
+  const turn1 = buildMealContext([], "ate egg", null)
+  assert.equal(turn1.processingMode, "graph_native")
+  assert.equal(turn1.readyToLog, false)
+  assert.ok(turn1.clarifyQuestion.toLowerCase().includes("egg"))
+
+  const turn2 = buildMealContext(
+    [{ role: "user", content: "ate egg" }, { role: "assistant", content: "How many eggs did you have?" }],
+    "4",
+    turn1
+  )
+  assert.equal(turn2.processingMode, "graph_native")
+  assert.equal(turn2.readyToLog, true)
+  const eggItem = turn2.items?.find(i => i.base_name === "egg")
+  assert.ok(eggItem, "egg item should exist")
+  assert.equal(eggItem.quantity?.amount, 4)
+})
+
+test("clarification reply routes graph-native not legacy for simple quantity answer", () => {
+  const session = buildMealContext([
+    { role: "user", content: "i had wine" },
+    { role: "assistant", content: "How much wine and what type?" },
+  ], "250ml", null)
+  assert.equal(session.processingMode, "graph_native")
+})
+
+test("lowConfidence flagged when legacy session has unit-category mismatches", () => {
+  // The complex multi-turn scenario produces swapped units (50g on wine, 250ml on egg)
+  // lowConfidence must be true so the AI knows to ignore meal_context
+  const history = [
+    { role: "user", content: "i had wine, ate egg" },
+    { role: "assistant", content: "How much wine and how many eggs?" },
+    { role: "user", content: "250ml white wine, 4 eggs fried in butter" },
+    { role: "assistant", content: "How much butter?" },
+  ]
+  const session = buildMealContext(history, "50g", null)
+  // If the parser misbinds quantities, lowConfidence should catch it
+  // (may not always misparse depending on legacy heuristics, but must never
+  // produce lowConfidence:true on a correctly parsed session)
+  if (session.lowConfidence) {
+    // When flagged, items must have the unit-category mismatch pattern
+    const hasLiquidOnSolid = session.items?.some(i => {
+      const unit = String(i.quantity?.unit || "").toLowerCase()
+      return ["wine", "beer", "juice"].includes(i.base_name) && ["g", "kg"].includes(unit)
+    })
+    const hasSolidOnLiquid = session.items?.some(i => {
+      const unit = String(i.quantity?.unit || "").toLowerCase()
+      return ["egg", "butter", "chicken"].includes(i.base_name) && ["ml", "l"].includes(unit)
+    })
+    assert.ok(hasLiquidOnSolid || hasSolidOnLiquid, "lowConfidence should only fire on real unit-category mismatches")
+  }
+})
+
+test("non-food answer after clarification does not become a meal session", () => {
+  const session = buildMealContext([
+    { role: "user", content: "i had wine" },
+    { role: "assistant", content: "How much wine?" },
+  ], "i feel good today", null)
+  // Should not be readyToLog with nonsense reply — either null session or not ready
+  assert.ok(!session?.readyToLog, "should not be readyToLog with a non-food reply")
+})

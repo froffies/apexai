@@ -373,6 +373,7 @@ Core rules:
 - If the user asks a nutrition or training question without clear logging intent, answer the question and return no persistence action.
 - If the user message contains multiple topics, prioritise the user's main ask and avoid trying to do everything at once.
 - If response_hints.clarify_hints.meal or response_hints.clarify_hints.workout is present, treat that question as a hint, not a script. Rephrase it naturally.
+- If response_hints.low_confidence_meal_context is true, the server-side meal parser could not reliably resolve a multi-turn clarification thread (quantities may be bound to the wrong items). Ignore meal_context entirely in this case. Read recent_messages carefully and construct all log actions yourself directly from the conversation. Do not trust meal_context.items or meal_context.summary.
 - Before asking a clarification question, check recent_messages and the current session context carefully. If the user already answered, do not ask again.
 - If the food or exercise name in a clarify hint looks like sentence filler or accidental text like "actually", "oh and", "and then", "at", or "this mornings workout", do not echo it back. Ask what they actually ate or did instead.
 - If response_hints.clarify_hints show a clarification need but recent_messages show the user already answered it, do not ask again. Prefer the answer already given and align your returned actions with the now-complete context.
@@ -1938,6 +1939,7 @@ async function handleCoach(request, response) {
           workout: workoutSuppressedGuard ? (workoutContext?.suppressionReply || "Okay, I won't save that.") : "",
         },
         delete_hint: [mealDeleteAction, workoutDeleteAction].filter(Boolean).map((action) => summarizeCoachAction(action)),
+        low_confidence_meal_context: Boolean(mealContext?.lowConfidence),
       },
     }
 
