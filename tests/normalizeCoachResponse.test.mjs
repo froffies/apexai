@@ -715,6 +715,48 @@ test("normalizeCoachResponse strict AI-first ignores internal workout candidates
   assert.match(payload.reply, /how much milk/i)
 })
 
+test("normalizeCoachResponse strict AI-first strips workout save wording when only the meal is being persisted", () => {
+  const payload = normalizeCoachResponse({
+    reply: "Great! I'll log your meal of 6 eggs and 250ml of wine, and the workout with a pushup and chinup.",
+    actions: [
+      {
+        type: "log_meal",
+        meal_type: "snack",
+        food_name: "6 eggs, plus 250ml wine",
+        quantity: "1 meal",
+        calories: 652,
+        protein_g: 38,
+        carbs_g: 10,
+        fat_g: 30.6,
+      },
+    ],
+    warnings: [],
+  }, {
+    preferAIFirst: true,
+    strictAIFirst: true,
+    mealContext: {
+      readyToLog: true,
+      alreadyLogged: false,
+      wantsLogging: true,
+      summary: "6 eggs, plus 250ml wine",
+    },
+    workoutContext: {
+      readyToLog: false,
+      alreadyLogged: true,
+      persistedWorkoutId: "workout_pushup",
+      persistedSummary: "Pushup for 1 set of 1",
+      summary: "Pushup for 1 set of 1",
+      exercise_name: "Pushup",
+      workout_type: "Pushup",
+    },
+  })
+
+  assert.equal(payload.actions.filter((action) => action.type === "log_meal").length, 1)
+  assert.equal(payload.actions.some((action) => action.type === "log_workout"), false)
+  assert.doesNotMatch(payload.reply, /pushup|chinup|workout/i)
+  assert.match(payload.reply, /6 eggs/i)
+})
+
 test("normalizeCoachResponse strict AI-first keeps a paraphrased meal clarification without auto-saving the workout", () => {
   const payload = normalizeCoachResponse({
     reply: "I'm asking how much milk you had.",

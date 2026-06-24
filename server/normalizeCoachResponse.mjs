@@ -111,6 +111,12 @@ function replyAddressesWorkoutClarification(reply = "", workoutContext = null) {
   return targetTokens.some((token) => token && normalizedReply.includes(token))
 }
 
+function replyMentionsWorkoutPersistence(reply = "") {
+  const normalizedReply = cleanReplyText(reply)
+  if (!normalizedReply || !replyClaimsPersistence(reply)) return false
+  return /\b(?:workout|pushup|pushups|chinup|chinups|pullup|pullups|bench|squat|deadlift|row|run|running|marathon|rep|reps|set|sets)\b/.test(normalizedReply)
+}
+
 function actionDedupeKey(action = {}) {
   const type = String(action?.type || "").trim()
   if (!type) return ""
@@ -673,6 +679,19 @@ export function normalizeCoachResponse(value, context = {}) {
     && (replyLooksQuestionLike || replyLooksLikeWrongWorkoutAlreadyLogged)
   ) {
     reply = summarizeCoachActions(actions)
+      || summarizeCoachAction(actions.find(isMealPersistenceAction))
+      || reply
+  }
+
+  if (
+    preferAIFirst
+    && strictAIFirst
+    && actions.some(isMealPersistenceAction)
+    && !actions.some(isWorkoutPersistenceAction)
+    && context.workoutContext?.alreadyLogged
+    && replyMentionsWorkoutPersistence(reply)
+  ) {
+    reply = summarizeCoachActions(actions.filter((action) => action?.type !== "clarify"))
       || summarizeCoachAction(actions.find(isMealPersistenceAction))
       || reply
   }
