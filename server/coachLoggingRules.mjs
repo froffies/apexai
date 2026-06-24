@@ -488,30 +488,23 @@ export function replyClaimsPersistence(reply) {
     .replace(/[’]/g, "'")
   const normalized = cleanText(text)
   if (!normalized) return false
-  if (/\b(?:i(?:'ll| will)|i can|let'?s)\s+(?:log|save|track|add|record|update|delete|remove)\b/i.test(normalized)) {
-    return true
-  }
-
-  if (/\b(?:haven'?t|hasn'?t|didn'?t|don'?t|doesn'?t|couldn'?t|won'?t|not\s+(?:yet\s+)?|never\s+)\s*(?:logged?|saved?|tracked?|added?|recorded?|updated?|deleted?|removed?)/i.test(normalized)) {
-    return false
-  }
-  if (/\b(?:you|we|they)\s+(?:already\s+)?(?:logged|saved|tracked|added|recorded|updated|deleted|removed)\b/i.test(normalized)) {
-    return false
-  }
-  if (/\b(?:what|which|how|when)\s+(?:\w+\s+){0,4}(?:logged|saved|tracked|added|recorded)\b/i.test(normalized)) {
-    return false
-  }
-
+  // Negation exclusions must come first — before any intent check.
+  // "I haven't logged X, let's add it" should NOT match even though "let's add" is present.
+  if (/\b(?:haven'?t|hasn'?t|didn'?t|don'?t|doesn'?t|couldn'?t|won'?t|not\s+(?:yet\s+)?|never\s+)\s*(?:logged?|saved?|tracked?|added?|recorded?|updated?|deleted?|removed?)/i.test(normalized)) return false
+  // Informational references to past logs
+  if (/\b(?:you|we|they)\s+(?:already\s+)?(?:logged|saved|tracked|added|recorded|updated|deleted|removed)\b/i.test(normalized)) return false
+  if (/\b(?:what|which|how|when)\s+(?:\w+\s+){0,4}(?:logged|saved|tracked|added|recorded)\b/i.test(normalized)) return false
+  // First-person intent phrases
+  if (/\b(?:i(?:'ll| will)|i can|let'?s)\s+(?:log|save|track|add|record|update|delete|remove)\b/i.test(normalized)) return true
+  // Verb-level check with negative context window
   const persistenceVerbPattern = /\b(logged|saved|tracked|added|recorded|updated|deleted|removed|logging|saving|tracking|adding|recording|updating|deleting|removing)\b/ig
   const negativeContextPattern = /\b(?:haven't|have not|hasn't|has not|hadn't|had not|didn't|did not|don't|do not|doesn't|does not|not|without|if)\b(?:\s+\w+){0,4}\s*$/
-
   for (const match of normalized.matchAll(persistenceVerbPattern)) {
     const index = Number(match.index || 0)
     const before = normalized.slice(Math.max(0, index - 48), index)
     if (negativeContextPattern.test(before)) continue
     return true
   }
-
   return false
 }
 

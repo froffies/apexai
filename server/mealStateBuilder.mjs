@@ -634,17 +634,30 @@ function markLegacySession(session, reason = "legacy_gate", legacyGateClause = "
   // Detect quantity-unit mismatch in legacy sessions: quantities bound to wrong items
   // e.g. 50g bound to wine, 250ml bound to egg after multi-turn clarification failure
   let lowConfidence = false
-  if (session.readyToLog && Array.isArray(session.items) && session.items.length > 1) {
+  if (Array.isArray(session.items) && session.items.length > 1) {
     const DRINK_BASES = new Set(["wine", "beer", "coffee", "tea", "juice", "milk", "water", "spirits", "alcohol", "cider", "sake", "whiskey", "vodka", "rum", "gin"])
     const SOLID_UNITS = new Set(["g", "kg", "oz", "lb"])
     const LIQUID_UNITS = new Set(["ml", "l"])
-    lowConfidence = session.items.some((item) => {
+    // Unit-category mismatch: 50g on wine, 250ml on egg
+    const hasMismatch = session.items.some((item) => {
       const base = String(item.base_name || "").toLowerCase().split(" ").pop()
       const unit = String(item.quantity?.unit || "").toLowerCase()
       if (DRINK_BASES.has(base) && SOLID_UNITS.has(unit)) return true
       if (!DRINK_BASES.has(base) && LIQUID_UNITS.has(unit)) return true
       return false
     })
+    // Duplicate base names with fractional quantities: garbled proportional split
+    const baseCounts = {}
+    for (const item of session.items) {
+      const base = String(item.base_name || "").toLowerCase().trim()
+      if (base) baseCounts[base] = (baseCounts[base] || 0) + 1
+    }
+    const hasDuplicateBase = Object.values(baseCounts).some((count) => count > 1)
+    const hasFractionalQuantity = session.items.some((item) => {
+      const amt = Number(item.quantity?.amount)
+      return Number.isFinite(amt) && amt > 0 && amt < 1
+    })
+    lowConfidence = hasMismatch || (hasDuplicateBase && hasFractionalQuantity) || hasFractionalQuantity
   }
   return {
     ...session,
