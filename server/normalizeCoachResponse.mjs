@@ -625,8 +625,8 @@ export function normalizeCoachResponse(value, context = {}) {
   }
   const hasPersistenceAction = actions.some(isPersistenceAction)
   const alreadyLoggedReply =
-    Boolean(context.mealContext?.alreadyLogged)
-    || Boolean(context.workoutContext?.alreadyLogged)
+    Boolean(context.mealContext?.alreadyLogged && !workoutHasPendingWork)
+    || Boolean(context.workoutContext?.alreadyLogged && !mealHasPendingWork)
   const fallbackReply =
     (context.mealContext?.alreadyLogged && !workoutHasPendingWork
       ? (hintAlreadyLoggedMeal?.reply_hint || deterministicAlreadyLoggedReply(context.mealContext, "meal"))

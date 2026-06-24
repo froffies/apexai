@@ -1219,6 +1219,31 @@ test("mixed thread: meal quantity follow-up does not trigger workout for drinks"
   assert.notEqual(normalizeValueText(milk.workoutSession?.exercise_name), "250ml")
 })
 
+test("mixed thread: persisted workouts stay already-logged during a meal-only clarification follow-up", () => {
+  const initial = replayCoachConversation([
+    user("i had 6 eggs and some wine and did a pushup and a chinup"),
+  ])
+
+  const persistedWorkout = makePersistedWorkoutSession(initial.workoutSession, "workout_pushup_chinup")
+  const next = buildCoachSessionState({
+    recentMessages: [
+      ...initial.history,
+      assistant("You've had 6 eggs and some wine. Could you let me know how much wine you had? Also, I've logged your pushup and chinup as workouts."),
+    ],
+    currentMessage: "250ml",
+    mealSession: initial.mealSession,
+    workoutSession: persistedWorkout,
+  })
+
+  assert.ok(next.mealSession)
+  assert.equal(next.mealSession.readyToLog, true)
+  assert.match(String(next.mealSession.summary || ""), /250ml wine/i)
+  assert.ok(next.workoutSession)
+  assert.equal(next.workoutSession.alreadyLogged, true)
+  assert.equal(next.workoutSession.readyToLog, false)
+  assert.equal(next.workoutSession.persistedWorkoutId, "workout_pushup_chinup")
+})
+
 test("mixed thread: real workout continuation still works for bench and cardio", () => {
   const bench = replayCoachConversation([
     user("bench"),

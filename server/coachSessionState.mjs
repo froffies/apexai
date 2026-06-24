@@ -2055,6 +2055,19 @@ function looksWorkoutSpecificMessage(message = "") {
   )
 }
 
+function shouldPreservePersistedWorkoutMarkerDuringMealFollowUp(message = "", existingSession = null, mealSession = null) {
+  if (!existingSession?.persisted || !String(existingSession?.persistedWorkoutId || "").trim()) return false
+  if (looksWorkoutSpecificMessage(message)) return false
+  if (!mealSession?.active) return false
+  return Boolean(
+    mealSession?.pendingClarification
+    || mealSession?.clarifyQuestion
+    || mealSession?.readyToLog
+    || mealSession?.correctionRequested
+    || mealSession?.deleteRequested
+  )
+}
+
 function suppressionTargetsWorkout(message = "", existingSession = null, mealSession = null) {
   if (!suppressionRequested(message)) return false
   if (workoutDeleteRequested(message)) return true
@@ -2149,7 +2162,21 @@ function buildWorkoutSessionState(recentMessages = [], currentMessage = "", exis
   }
 
   const thread = extractWorkoutThread(recentMessages, currentMessage, prior)
-  if (!thread.length) return null
+  if (!thread.length) {
+    if (shouldPreservePersistedWorkoutMarkerDuringMealFollowUp(currentMessage, prior, mealSession)) {
+      return {
+        ...prior,
+        active: false,
+        readyToLog: false,
+        clarifyQuestion: "",
+        alreadyLogged: true,
+        correctionRequested: false,
+        deleteRequested: false,
+        thread_messages: buildThreadMessages(recentMessages, currentMessage),
+      }
+    }
+    return null
+  }
 
   const clarificationStats = collectWorkoutClarificationStats(thread)
   const state = {
