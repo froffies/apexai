@@ -6,6 +6,7 @@ import { spawn } from "node:child_process"
 import { createClient } from "@supabase/supabase-js"
 import { chromium, expect } from "@playwright/test"
 import { buildCoachAuditFlags, detectCoachAuditIntent } from "../server/coachAudit.mjs"
+import { replyClaimsPersistence } from "../server/coachLoggingRules.mjs"
 import { emptyMealSessionState, emptyWorkoutSessionState } from "../server/coachSessionState.mjs"
 
 const rootDir = process.cwd()
@@ -125,7 +126,7 @@ function cleanText(value) {
 }
 
 function responseClaimsPersistence(reply) {
-  return /\b(logged|saved|tracked|updated|added|recorded|deleted|removed)\b/i.test(String(reply || ""))
+  return replyClaimsPersistence(reply)
 }
 
 function responseIsConditionalPersistenceOffer(reply) {
@@ -1307,6 +1308,24 @@ function mixedRepeatMealCase(rng, store) {
   }
 }
 
+function mixedMealWorkoutMultiExerciseCase() {
+  return {
+    kind: "mixed",
+    label: "mixed-meal-workout-multi-exercise",
+    expected: "mixed meal and multi-exercise turn persists both domains cleanly",
+    turns: [
+      "i had 6 eggs and some wine and did a pushup and a chinup",
+      "250ml",
+    ],
+    assert(result) {
+      expect(result.mealDelta).toBeGreaterThanOrEqual(1)
+      expect(result.workoutDelta).toBeGreaterThanOrEqual(1)
+      expect(result.persistedActions.some((action) => action.type === "log_meal")).toBeTruthy()
+      expect(result.persistedActions.some((action) => action.type === "log_workout")).toBeTruthy()
+    },
+  }
+}
+
 const mealCaseBuilders = [
   mealFragmentedCase,
   mealGroupedCase,
@@ -1335,6 +1354,7 @@ const mixedCaseBuilders = [
   mixedSuppressionCase,
   mixedNonsenseCase,
   mixedRepeatMealCase,
+  mixedMealWorkoutMultiExerciseCase,
 ]
 
 function pickCase(rng, builders, store) {

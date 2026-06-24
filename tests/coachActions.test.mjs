@@ -9,6 +9,7 @@ import {
   isShowMealPlanRequest,
   isShowWorkoutRequest,
   isWorkoutPlanRequest,
+  parseActiveWorkoutUpdate,
   parseMealLog,
   parseRecoveryCheckIn,
   parseTargetUpdate,
@@ -74,6 +75,12 @@ test("recovery check-ins and weekly schedule prompts are recognized", () => {
 })
 
 test("only app-state-specific coach prompts stay local", () => {
+  const activeWorkout = {
+    id: "active_1",
+    session_id: "session_1",
+    current_exercise_index: 0,
+    exercises: [{ name: "Back Squat", setsReps: "3x8-10" }],
+  }
   assert.equal(isWorkoutPlanRequest("Build me a workout for today"), true)
   assert.equal(isMealPlanRequest("Meal plan"), true)
   assert.equal(isShowWorkoutRequest("show me the workout"), true)
@@ -86,6 +93,8 @@ test("only app-state-specific coach prompts stay local", () => {
   assert.equal(shouldUseLocalCoach("Nothing. Build me a workout"), true)
   assert.equal(isStartWorkoutRequest("Start today's workout"), true)
   assert.equal(shouldUseLocalCoach("Start today's workout"), true)
+  assert.deepEqual(parseActiveWorkoutUpdate("finished", activeWorkout), { type: "finish" })
+  assert.equal(shouldUseLocalCoach("finished", { activeWorkout }), true)
   assert.equal(shouldUseLocalCoach("Meal plan"), true)
   assert.equal(shouldUseLocalCoach("I had vegemite"), false)
   assert.equal(shouldUseLocalCoach("What are three breakfast ideas for me?"), false)

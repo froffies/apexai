@@ -3,6 +3,7 @@ import {
   buildDeterministicMealActions,
   buildDeterministicWorkoutAction,
   deterministicClarifyActionFromSession,
+  replyClaimsPersistence,
   summarizeCoachAction,
   summarizeCoachActions,
 } from "../server/coachLoggingRules.mjs"
@@ -28,7 +29,7 @@ function cleanText(value) {
 }
 
 function responseClaimsPersistence(reply) {
-  return /\b(logged|saved|tracked|updated|added|recorded)\b/i.test(String(reply || ""))
+  return replyClaimsPersistence(reply)
 }
 
 function buildResponseForState(message, recentMessages, mealSession, workoutSession) {
@@ -239,4 +240,3 @@ const results = [
 ]
 
 console.log(JSON.stringify({ ok: true, results }, null, 2))
-

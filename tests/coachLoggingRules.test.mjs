@@ -218,6 +218,13 @@ test("coach logging rules build a deterministic meal action from the actual coac
   assert.equal(action.food_name, "1 burger")
 })
 
+test("coach logging rules persistence reply detection ignores negative historical mentions", () => {
+  assert.equal(replyClaimsPersistence("Since you haven't logged any workouts today, it might be good to train deadlift if you're feeling ready."), false)
+  assert.equal(replyClaimsPersistence("If you want that logged, tell me the quantity."), false)
+  assert.equal(replyClaimsPersistence("Logged your 2 eggs."), true)
+  assert.equal(replyClaimsPersistence("Let's log your pushup and chinup as well."), true)
+})
+
 test("coach logging rules keep ambiguous single-item staples in clarification instead of inventing a meal action for i had 1 rice", () => {
   const state = buildCoachSessionState({
     recentMessages: [],

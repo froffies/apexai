@@ -1,6 +1,6 @@
 import { coachMealConfidenceNote } from "../src/lib/nutritionHelpers.js"
 import { findBestFoodMatch } from "../src/lib/nutritionDatabase.js"
-import { safeArray, safeNumber, titleCase, roundMacro as _roundMacro, escapeRegex as _escapeRegex } from "./utils.mjs"
+import { cleanText, safeArray, safeNumber, titleCase, roundMacro as _roundMacro, escapeRegex as _escapeRegex } from "./utils.mjs"
 
 export { safeArray, safeNumber, titleCase }
 
@@ -486,14 +486,33 @@ export function replyClaimsPersistence(reply) {
   const text = String(reply || "")
     .replace(/â€™/g, "'")
     .replace(/[’]/g, "'")
-  // Exclude negations: "I haven't logged", "I didn't save", "couldn't track"
-  if (/\b(?:haven'?t|hasn'?t|didn'?t|don'?t|doesn'?t|couldn'?t|won'?t|not\s+(?:yet\s+)?|never\s+)\s*(?:logged?|saved?|tracked?|added?|recorded?|updated?|deleted?|removed?)/i.test(text)) return false
-  // Exclude informational references to past logs: "exercises you logged today", "what did you log"
-  if (/\b(?:you|we|they)\s+(?:already\s+)?(?:logged|saved|tracked|added|recorded|updated|deleted|removed)\b/i.test(text)) return false
-  if (/\b(?:what|which|how|when)\s+(?:\w+\s+){0,4}(?:logged|saved|tracked|added|recorded)\b/i.test(text)) return false
-  return /\b(logged|saved|tracked|added|recorded|updated|deleted|removed)\b/i.test(text)
-    || /\b(logging|saving|tracking|adding|recording|updating|deleting|removing)\b/i.test(text)
-    || /\b(?:i(?:'ll| will)|i can|let'?s)\s+(?:log|save|track|add|record|update|delete|remove)\b/i.test(text)
+  const normalized = cleanText(text)
+  if (!normalized) return false
+  if (/\b(?:i(?:'ll| will)|i can|let'?s)\s+(?:log|save|track|add|record|update|delete|remove)\b/i.test(normalized)) {
+    return true
+  }
+
+  if (/\b(?:haven'?t|hasn'?t|didn'?t|don'?t|doesn'?t|couldn'?t|won'?t|not\s+(?:yet\s+)?|never\s+)\s*(?:logged?|saved?|tracked?|added?|recorded?|updated?|deleted?|removed?)/i.test(normalized)) {
+    return false
+  }
+  if (/\b(?:you|we|they)\s+(?:already\s+)?(?:logged|saved|tracked|added|recorded|updated|deleted|removed)\b/i.test(normalized)) {
+    return false
+  }
+  if (/\b(?:what|which|how|when)\s+(?:\w+\s+){0,4}(?:logged|saved|tracked|added|recorded)\b/i.test(normalized)) {
+    return false
+  }
+
+  const persistenceVerbPattern = /\b(logged|saved|tracked|added|recorded|updated|deleted|removed|logging|saving|tracking|adding|recording|updating|deleting|removing)\b/ig
+  const negativeContextPattern = /\b(?:haven't|have not|hasn't|has not|hadn't|had not|didn't|did not|don't|do not|doesn't|does not|not|without|if)\b(?:\s+\w+){0,4}\s*$/
+
+  for (const match of normalized.matchAll(persistenceVerbPattern)) {
+    const index = Number(match.index || 0)
+    const before = normalized.slice(Math.max(0, index - 48), index)
+    if (negativeContextPattern.test(before)) continue
+    return true
+  }
+
+  return false
 }
 
 export function isPersistenceAction(action) {

@@ -297,7 +297,7 @@ export function parseActiveWorkoutUpdate(message, activeWorkout) {
   if (!activeWorkout?.id || !activeWorkout.exercises?.length) return null
   const text = clean(message)
 
-  if (/\b(finish workout|end workout|wrap up|done with workout)\b/.test(text)) {
+  if (/^(?:finished|done|completed|all done|that's it|thats it)$/.test(text) || /\b(finish workout|end workout|wrap up|done with workout)\b/.test(text)) {
     return { type: "finish" }
   }
   if (/\b(next exercise|move on|advance)\b/.test(text)) {
