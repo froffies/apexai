@@ -486,6 +486,11 @@ export function replyClaimsPersistence(reply) {
   const text = String(reply || "")
     .replace(/â€™/g, "'")
     .replace(/[’]/g, "'")
+  // Exclude negations: "I haven't logged", "I didn't save", "couldn't track"
+  if (/\b(?:haven'?t|hasn'?t|didn'?t|don'?t|doesn'?t|couldn'?t|won'?t|not\s+(?:yet\s+)?|never\s+)\s*(?:logged?|saved?|tracked?|added?|recorded?|updated?|deleted?|removed?)/i.test(text)) return false
+  // Exclude informational references to past logs: "exercises you logged today", "what did you log"
+  if (/\b(?:you|we|they)\s+(?:already\s+)?(?:logged|saved|tracked|added|recorded|updated|deleted|removed)\b/i.test(text)) return false
+  if (/\b(?:what|which|how|when)\s+(?:\w+\s+){0,4}(?:logged|saved|tracked|added|recorded)\b/i.test(text)) return false
   return /\b(logged|saved|tracked|added|recorded|updated|deleted|removed)\b/i.test(text)
     || /\b(logging|saving|tracking|adding|recording|updating|deleting|removing)\b/i.test(text)
     || /\b(?:i(?:'ll| will)|i can|let'?s)\s+(?:log|save|track|add|record|update|delete|remove)\b/i.test(text)

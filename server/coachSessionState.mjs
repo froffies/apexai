@@ -18,7 +18,7 @@ const VAGUE_REFERENCE_PATTERN = /^(?:(?:i\s+)?(?:had|ate|drank|eaten))\s+(?:that
 const FRUSTRATION_PATTERN = /\b(?:why did you|why cant you|you suck|what the|thats not what|thats wrong|youre wrong|you got it wrong|why would you|stop doing|you keep|you always|i cant believe|this is wrong|you messed up)\b/i
 const VAGUE_WORKOUT_REFERENCE_PATTERN = /^(?:this\s+mornings\s+workout|this\s+morning'?s\s+workout|today'?s\s+workout|my\s+workout|the\s+workout|this\s+workout|that\s+workout|workout\s+this\s+morning|training\s+this\s+morning|this\s+mornings\s+training|this\s+morning'?s\s+training)\b/i
 const WORKOUT_REROUTE_PATTERN = /^(?:log|save|add|track|put)\s+(?:it|that|this)\s+(?:in|as|to|under)\s+(?:a\s+|my\s+)?(?:workout|workouts|training|exercise|gym|weights)/i
-const WORKOUT_START_PATTERN = /(?:\b(?:workout|train(?:ed|ing)?|lift(?:ed|ing)?|exercise|exercises|session|cardio|bench|squats?|deadlift|row|rows|press|curls?|pulldown|pull\s*ups?|push\s*ups?|sit\s*ups?|burpees?|dips?|lunges?|treadmill|bike|biked|ran|run|running|swim|swam|walk(?:ed|ing)?|cycling|cycled|rower|elliptical|stairmaster|sets?|reps?)\b)|(?:\d+\s*(?:kg|km|mi|miles?|min(?:utes?)?|sec(?:onds?)?|hours?|cal(?:ories?)?))|(?:\d+\s*x\s*\d+)/i
+const WORKOUT_START_PATTERN = /(?:\b(?:workout|train(?:ed|ing)?|lift(?:ed|ing)?|exercise|exercises|session|cardio|bench|squats?|deadlift|row|rows|press|curls?|pulldown|pull\s*ups?|pullups?|chin\s*ups?|chinups?|push\s*ups?|pushups?|sit\s*ups?|situps?|burpees?|dips?|lunges?|treadmill|bike|biked|ran|run|running|swim|swam|walk(?:ed|ing)?|cycling|cycled|rower|elliptical|stairmaster|plank|sets?|reps?)\b)|(?:\d+\s*(?:kg|km|mi|miles?|min(?:utes?)?|sec(?:onds?)?|hours?|cal(?:ories?)?))|(?:\d+\s*x\s*\d+)/i
 const WORKOUT_CORRECTION_PATTERN = /\b(?:actually|correction|change(?:\s+that)?|update(?:\s+that)?|make that|not\b|instead|sorry|i meant)\b/i
 const WORKOUT_DELETE_PATTERN = /\b(?:delete|remove|undo|erase)\b(?:\s+(?:it|that|this|workout|session|log))?/i
 const WORKOUT_FINALISE_PATTERN = /^(?:i just did|i already did|that'?s it|thats it|log it|save it|go ahead|yes|yeah|yep|okay|ok)$/i
@@ -37,6 +37,12 @@ const WORKOUT_EXERCISES = [
   "pull ups",
   "pull up",
   "pullup",
+  "chinups",
+  "chin ups",
+  "chin up",
+  "chinup",
+  "chin-up",
+  "chin-ups",
   "pushups",
   "push ups",
   "push up",
@@ -49,6 +55,8 @@ const WORKOUT_EXERCISES = [
   "burpees",
   "dip",
   "dips",
+  "lunge",
+  "lunges",
   "lat pulldown",
   "deadlift",
   "romanian deadlift",
@@ -58,12 +66,27 @@ const WORKOUT_EXERCISES = [
   "squat",
   "squats",
   "leg press",
+  "leg curl",
+  "leg extension",
+  "calf raise",
+  "calf raises",
   "walking lunge",
   "preacher curl",
   "preacher curls",
   "bicep curl",
+  "bicep curls",
+  "hammer curl",
+  "hammer curls",
   "tricep pushdown",
+  "tricep dip",
+  "skull crusher",
   "plank",
+  "mountain climber",
+  "mountain climbers",
+  "jumping jack",
+  "jumping jacks",
+  "box jump",
+  "box jumps",
   "incline treadmill",
   "treadmill",
   "bike",
@@ -72,6 +95,21 @@ const WORKOUT_EXERCISES = [
   "walk",
   "elliptical",
   "stairmaster",
+  "cable row",
+  "face pull",
+  "face pulls",
+  "arnold press",
+  "lateral raise",
+  "lateral raises",
+  "front raise",
+  "front raises",
+  "hip thrust",
+  "hip thrusts",
+  "glute bridge",
+  "glute bridges",
+  "romanian deadlift",
+  "sumo deadlift",
+  "trap bar deadlift",
 ]
 
 const CORRECTION_LEAD_PATTERNS = [
@@ -87,7 +125,7 @@ const INLINE_MEAL_CORRECTION_PATTERN = /^(?<lead>(?:please\s+)?(?:(?:i\s+)?(?:ha
 const TRAILING_MEAL_QUANTITY_PATTERN = /^(?<lead>(?:(?:actually|also|and then|then)\s+)*(?:(?:i\s+)?(?:had|ate|drank)|log|track|save|add|include)\s+)?(?<food>[a-z][a-z\s'/-]+?)\s+(?<amount>\d+(?:\.\d+)?|half)\s*(?:(?<article>a)\s+)?(?<unit>kg|g|lb|lbs|pound|pounds|ml|l|litre|litres|liter|liters|cup|cups|tbsp|tablespoon|tablespoons|tsp|teaspoon|teaspoons|slice|slices|serve|serves|serving|servings|bowl|bowls|plate|plates|mug|mugs)\b$/i
 const BARE_MEAL_MEASURE_NAMES = new Set(["g", "kg", "lb", "ml", "l", "cup", "tbsp", "tsp", "slice", "tin", "can", "block", "bunch", "serve", "bowl", "plate", "mug"])
 const MIXED_TURN_SPLIT_PATTERN = /\b(?:oh\s+and|and then|and|also|then|plus)\b|[,;]+/gi
-const WORKOUT_PIVOT_PATTERN = /^(?:(?:i\s+)?(?:did|trained?|lifted|worked\s+out|ran|run|running|walked|walk|cycled|cycle|biked|bike|swam|swim)\b|(?:bench(?:\s+press)?|incline\s+bench\s+press|overhead\s+press|shoulder\s+press|dumbbell\s+shoulder\s+press|seated\s+row|barbell\s+row|bent\s+over\s+row|lat\s+pulldown|back\s+squat|front\s+squat|squats?|deadlift|romanian\s+deadlift|rdl|leg\s+press|walking\s+lunge|preacher\s+curls?|bicep\s+curl|tricep\s+pushdown|plank|treadmill|rower|elliptical|stairmaster|push\s*ups?|pushups?|pull\s*ups?|pullups?|sit\s*ups?|situps?|burpees?|dips?|lunges?)\b|\d+(?:\.\d+)?\s*(?:push\s*ups?|pushups?|pull\s*ups?|pullups?|sit\s*ups?|situps?|burpees?|dips?|lunges?|squats?)\b)/i
+const WORKOUT_PIVOT_PATTERN = /^(?:(?:i\s+)?(?:did|trained?|lifted|worked\s+out|ran|run|running|walked|walk|cycled|cycle|biked|bike|swam|swim)\b|(?:bench(?:\s+press)?|incline\s+bench\s+press|overhead\s+press|shoulder\s+press|dumbbell\s+shoulder\s+press|seated\s+row|barbell\s+row|bent\s+over\s+row|lat\s+pulldown|back\s+squat|front\s+squat|squats?|deadlift|romanian\s+deadlift|rdl|leg\s+press|walking\s+lunge|preacher\s+curls?|bicep\s+curl|tricep\s+pushdown|plank|treadmill|rower|elliptical|stairmaster|push\s*ups?|pushups?|pull\s*ups?|pullups?|chin\s*ups?|chinups?|sit\s*ups?|situps?|burpees?|dips?|lunges?)\b|\d+(?:\.\d+)?\s*(?:push\s*ups?|pushups?|pull\s*ups?|pullups?|sit\s*ups?|situps?|burpees?|dips?|lunges?|squats?)\b)/i
 const MEAL_PIVOT_PATTERN = /^(?:actually\s+)?(?:also\s+)?(?:(?:i\s+)?(?:had|ate|drank))\b/i
 const TURN_DIRECTIVE_ONLY_PATTERN = /^(?:can\s+you|could\s+you|please|just)\s+(?:log|save|track|add)\b/i
 const MEAL_CONTINUATION_PATTERN = /^(?:and\s+)?(?:about|around|bout|roughly|approx(?:imately)?|with|without|no\b|the\b|rest\b|more\b|another\b|half\b|a\s+couple\b|a\s+few\b|a\s+small\b|a\s+big\b|heaps?\b|cooked\s+in\b|fried\b|scrambled\b|boiled\b|grilled\b|poached\b|baked\b|\d+(?:\.\d+)?\s*(?:g|kg|lb|lbs|pound|pounds|ml|l|litre|litres|liter|liters|cup|cups|tbsp|tablespoon|tablespoons|tsp|teaspoon|teaspoons|slice|slices|serve|serves|serving|servings|bowl|bowls|plate|plates|mug|mugs)\b)/i
@@ -462,7 +500,7 @@ function splitTurnIntoClauses(message = "") {
   }))
 }
 
-const INLINE_BODYWEIGHT_FRAGMENT_PATTERN = /\b(?:(?:i\s+)?(?:did|do)\s+)?(?<count>\d+(?:\.\d+)?|a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s*(?<exercise>pushups?|push ups?|pullups?|pull ups?|situps?|sit ups?|burpees?|dips?|lunges?|squats?)\b/i
+const INLINE_BODYWEIGHT_FRAGMENT_PATTERN = /\b(?:(?:i\s+)?(?:did|do)\s+)?(?<count>\d+(?:\.\d+)?|a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s*(?<exercise>pushups?|push ups?|pullups?|pull ups?|chinups?|chin ups?|situps?|sit ups?|burpees?|dips?|lunges?|squats?)\b/i
 
 function extractInlineMixedClauseFragments(text = "") {
   const raw = String(text || "").trim()
@@ -760,6 +798,27 @@ function buildTurnIntentGraph({
       seenDomains.add("workout")
       previousDomain = "workout"
       continue
+    }
+
+    // Inherit workout domain for bare exercise fragments following a workout clause.
+    // "did a pushup and a chinup" splits to ["did a pushup", "a chinup"] — the second
+    // clause has no verb so classifyCoachClauseDomain marks it general, but it's clearly
+    // a continuation of the workout context from the previous clause.
+    if (analysis.domain === "general" && previousDomain === "workout" && !analysis.mealLike) {
+      const inheritedWorkout = parseWorkoutMessage(clause.text)
+      if (inheritedWorkout?.exercise_name) {
+        const fragmentText = normalizeWorkoutFragment(stripMixedTurnLead(clause.text))
+        graph.workoutFragments.push({
+          id: clause.id,
+          index: clause.index,
+          text: fragmentText,
+          rawText: clause.text,
+          parsedWorkout: inheritedWorkout,
+        })
+        seenDomains.add("workout")
+        previousDomain = "workout"
+        continue
+      }
     }
 
     graph.generalFragments.push({ id: clause.id, index: clause.index, text: clause.text })
@@ -1298,6 +1357,12 @@ const bodyweightAliases = new Set([
   "pullup",
   "pull ups",
   "pullups",
+  "chin up",
+  "chinup",
+  "chin ups",
+  "chinups",
+  "chin-up",
+  "chin-ups",
   "sit up",
   "situp",
   "sit ups",
@@ -1311,6 +1376,12 @@ const bodyweightAliases = new Set([
   "squat",
   "squats",
   "plank",
+  "mountain climber",
+  "mountain climbers",
+  "jumping jack",
+  "jumping jacks",
+  "box jump",
+  "box jumps",
 ])
 
 function buildWorkoutClarificationKey(field) {
@@ -1613,7 +1684,7 @@ function parseWorkoutMessage(message) {
     }
   }
 
-  const countedBodyweightPattern = text.match(/^(?:(?:i\s+)?(?:did|do)\s+)?(?<reps>\d+(?:\.\d+)?|a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s*(?<exercise>pushups?|push ups?|pullups?|pull ups?|situps?|sit ups?|burpees?|dips?|lunges?|squats?)\b/)
+  const countedBodyweightPattern = text.match(/^(?:(?:i\s+)?(?:did|do)\s+)?(?<reps>\d+(?:\.\d+)?|a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s*(?<exercise>pushups?|push ups?|pullups?|pull ups?|chinups?|chin ups?|situps?|sit ups?|burpees?|dips?|lunges?|squats?)\b/)
   if (countedBodyweightPattern?.groups) {
     const exercise = normalizeExerciseName(countedBodyweightPattern.groups.exercise)
     const reps = parseCountWord(countedBodyweightPattern.groups.reps || "")

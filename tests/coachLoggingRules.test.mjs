@@ -12,6 +12,7 @@ import {
   deterministicClarifyActionFromSession,
   estimateMealFromSession,
   formatDeterministicMealAnswer,
+  replyClaimsPersistence,
 } from "../server/coachLoggingRules.mjs"
 import { buildCoachSessionState, emptyMealSessionState, emptyWorkoutSessionState } from "../server/coachSessionState.mjs"
 import { verifiedFoods } from "../src/lib/nutritionDatabase.js"
@@ -1279,4 +1280,40 @@ test("coach logging rules give already-logged replies from persisted state", () 
 
   assert.match(mealReply, /already saved .*today's nutrition log/i)
   assert.match(workoutReply, /already saved .*Workouts/i)
+})
+
+test("replyClaimsPersistence does not fire on negations or informational references", () => {
+  const falsePositives = [
+    "You're right! I haven't logged the chinup yet. Let's add that now.",
+    "Here are the exercises you logged today: Pushup.",
+    "I don't have access to real-time weather data.",
+    "I didn't save that, sorry.",
+    "I haven't added the chinup yet.",
+    "What exercises did you log today?",
+  ]
+  for (const text of falsePositives) {
+    assert.equal(
+      replyClaimsPersistence(text),
+      false,
+      `replyClaimsPersistence should be false for: "${text.substring(0, 60)}"`
+    )
+  }
+})
+
+test("replyClaimsPersistence fires on genuine persistence confirmations", () => {
+  const trueCases = [
+    "Logged! Pushup for 1 set of 10.",
+    "Saved to today's nutrition: 6 eggs.",
+    "I've added your workout.",
+    "Updated your nutrition log.",
+    "I'll log that for you now.",
+    "Let's save that to your log.",
+  ]
+  for (const text of trueCases) {
+    assert.equal(
+      replyClaimsPersistence(text),
+      true,
+      `replyClaimsPersistence should be true for: "${text.substring(0, 60)}"`
+    )
+  }
 })

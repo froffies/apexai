@@ -2316,3 +2316,31 @@ test("real workout logs still produce a workout session after planning directive
     )
   }
 })
+
+test("multi-exercise input extracts both exercises as workout fragments", () => {
+  const { workoutSession } = buildCoachSessionState({
+    recentMessages: [],
+    currentMessage: "did a pushup and a chinup",
+    existingMealSession: null, existingWorkoutSession: null,
+    recentMeals: [], recentWorkouts: [], profile: {}, coachContext: {},
+  })
+  const fragments = workoutSession?.intentGraph?.workoutFragments || []
+  const exerciseNames = fragments.map(f => f.parsedWorkout?.exercise_name).filter(Boolean)
+  assert.ok(exerciseNames.length >= 2, `Expected 2+ exercises, got: ${JSON.stringify(exerciseNames)}`)
+  assert.ok(exerciseNames.some(n => n === "Pushup"), "Expected Pushup in fragments")
+  assert.ok(exerciseNames.some(n => n === "Chinup"), "Expected Chinup in fragments")
+})
+
+test("chinup is recognised as a known exercise", () => {
+  const { workoutSession } = buildCoachSessionState({
+    recentMessages: [],
+    currentMessage: "i did 10 chinups",
+    existingMealSession: null, existingWorkoutSession: null,
+    recentMeals: [], recentWorkouts: [], profile: {}, coachContext: {},
+  })
+  assert.ok(workoutSession !== null, "Expected workout session for chinups")
+  assert.ok(
+    workoutSession?.exercise_name?.toLowerCase().includes("chin"),
+    `Expected chinup exercise name, got: ${workoutSession?.exercise_name}`
+  )
+})
