@@ -438,7 +438,7 @@ export function buildCoachAuditFlags(entry = {}) {
     && !replyIsConditionalPersistenceOffer(assistantReply)
     && persistedActions.length === 0
     && entry.intent !== "app_help"
-    && !["already_logged", "suppressed"].includes(String(entry.persistence_status || ""))
+    && !["already_logged", "suppressed", "pending_client"].includes(String(entry.persistence_status || ""))
   ) {
     addFlag(flags, "fake_save_blocked", "Reply implied a save without a persisted action.", "error")
   }

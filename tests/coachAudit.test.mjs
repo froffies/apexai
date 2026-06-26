@@ -98,6 +98,21 @@ test("buildCoachAuditFlags does not flag suppressed logging turns as missing act
   assert.equal(flags.some((flag) => flag.code === "no_action_when_expected"), false)
 })
 
+
+test("buildCoachAuditFlags does not flag pending-client persistence turns as fake saves", () => {
+  const flags = buildCoachAuditFlags({
+    user_message: "i had 2 eggs",
+    assistant_reply: "Saved to today's nutrition: 2 eggs.",
+    actions: [{ type: "log_meal", food_name: "2 eggs" }],
+    persisted_actions: [],
+    route_type: "ai-assisted",
+    persistence_status: "pending_client",
+    intent: "meal_logging",
+  })
+
+  assert.equal(flags.some((flag) => flag.code === "fake_save_blocked"), false)
+})
+
 test("buildCoachAuditFlags catches clarification target loss and unbound decimal quantity replies", () => {
   const flags = buildCoachAuditFlags({
     user_message: "19.2",
