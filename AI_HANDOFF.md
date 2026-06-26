@@ -1,6 +1,6 @@
 # ApexAI AI Handoff
 
-Last updated: 2026-06-21
+Last updated: 2026-06-26
 
 ## Current Status
 
@@ -48,6 +48,9 @@ Current responsibilities:
   - is the graph-native front door for meal parsing
   - records `legacyGateClause` whenever `shouldUseLegacy()` routes a turn into the legacy fallback
   - includes the `isGraphNativeSimpleMeasuredFollowUp()` exemption so simple measured fresh-topic turns such as `500ml coffee` can stay graph-native even after prior assistant history
+  - now preserves active legacy nutrition-question turns as answer-only context instead of reopening clarifications
+  - now allows only genuinely simple legacy quantity/complaint follow-ups back onto the graph-native path, while keeping complex grouped/attachment flows on the legacy rail
+  - now lets stale active legacy sessions yield to a clearly fresh simple measured meal start instead of trapping the new turn inside old state
 - `src/lib/coachSessionMerge.js`
   - merges persisted meal/workout results back into frontend state after successful logging
 
@@ -132,7 +135,7 @@ The telemetry report also tracks photo review rate, telemetry error rate, nutrit
 
 Current verified baseline in this workspace:
 
-- `npm test` passes `339/339`
+- `npm test` passes `377/377`
 - `npm run typecheck` passes
 - `npm run lint` passes
 - `npm run build` passes
@@ -153,6 +156,20 @@ Recently confirmed live checks in this workspace:
 - full live verify passed against the deployed frontend/backend pair
 - Render `/health` exposed the expected commit hash during the latest deployment check
 
+Latest measured telemetry before the current local parser pass:
+
+- commit/sample: `80889a2`
+- `legacy_fallback_rate`: `82.4%`
+- dominant clause: `active_non_graph_session` with `8` hits
+
+This pass specifically targets that dominant fallback with safer graph-native re-entry for:
+
+- active legacy nutrition-answer turns
+- simple pending drink quantity replies
+- stale active legacy sessions receiving a clearly fresh simple measured meal
+
+A fresh post-deploy telemetry sample is still required after this pass lands to prove the fallback rate moved.
+
 Generated verification artifacts are written under:
 
 - `tmp/coach-soak-runs/`
@@ -168,6 +185,9 @@ Recent important confirmed fixes include:
 - quantified drink follow-ups no longer hijack pending fried-egg cooking-medium clarifications
 - inline correction handling no longer saves literal correction text such as `no wait`
 - mixed meal/workout threads keep meal/workout domains separate more reliably during fragmented follow-ups
+- active nutrition questions on an already-resolved meal now stay answer-only without losing the ready meal context
+- simple legacy pending drink clarifications can resolve graph-natively without dragging grouped/attachment-heavy legacy sessions into the wrong parser
+- stale active legacy sessions can start a clean fresh measured meal when the new turn is clearly unrelated to the old meal
 
 ## Package / Dependency Status
 

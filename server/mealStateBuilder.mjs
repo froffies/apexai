@@ -113,10 +113,22 @@ const normalizeMealType = (value = "") => {
 }
 
 function resolveInlineCorrection(text = "") {
-  const match = String(text || "").trim().match(
+  const normalizedText = String(text || "").trim()
+  const correctionOnlyTrimmed = normalizedText
+    .replace(/\bnot\s+(?:\d+(?:\.\d+)?|half|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)(?:\s*(?:g|kg|ml|l|oz|lb|lbs|pound|pounds|cup|cups|serve|serves|serving|servings|slice|slices|egg|eggs))?\s*$/i, "")
+    .trim()
+  if (
+    correctionOnlyTrimmed
+    && correctionOnlyTrimmed !== normalizedText
+    && /^(?:actually|sorry|correction|no\s+wait|wait|i meant|make that|change that(?: to)?|update that(?: to)?|instead)\b/i.test(correctionOnlyTrimmed)
+  ) {
+    return correctionOnlyTrimmed
+  }
+
+  const match = normalizedText.match(
     /^(.+?)\s+(?:no wait|no,?\s*actually|actually(?:,?\s*make that)?|wait no|sorry,?\s*actually|i meant|make that|change that(?: to)?|update that(?: to)?)\s+(.+)$/i
   )
-  if (!match) return String(text || "")
+  if (!match) return normalizedText
 
   const before = match[1].trim()
   const corrected = match[2].trim()
@@ -533,6 +545,10 @@ function shouldUseLegacy(conversation, currentMessage, existingSession) {
     lastLegacyGateClause = ""
     return false
   }
+  if (isGraphNativeLegacyPendingClarificationTurn(currentMessage, existingSession)) {
+    lastLegacyGateClause = ""
+    return false
+  }
   const joined = cleanText([...conversation.map((entry) => entry.content || ""), currentMessage].join(" "))
   const assistantMealTurns = conversation.filter((entry) => entry.role === "assistant" && /\b(?:how much|how many|what type|what kind|cooked in|fried in|used for|before i can log|need more detail)\b/i.test(cleanText(entry.content || ""))).length
   const currentClauses = splitGraphClauses(currentMessage)
@@ -610,6 +626,104 @@ function isWorkoutOnlyFollowUpTurn(currentMessage = "", existingSession = null) 
   return WORKOUT_ONLY_FOLLOW_UP_PATTERN.test(normalizedCurrent) || isWorkoutish(normalizedCurrent)
 }
 
+function isActiveMealNutritionQuestionTurn(currentMessage = "", existingSession = null) {
+  const normalizedCurrent = cleanText(currentMessage)
+  if (!existingSession?.active || existingSession?.pendingClarification) return false
+  if (!normalizedCurrent || !detectQuestionOnlyTurn(currentMessage)) return false
+  if (isWorkoutish(normalizedCurrent) || MEAL_LOG_QUERY_PATTERN.test(normalizedCurrent)) return false
+  return /\b(?:calories|kcal|protein|carbs?|fat|macro|macros)\b/i.test(normalizedCurrent)
+}
+
+function isGraphNativeLegacyPendingClarificationTurn(currentMessage = "", existingSession = null) {
+  const pending = existingSession?.pendingClarification
+  const normalizedCurrent = cleanText(currentMessage)
+  if (!existingSession?.active || existingSession?.graphNative || !pending) return false
+  if (!normalizedCurrent || detectQuestionOnlyTurn(currentMessage) || isWorkoutish(normalizedCurrent)) return false
+  if (TIME_REFERENCE_PATTERN.test(normalizedCurrent)) return false
+  if (CORRECTION_PREFIX.test(normalizedCurrent) || INLINE_CORRECTION_PATTERN.test(normalizedCurrent)) return false
+  if (/\b(?:delete|remove|undo|erase)\b(?:\s+(?:it|that|this|meal))?/i.test(normalizedCurrent)) return false
+  const hasDeclaredTotals = safeArray(existingSession?.declaredTotals, 8).length > 0
+  const hasPendingAttachments = safeArray(existingSession?.pendingAttachments, 8).length > 0
+  const hasAttachedItems = safeArray(existingSession?.items, 24).some((item) => item?.attached_to || item?.relation)
+  const unresolvedRootItems = safeArray(existingSession?.items, 24).filter((item) => !item?.attached_to && !item?.quantity)
+  const simplePendingSession = !hasDeclaredTotals && !hasPendingAttachments && !hasAttachedItems && unresolvedRootItems.length <= 1
+  if (META_COMPLAINT_PATTERN.test(normalizedCurrent)) {
+    return simplePendingSession && isDrink(pending.targetBaseName || pending.targetLabel || "")
+  }
+  if (pending.type !== "quantity" || !simplePendingSession) return false
+  if (splitGraphClauses(currentMessage).length !== 1) return false
+
+  const quantity = extractQuantity(currentMessage) || extractEmbeddedQuantity(currentMessage)
+  const bareNumericReply = /^\d+(?:\.\d+)?$/.test(normalizedCurrent)
+  if (!quantity && !bareNumericReply) return false
+
+  const explicitBaseName = canonicalBaseName(baseNameFromText(currentMessage))
+  if (explicitBaseName && pending.targetBaseName && !baseNamesCompatible(explicitBaseName, pending.targetBaseName)) {
+    return false
+  }
+  return true
+}
+
+function shouldStartFreshMealThreadOnActiveSession(currentMessage = "", existingSession = null) {
+  const normalizedCurrent = cleanText(currentMessage)
+  if (!existingSession?.active || existingSession?.graphNative || existingSession?.pendingClarification) return false
+  if (!normalizedCurrent) return false
+  if (detectQuestionOnlyTurn(currentMessage) || isWorkoutish(normalizedCurrent) || isFutureMealIntent(currentMessage)) return false
+  if (SUPPRESS_PATTERN.test(normalizedCurrent)) return false
+  if (CORRECTION_PREFIX.test(normalizedCurrent) || INLINE_CORRECTION_PATTERN.test(normalizedCurrent)) return false
+  if (TIME_REFERENCE_PATTERN.test(normalizedCurrent)) return false
+  if (/\b(?:delete|remove|undo|erase)\b(?:\s+(?:it|that|this|meal))?/i.test(normalizedCurrent)) return false
+  if (VAGUE_REFERENCE_PATTERN.test(normalizedCurrent)) return false
+  if (/^\s*(?:and|also|plus)\b/i.test(normalizedCurrent)) return false
+  if (/\b(?:that|it|this|same|rest|another|more)\b/i.test(normalizedCurrent)) return false
+  if (/^\s*(?:with|without|cooked in|fried in|mixed with|topped with|covered in)\b/i.test(normalizedCurrent)) return false
+  if (splitGraphClauses(currentMessage).length !== 1) return false
+
+  const existingLooksResolved = Boolean(
+    existingSession?.readyToLog
+    || existingSession?.summary
+    || safeArray(existingSession?.items, 24).some((item) => item?.quantity)
+  )
+  if (!existingLooksResolved) return false
+
+  const existingRootItems = safeArray(existingSession?.items, 24).filter((item) => !item?.attached_to)
+  if (existingRootItems.length === 1) {
+    const [primaryRoot] = existingRootItems
+    const primaryAmount = Number(primaryRoot?.quantity?.amount || 0)
+    const primaryBase = singularize(primaryRoot?.base_name || primaryRoot?.baseName || "")
+    const currentQuantity = extractQuantity(currentMessage) || extractEmbeddedQuantity(currentMessage)
+    const measuredLead = Boolean(currentQuantity?.unit && currentQuantity.unit !== "egg")
+    const supportsGroupedSplit = (
+      primaryAmount > 1
+      && (
+        !primaryRoot?.quantity?.unit
+        || primaryRoot?.category === "drink"
+        || COUNT_REQUIRED.has(primaryBase)
+        || COUNT_FRIENDLY_BASES.has(primaryBase)
+      )
+    )
+    if (supportsGroupedSplit && !measuredLead && /^(?:the\s+rest|rest|remainder|one|two|three|four|five|six|seven|eight|nine|ten|\d+)/i.test(normalizedCurrent)) {
+      return false
+    }
+  }
+
+  const currentBaseName = canonicalBaseName(baseNameFromText(currentMessage))
+  if (currentBaseName) {
+    const existingRootBaseNames = existingRootItems
+      .map((item) => canonicalBaseName(item?.base_name || ""))
+      .filter(Boolean)
+    if (existingRootBaseNames.some((baseName) => baseNamesCompatible(baseName, currentBaseName))) {
+      return false
+    }
+  }
+
+  return Boolean(
+    MEAL_START_PATTERN.test(normalizedCurrent)
+    || isSimpleMeasuredMealFragment(currentMessage)
+    || isGraphNativeFriendlyDrinkStart(currentMessage)
+  )
+}
+
 function preserveExistingSessionForIgnoredTurn(conversation = [], currentMessage = "", existingSession = null) {
   const threadMessages = conversation.map((entry) => ({ role: entry.role, content: String(entry.content || "") }))
   const intentGraph = buildIntentGraph(conversation, currentMessage, existingSession)
@@ -625,6 +739,17 @@ function preserveExistingSessionForIgnoredTurn(conversation = [], currentMessage
       general: safeArray(intentGraph.generalFragments, 16),
     },
     graphNative: Boolean(existingSession?.graphNative),
+    legacyGateClause: "",
+  }
+}
+
+function preserveExistingSessionForAnswerOnlyTurn(conversation = [], currentMessage = "", existingSession = null) {
+  return {
+    ...preserveExistingSessionForIgnoredTurn(conversation, currentMessage, existingSession),
+    answerOnly: true,
+    wantsNutrition: true,
+    processingMode: "idle",
+    fallbackReason: "",
     legacyGateClause: "",
   }
 }
@@ -1838,43 +1963,47 @@ export function emptyMealSession() {
 
 export function buildMealStateFromConversation(recentMessages = [], currentMessage = "", existingSession = null) {
   const resolvedMessage = resolveInlineCorrection(currentMessage)
-  const normalizedRecentMessages = pruneTrailingNutritionQuestionHistory(recentMessages, resolvedMessage, existingSession)
-  const conversation = normalizeConversation(normalizedRecentMessages, resolvedMessage, existingSession)
-  const graphNativeSimpleMeasuredFollowUp = isGraphNativeSimpleMeasuredFollowUp(conversation, resolvedMessage, existingSession)
+  const sessionSeed = shouldStartFreshMealThreadOnActiveSession(resolvedMessage, existingSession) ? null : existingSession
+  const normalizedRecentMessages = pruneTrailingNutritionQuestionHistory(recentMessages, resolvedMessage, sessionSeed)
+  const conversation = normalizeConversation(normalizedRecentMessages, resolvedMessage, sessionSeed)
+  const graphNativeSimpleMeasuredFollowUp = isGraphNativeSimpleMeasuredFollowUp(conversation, resolvedMessage, sessionSeed)
   const implicitLoggingTurn = (
-    isGraphNativeImplicitMeasuredTurn(conversation, resolvedMessage, existingSession)
+    isGraphNativeImplicitMeasuredTurn(conversation, resolvedMessage, sessionSeed)
     || graphNativeSimpleMeasuredFollowUp
-    || isGraphNativeFriendlyDaypartTurn(conversation, resolvedMessage, existingSession)
-    || isGraphNativeFriendlyPersistedFollowUp(resolvedMessage, existingSession)
+    || isGraphNativeFriendlyDaypartTurn(conversation, resolvedMessage, sessionSeed)
+    || isGraphNativeFriendlyPersistedFollowUp(resolvedMessage, sessionSeed)
   )
-  if (!existingSession?.active && !existingSession?.persisted && isFutureMealIntent(resolvedMessage)) {
+  if (!sessionSeed?.active && !sessionSeed?.persisted && isFutureMealIntent(resolvedMessage)) {
     return baseSession()
   }
-  if (!existingSession?.active && !existingSession?.persisted && /\b(?:nothing|anything|not\s+hungry|not\s+eating|skipped?|fasting?|fast(?:ed)?|no\s+food)\b/i.test(cleanText(resolvedMessage)) && !looksFoodish(resolvedMessage)) {
+  if (!sessionSeed?.active && !sessionSeed?.persisted && /\b(?:nothing|anything|not\s+hungry|not\s+eating|skipped?|fasting?|fast(?:ed)?|no\s+food)\b/i.test(cleanText(resolvedMessage)) && !looksFoodish(resolvedMessage)) {
     return baseSession()
   }
-  if (isWorkoutOnlyFollowUpTurn(resolvedMessage, existingSession)) {
-    return preserveExistingSessionForIgnoredTurn(conversation, resolvedMessage, existingSession)
+  if (isWorkoutOnlyFollowUpTurn(resolvedMessage, sessionSeed)) {
+    return preserveExistingSessionForIgnoredTurn(conversation, resolvedMessage, sessionSeed)
   }
-  if (shouldUseLegacy(conversation, resolvedMessage, existingSession)) {
-    return markLegacySession(buildLegacyMealStateFromConversation(normalizedRecentMessages, resolvedMessage, existingSession), "legacy_gate", lastLegacyGateClause)
+  if (isActiveMealNutritionQuestionTurn(resolvedMessage, sessionSeed)) {
+    return preserveExistingSessionForAnswerOnlyTurn(conversation, resolvedMessage, sessionSeed)
+  }
+  if (shouldUseLegacy(conversation, resolvedMessage, sessionSeed)) {
+    return markLegacySession(buildLegacyMealStateFromConversation(normalizedRecentMessages, resolvedMessage, sessionSeed), "legacy_gate", lastLegacyGateClause)
   }
 
   const state = baseSession()
-  Object.assign(state, existingSession ? { ...baseSession(), ...existingSession } : {})
-  state.items = safeArray(existingSession?.items, 48).map(cloneItem)
-  state.declaredTotals = safeArray(existingSession?.declaredTotals, 12).map((entry) => ({ ...entry }))
-  state.pendingAttachments = safeArray(existingSession?.pendingAttachments, 8).map((entry) => ({ ...entry }))
-  state.pendingQuantities = safeArray(existingSession?.pendingQuantities, 8).map((entry) => ({ ...entry }))
-  state.clarificationCounts = { ...(existingSession?.clarificationCounts || {}) }
-  state.pendingClarification = existingSession?.pendingClarification ? { ...existingSession.pendingClarification } : null
-  state.nextClarificationReference = String(existingSession?.nextClarificationReference || "")
+  Object.assign(state, sessionSeed ? { ...baseSession(), ...sessionSeed } : {})
+  state.items = safeArray(sessionSeed?.items, 48).map(cloneItem)
+  state.declaredTotals = safeArray(sessionSeed?.declaredTotals, 12).map((entry) => ({ ...entry }))
+  state.pendingAttachments = safeArray(sessionSeed?.pendingAttachments, 8).map((entry) => ({ ...entry }))
+  state.pendingQuantities = safeArray(sessionSeed?.pendingQuantities, 8).map((entry) => ({ ...entry }))
+  state.clarificationCounts = { ...(sessionSeed?.clarificationCounts || {}) }
+  state.pendingClarification = sessionSeed?.pendingClarification ? { ...sessionSeed.pendingClarification } : null
+  state.nextClarificationReference = String(sessionSeed?.nextClarificationReference || "")
   state.thread_messages = conversation.map((entry) => ({ role: entry.role, content: String(entry.content || "") }))
   state.answerOnly = detectQuestionOnlyTurn(resolvedMessage)
-  state.wantsLogging = Boolean(existingSession?.wantsLogging) || MEAL_START_PATTERN.test(cleanText(resolvedMessage)) || implicitLoggingTurn
-  state.wantsNutrition = Boolean(existingSession?.wantsNutrition) || /\b(?:calories|protein|carbs|fat|macro|macros)\b/i.test(cleanText(resolvedMessage))
-  state.mealConversation = Boolean(existingSession?.mealConversation) || looksFoodish(resolvedMessage) || Boolean(existingSession?.active)
-  state.intentGraph = buildIntentGraph(conversation, resolvedMessage, existingSession)
+  state.wantsLogging = Boolean(sessionSeed?.wantsLogging) || MEAL_START_PATTERN.test(cleanText(resolvedMessage)) || implicitLoggingTurn
+  state.wantsNutrition = Boolean(sessionSeed?.wantsNutrition) || /\b(?:calories|protein|carbs|fat|macro|macros)\b/i.test(cleanText(resolvedMessage))
+  state.mealConversation = Boolean(sessionSeed?.mealConversation) || looksFoodish(resolvedMessage) || Boolean(sessionSeed?.active)
+  state.intentGraph = buildIntentGraph(conversation, resolvedMessage, sessionSeed)
   state.candidateFragments = {
     meal: safeArray(state.intentGraph.mealFragments, 16),
     workout: [],
@@ -1882,10 +2011,10 @@ export function buildMealStateFromConversation(recentMessages = [], currentMessa
   }
 
   try {
-    const turns = existingSession?.active ? [{ role: "user", content: String(resolvedMessage || "") }] : conversation.filter((entry) => entry.role === "user")
+    const turns = sessionSeed?.active ? [{ role: "user", content: String(resolvedMessage || "") }] : conversation.filter((entry) => entry.role === "user")
     for (const turn of turns) processGraphTurn(state, turn)
   } catch {
-    return markLegacySession(buildLegacyMealStateFromConversation(recentMessages, resolvedMessage, existingSession), "graph_parse_error")
+    return markLegacySession(buildLegacyMealStateFromConversation(recentMessages, resolvedMessage, sessionSeed), "graph_parse_error")
   }
 
   if (state.suppressed) {
@@ -1969,18 +2098,22 @@ export function mealStateNeedsClarification(mealState) {
 
 export function buildMealContext(recentMessages = [], currentMessage = "", existingSession = null) {
   const resolvedMessage = resolveInlineCorrection(currentMessage)
-  const normalizedRecentMessages = pruneTrailingNutritionQuestionHistory(recentMessages, resolvedMessage, existingSession)
-  const conversation = normalizeConversation(normalizedRecentMessages, resolvedMessage, existingSession)
-  if (!existingSession?.active && !existingSession?.persisted && isFutureMealIntent(resolvedMessage)) {
+  const sessionSeed = shouldStartFreshMealThreadOnActiveSession(resolvedMessage, existingSession) ? null : existingSession
+  const normalizedRecentMessages = pruneTrailingNutritionQuestionHistory(recentMessages, resolvedMessage, sessionSeed)
+  const conversation = normalizeConversation(normalizedRecentMessages, resolvedMessage, sessionSeed)
+  if (!sessionSeed?.active && !sessionSeed?.persisted && isFutureMealIntent(resolvedMessage)) {
     return null
   }
-  if (isWorkoutOnlyFollowUpTurn(resolvedMessage, existingSession)) {
-    return preserveExistingSessionForIgnoredTurn(conversation, resolvedMessage, existingSession)
+  if (isWorkoutOnlyFollowUpTurn(resolvedMessage, sessionSeed)) {
+    return preserveExistingSessionForIgnoredTurn(conversation, resolvedMessage, sessionSeed)
   }
-  if (shouldUseLegacy(conversation, resolvedMessage, existingSession)) {
-    return markLegacySession(buildLegacyMealContext(normalizedRecentMessages, resolvedMessage, existingSession), "legacy_gate", lastLegacyGateClause)
+  if (isActiveMealNutritionQuestionTurn(resolvedMessage, sessionSeed)) {
+    return preserveExistingSessionForAnswerOnlyTurn(conversation, resolvedMessage, sessionSeed)
   }
-  const state = buildMealStateFromConversation(normalizedRecentMessages, resolvedMessage, existingSession)
+  if (shouldUseLegacy(conversation, resolvedMessage, sessionSeed)) {
+    return markLegacySession(buildLegacyMealContext(normalizedRecentMessages, resolvedMessage, sessionSeed), "legacy_gate", lastLegacyGateClause)
+  }
+  const state = buildMealStateFromConversation(normalizedRecentMessages, resolvedMessage, sessionSeed)
   if (!state.mealConversation && !state.suppressed) return null
   return {
     ...state,

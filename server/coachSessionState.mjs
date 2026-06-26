@@ -1192,6 +1192,7 @@ function normalizeSplitPreparationFollowUp(message = "") {
 
 function buildMealSessionState(recentMessages = [], currentMessage = "", existingSession = null, recentMeals = []) {
   const prior = normalizeMealSession(existingSession)
+  const rawPriorReadyToLog = Boolean(existingSession?.readyToLog)
   const normalizedCurrent = cleanText(currentMessage)
   const normalizedMealMessage = normalizeSplitPreparationFollowUp(
     normalizeTrailingMealQuantityMessage(normalizeInlineMealCorrectionMessage(currentMessage))
@@ -1228,6 +1229,27 @@ function buildMealSessionState(recentMessages = [], currentMessage = "", existin
   // handling when there is no active session. When a session IS persisted, let the
   // delete/correction path handle it instead.
   if (!prior.active && !prior.persisted && FRUSTRATION_PATTERN.test(cleanText(currentMessage))) return null
+  if (
+    prior.active
+    && !prior.pendingClarification
+    && detectQuestionOnlyTurn(currentMessage)
+    && !mealLogQueryRequested(currentMessage)
+    && !mealDeleteRequested(currentMessage)
+    && !mealRejectionRequested(currentMessage)
+    && !mealCorrectionRequested(currentMessage)
+    && POST_SAVE_NUTRITION_QUERY_PATTERN.test(cleanText(currentMessage))
+  ) {
+    return {
+      ...prior,
+      active: true,
+      answerOnly: true,
+      readyToLog: rawPriorReadyToLog,
+      clarifyQuestion: "",
+      wantsNutrition: true,
+      processingMode: "idle",
+      thread_messages: buildThreadMessages(recentMessages, currentMessage),
+    }
+  }
   // After a meal is saved, macro/nutrition questions like "how much protein is in that" or
   // "am i over my fat target" should be answered in the context of the recently saved meal,
   // not routed to GENERAL with no context. Return an answerOnly session so the AI uses the

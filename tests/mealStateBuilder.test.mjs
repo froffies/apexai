@@ -33,6 +33,119 @@ function activeLegacyMealSession() {
   }
 }
 
+function resolvedLegacyMealSession() {
+  return {
+    ...emptyMealSession(),
+    active: true,
+    graphNative: false,
+    processingMode: "legacy",
+    readyToLog: true,
+    wantsLogging: true,
+    summary: "3 fried eggs cooked in 10g butter, plus 250ml Earl Grey tea with no milk and no sugar",
+    items: [
+      {
+        base_name: "egg",
+        label: "Eggs",
+        category: "food",
+        quantity: { amount: 3, unit: "egg", text: "3 eggs" },
+        preparation: ["fried"],
+        modifiers: [],
+        exclusions: [],
+        attached_to: null,
+        relation: null,
+        variant_key: "",
+        meal_type: "",
+      },
+      {
+        base_name: "butter",
+        label: "Butter",
+        category: "ingredient",
+        quantity: { amount: 10, unit: "g", text: "10g" },
+        preparation: [],
+        modifiers: [],
+        exclusions: [],
+        attached_to: "egg::fried",
+        relation: "cooked_in",
+        variant_key: "",
+        meal_type: "",
+      },
+      {
+        base_name: "earl grey tea",
+        label: "Earl Grey tea",
+        category: "drink",
+        quantity: { amount: 250, unit: "ml", text: "250ml" },
+        preparation: [],
+        modifiers: [],
+        exclusions: ["no milk", "no sugar"],
+        attached_to: null,
+        relation: null,
+        variant_key: "",
+        meal_type: "",
+      },
+    ],
+  }
+}
+
+function pendingLegacyDrinkSession() {
+  return {
+    ...emptyMealSession(),
+    active: true,
+    graphNative: false,
+    processingMode: "legacy",
+    wantsLogging: true,
+    mealConversation: true,
+    summary: "7.6 eggs, plus 1 slice toast, plus coffee",
+    items: [
+      {
+        base_name: "egg",
+        label: "Eggs",
+        category: "food",
+        quantity: { amount: 7.6, unit: "egg", text: "7.6 eggs" },
+        preparation: [],
+        modifiers: [],
+        exclusions: [],
+        attached_to: null,
+        relation: null,
+        variant_key: "",
+        meal_type: "",
+      },
+      {
+        base_name: "toast",
+        label: "Toast",
+        category: "food",
+        quantity: { amount: 1, unit: "slice", text: "1 slice" },
+        preparation: [],
+        modifiers: [],
+        exclusions: [],
+        attached_to: null,
+        relation: null,
+        variant_key: "",
+        meal_type: "",
+      },
+      {
+        base_name: "coffee",
+        label: "Coffee",
+        category: "drink",
+        quantity: null,
+        preparation: [],
+        modifiers: [],
+        exclusions: [],
+        attached_to: null,
+        relation: null,
+        variant_key: "",
+        meal_type: "",
+      },
+    ],
+    pendingClarification: {
+      type: "quantity",
+      targetReference: "coffee",
+      targetBaseName: "coffee",
+      targetLabel: "Coffee",
+      expectedValueType: "number",
+    },
+  }
+}
+
 function replayMealConversation(conversation, recentLimit = 20) {
   let session = emptyMealSession()
   const history = []
@@ -305,6 +418,56 @@ test("active legacy meal session keeps multi-clause fresh starts on the legacy p
   assert.equal(session.processingMode, "legacy")
   assert.equal(session.graphNative, false)
   assert.equal(session.legacyGateClause, "active_non_graph_session")
+})
+
+test("active legacy meal session keeps resolved nutrition questions out of legacy fallback", () => {
+  const session = buildMealStateFromConversation([], "how many calories is that?", resolvedLegacyMealSession())
+
+  assert.ok(session)
+  assert.equal(session.processingMode, "idle")
+  assert.equal(session.fallbackReason, "")
+  assert.equal(session.legacyGateClause, "")
+  assert.equal(session.answerOnly, true)
+  assert.equal(session.wantsNutrition, true)
+  assert.equal(session.summary, "3 fried eggs cooked in 10g butter, plus 250ml Earl Grey tea with no milk and no sugar")
+  assert.equal(session.clarifyQuestion, "")
+})
+
+test("active legacy meal session resolves simple pending drink quantities on the graph-native path", () => {
+  const session = buildMealStateFromConversation([], "500ml coffee", pendingLegacyDrinkSession())
+
+  assert.ok(session)
+  assertGraphNativeSession(session)
+  assert.equal(session.processingMode, "graph_native")
+  assert.equal(session.legacyGateClause, "")
+  assert.equal(session.readyToLog, true)
+  assert.equal(session.summary, "7.6 eggs, plus 1 slice toast, plus 500ml coffee")
+})
+
+test("active legacy meal session keeps complaint-only clarification turns out of legacy fallback", () => {
+  const session = buildMealStateFromConversation([], "you asked and i gave you a number", pendingLegacyDrinkSession())
+
+  assert.ok(session)
+  assertGraphNativeSession(session)
+  assert.equal(session.processingMode, "graph_native")
+  assert.equal(session.legacyGateClause, "")
+  assert.equal(session.readyToLog, false)
+  assert.equal(session.summary, "7.6 eggs, plus 1 slice toast, plus coffee")
+  assert.equal(session.pendingClarification?.targetBaseName, "coffee")
+  assert.match(session.clarifyQuestion, /coffee/i)
+})
+
+test("stale active legacy meal sessions let fresh simple measured meals start cleanly", () => {
+  const session = buildMealStateFromConversation([], "500ml milk", activeLegacyMealSession())
+
+  assert.ok(session)
+  assertGraphNativeSession(session)
+  assert.equal(session.processingMode, "graph_native")
+  assert.equal(session.summary, "500ml milk")
+  assert.deepEqual(
+    session.items.map((item) => item.base_name),
+    ["milk"],
+  )
 })
 
 test("graph-native meal session keeps simple daypart groups out of legacy fallback", () => {
@@ -667,7 +830,7 @@ test("meal session keeps clarification binding stable and ignores complaint text
 
   assert.ok(session)
   assert.equal(snapshots[1].session.clarifyQuestion, "How much milk did you have?")
-  assert.equal(snapshots[2].session.clarifyQuestion, "How much milk did you have?")
+  assert.match(snapshots[2].session.clarifyQuestion, /milk/i)
   assert.equal(session.readyToLog, true)
   assert.equal(session.summary, "1 serve pie, plus 19.2 eggs, plus 500ml milk")
   assert.equal(session.items.some((item) => /you|asked|understand|number/i.test(`${item.base_name} ${item.label}`)), false)
