@@ -101,6 +101,10 @@ const canonicalBaseName = (value = "") => {
   if (!normalized) return ""
   return normalized.includes(" ") ? normalized : singularize(normalized)
 }
+const stripSuppressionDirective = (text = "") => String(text || "")
+  .replace(/\b(?:and\s+)?(?:don't|dont|do not|stop|no)\s+(?:log|save|track|record|add)\b.*$/i, "")
+  .replace(/\s+/g, " ")
+  .trim()
 const normalizeUnit = (unit = "") => UNIT_ALIASES.get(cleanText(unit)) || cleanText(unit)
 const hasDigits = (text = "") => /\d/.test(String(text))
 const isDrink = (name = "") => DRINK_WORDS.some((word) => containsWord(name, word))
@@ -236,6 +240,12 @@ function normalizeConversation(recentMessages = [], currentMessage = "", existin
     return [...safeArray(existingSession.thread_messages, 18), { role: "user", content: String(currentMessage || "") }]
   }
   const history = pruneTrailingNutritionQuestionHistory(recentMessages, currentMessage, existingSession)
+  if (!existingSession?.persisted && isGraphNativeSimpleMixedFoodDrinkStart(currentMessage)) {
+    return [
+      ...history.filter((entry) => entry?.role === "assistant").map((entry) => ({ role: entry.role, content: String(entry.content || "") })),
+      { role: "user", content: String(currentMessage || "") },
+    ]
+  }
   if (isGraphNativeSimpleMeasuredFollowUp(history, currentMessage, existingSession)) {
     return [
       ...history.filter((entry) => entry?.role === "assistant").map((entry) => ({ role: entry.role, content: String(entry.content || "") })),
@@ -277,6 +287,43 @@ function isGraphNativeFriendlyDrinkStart(currentMessage = "") {
   if (!mentionsDrink(currentMessage)) return false
   if (/\b(?:with|without|cooked in|fried in|no sugar|no milk)\b/i.test(normalizedCurrent)) return false
   return true
+}
+
+function isGraphNativeSimpleMixedFoodDrinkStart(currentMessage = "") {
+  const analysisText = stripSuppressionDirective(currentMessage)
+  const normalizedCurrent = cleanText(analysisText)
+  if (!normalizedCurrent) return false
+  if (!MEAL_START_PATTERN.test(normalizedCurrent)) return false
+  if (detectQuestionOnlyTurn(analysisText)) return false
+  if (TIME_REFERENCE_PATTERN.test(normalizedCurrent)) return false
+  if (SAME_REFERENCE_PATTERN.test(normalizedCurrent)) return false
+  if (CORRECTION_PREFIX.test(normalizedCurrent) || INLINE_CORRECTION_PATTERN.test(normalizedCurrent)) return false
+  if (PACKAGED_UNIT_PATTERN.test(normalizedCurrent)) return false
+  if (isWorkoutish(normalizedCurrent)) return false
+  if (COMPLEX_PATTERN.test(normalizedCurrent)) return false
+  if (/\b(?:with|without|cooked in|fried in|no sugar|no milk)\b/i.test(normalizedCurrent)) return false
+
+  const clauses = splitGraphClauses(analysisText)
+  if (clauses.length < 2 || clauses.length > 3) return false
+
+  let drinkClauses = 0
+  let foodClauses = 0
+  for (const fragment of clauses) {
+    const normalizedFragment = cleanText(fragment)
+    if (!normalizedFragment) return false
+    if (detectQuestionOnlyTurn(fragment) || isWorkoutish(normalizedFragment)) return false
+    if (TIME_REFERENCE_PATTERN.test(normalizedFragment) || SAME_REFERENCE_PATTERN.test(normalizedFragment)) return false
+    if (/\b(?:with|without|cooked in|fried in|no sugar|no milk)\b/i.test(normalizedFragment)) return false
+
+    const drinkClause = mentionsDrink(fragment)
+    const simpleClause = isSimpleMeasuredMealFragment(fragment) || Boolean(canonicalBaseName(baseNameFromText(fragment)))
+    if (!drinkClause && !simpleClause) return false
+
+    if (drinkClause) drinkClauses += 1
+    else foodClauses += 1
+  }
+
+  return drinkClauses === 1 && foodClauses >= 1
 }
 
 function isGraphNativeCorrectionFollowUp(currentMessage = "", existingSession = null) {
@@ -498,9 +545,11 @@ function isGraphNativeClarificationReply(conversation = [], currentMessage = "",
 
 function isGraphNativeFreshStartOnLegacySession(currentMessage = "", existingSession = null) {
   if (!existingSession?.active || existingSession?.graphNative) return false
-  const normalizedCurrent = cleanText(currentMessage)
+  const analysisText = stripSuppressionDirective(currentMessage)
+  const normalizedCurrent = cleanText(analysisText)
   if (!normalizedCurrent) return false
   if (!MEAL_START_PATTERN.test(normalizedCurrent)) return false
+  if (isGraphNativeSimpleMixedFoodDrinkStart(currentMessage)) return true
   if (VAGUE_REFERENCE_PATTERN.test(normalizedCurrent)) return false
   if (/\b(?:that|it|this|same|rest|the)\b/i.test(normalizedCurrent)) return false
   if (CORRECTION_PREFIX.test(normalizedCurrent)) return false
@@ -508,7 +557,7 @@ function isGraphNativeFreshStartOnLegacySession(currentMessage = "", existingSes
   if (INLINE_CORRECTION_PATTERN.test(normalizedCurrent)) return false
   if (TIME_REFERENCE_PATTERN.test(normalizedCurrent)) return false
   if (PACKAGED_UNIT_PATTERN.test(normalizedCurrent)) return false
-  if (splitGraphClauses(currentMessage).length !== 1) return false
+  if (splitGraphClauses(analysisText).length !== 1) return false
   return true
 }
 
@@ -566,6 +615,7 @@ function shouldUseLegacy(conversation, currentMessage, existingSession) {
   const graphNativeFriendlyDaypartTurn = isGraphNativeFriendlyDaypartTurn(conversation, currentMessage, existingSession)
   const graphNativeFriendlyPersistedFollowUp = isGraphNativeFriendlyPersistedFollowUp(currentMessage, existingSession)
   const graphNativeSimpleMeasuredFollowUp = isGraphNativeSimpleMeasuredFollowUp(conversation, currentMessage, existingSession)
+  const graphNativeSimpleMixedFoodDrinkStart = isGraphNativeSimpleMixedFoodDrinkStart(currentMessage)
   const graphNativeClarificationReply = isGraphNativeClarificationReply(conversation, currentMessage, existingSession)
   const graphNativeFreshStartOnLegacySession = isGraphNativeFreshStartOnLegacySession(currentMessage, existingSession)
   const activeGraphGroupedFollowUp = isActiveGraphGroupedFollowUp(currentMessage, existingSession)
@@ -588,21 +638,21 @@ function shouldUseLegacy(conversation, currentMessage, existingSession) {
     ["pending_quantities", existingSession?.pendingQuantities?.length],
     ["correction_requested", existingSession?.correctionRequested],
     ["delete_requested", existingSession?.deleteRequested],
-    ["non_graph_assistant_turn_present", !activeGraphSession && conversation.some((entry) => entry.role === "assistant") && !graphNativeFriendlyPersistedFollowUp && !graphNativeFriendlyDrinkStart && !graphNativeSimpleMeasuredFollowUp && !graphNativeClarificationReply],
-    ["non_graph_multi_user_turn", !activeGraphSession && conversation.filter((entry) => entry.role === "user").length > 1 && !graphNativeFriendlyPersistedFollowUp && !graphNativeFriendlyDrinkStart && !graphNativeClarificationReply],
+    ["non_graph_assistant_turn_present", !activeGraphSession && conversation.some((entry) => entry.role === "assistant") && !graphNativeFriendlyPersistedFollowUp && !graphNativeFriendlyDrinkStart && !graphNativeSimpleMeasuredFollowUp && !graphNativeSimpleMixedFoodDrinkStart && !graphNativeClarificationReply],
+    ["non_graph_multi_user_turn", !activeGraphSession && conversation.filter((entry) => entry.role === "user").length > 1 && !graphNativeFriendlyPersistedFollowUp && !graphNativeFriendlyDrinkStart && !graphNativeSimpleMixedFoodDrinkStart && !graphNativeClarificationReply],
     ["non_graph_not_meal_start", !activeGraphSession && !MEAL_START_PATTERN.test(cleanText(currentMessage)) && !implicitGraphNativeTurn],
     ["time_reference", TIME_REFERENCE_PATTERN.test(cleanText(currentMessage))],
     ["inline_correction", INLINE_CORRECTION_PATTERN.test(cleanText(currentMessage))],
     ["packaged_unit", PACKAGED_UNIT_PATTERN.test(cleanText(currentMessage))],
-    ["non_graph_multi_quantity_signal", !activeGraphSession && quantitySignals > 1 && !graphNativeFriendlyDaypartTurn && !graphNativeAdditiveFreshTurn],
-    ["non_graph_multi_measured_signal", !activeGraphSession && measuredAmountSignals > 1 && !graphNativeFriendlyDaypartTurn && !graphNativeAdditiveFreshTurn],
-    ["non_graph_drink_mention", !activeGraphSession && mentionsDrink(currentMessage) && !simpleFoodDrinkStart && !graphNativeFriendlyDrinkStart && !graphNativeFriendlyFreshTurn && !implicitGraphNativeTurn],
+    ["non_graph_multi_quantity_signal", !activeGraphSession && quantitySignals > 1 && !graphNativeFriendlyDaypartTurn && !graphNativeAdditiveFreshTurn && !graphNativeSimpleMixedFoodDrinkStart],
+    ["non_graph_multi_measured_signal", !activeGraphSession && measuredAmountSignals > 1 && !graphNativeFriendlyDaypartTurn && !graphNativeAdditiveFreshTurn && !graphNativeSimpleMixedFoodDrinkStart],
+    ["non_graph_drink_mention", !activeGraphSession && mentionsDrink(currentMessage) && !simpleFoodDrinkStart && !graphNativeFriendlyDrinkStart && !graphNativeFriendlyFreshTurn && !graphNativeSimpleMixedFoodDrinkStart && !implicitGraphNativeTurn],
     ["non_graph_modifier_phrase", !activeGraphSession && /\b(?:with|without|cooked in|fried in|no sugar|no milk)\b/i.test(cleanText(currentMessage)) && !graphNativeFriendlyFreshTurn && !graphNativeFriendlyPersistedFollowUp],
     ["correction_prefix", !graphNativeCorrectionFollowUp && CORRECTION_PREFIX.test(cleanText(currentMessage))],
     ["grouped_complex_pattern", GROUPED_COMPLEX_PATTERN.test(joined)],
     ["non_graph_complex_pattern", !activeGraphSession && COMPLEX_PATTERN.test(joined) && !graphNativeFriendlyDaypartTurn],
     ["non_graph_multi_assistant_meal_turn", !activeGraphSession && assistantMealTurns > 1],
-    ["non_graph_multi_clause", !activeGraphSession && currentClauses.length > 1 && !simpleFoodDrinkStart && !graphNativeFriendlyFreshTurn && !graphNativeFriendlyDaypartTurn && !graphNativeAdditiveFreshTurn],
+    ["non_graph_multi_clause", !activeGraphSession && currentClauses.length > 1 && !simpleFoodDrinkStart && !graphNativeFriendlyFreshTurn && !graphNativeFriendlyDaypartTurn && !graphNativeAdditiveFreshTurn && !graphNativeSimpleMixedFoodDrinkStart],
     ["non_graph_many_clauses", !activeGraphSession && currentClauses.length > 3],
     ["graph_session_that_were", activeGraphSession && /\bthat were\b|\bwere just\b/.test(normalizedCurrent)],
     ["graph_session_n_of_the_were", activeGraphSession && /\b\d+\s+of the\b.*\bwere\b/i.test(normalizedCurrent)],
@@ -672,6 +722,7 @@ function shouldStartFreshMealThreadOnActiveSession(currentMessage = "", existing
   if (!normalizedCurrent) return false
   if (detectQuestionOnlyTurn(currentMessage) || isWorkoutish(normalizedCurrent) || isFutureMealIntent(currentMessage)) return false
   if (SUPPRESS_PATTERN.test(normalizedCurrent)) return false
+  if (isGraphNativeSimpleMixedFoodDrinkStart(currentMessage)) return true
   if (CORRECTION_PREFIX.test(normalizedCurrent) || INLINE_CORRECTION_PATTERN.test(normalizedCurrent)) return false
   if (TIME_REFERENCE_PATTERN.test(normalizedCurrent)) return false
   if (/\b(?:delete|remove|undo|erase)\b(?:\s+(?:it|that|this|meal))?/i.test(normalizedCurrent)) return false

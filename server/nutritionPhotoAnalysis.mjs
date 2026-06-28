@@ -287,6 +287,30 @@ function parseNamedPhotoDishFromSummary(summary = "", assumptions = [], confiden
       },
     },
     {
+      pattern: /\b(?:avocado toast|avo toast|smashed avo(?:cado)?(?: on)? toast)\b/i,
+      resolveName() {
+        return "avocado toast"
+      },
+    },
+    {
+      pattern: /\bsteak (?:sandwich|sanga)\b/i,
+      resolveName() {
+        return "steak sandwich"
+      },
+    },
+    {
+      pattern: /\b(?:chicken )?caesar wrap\b/i,
+      resolveName() {
+        return "chicken caesar wrap"
+      },
+    },
+    {
+      pattern: /\bfalafel wrap\b/i,
+      resolveName() {
+        return "falafel wrap"
+      },
+    },
+    {
       pattern: /\bhalloumi\b.*\bsalad\b|\bsalad\b.*\bhalloumi\b/i,
       resolveName() {
         return "halloumi salad"
@@ -313,6 +337,18 @@ function parseNamedPhotoDishFromSummary(summary = "", assumptions = [], confiden
         if (normalized.includes("chicken")) return "chicken burrito bowl"
         if (normalized.includes("beef")) return "beef burrito bowl"
         return "burrito bowl"
+      },
+    },
+    {
+      pattern: /\b(?:rice paper rolls?|fresh spring rolls?|summer rolls?)\b/i,
+      resolveName() {
+        return "rice paper rolls"
+      },
+    },
+    {
+      pattern: /\bpesto pasta\b|\bpasta pesto\b/i,
+      resolveName() {
+        return "pesto pasta"
       },
     },
     {

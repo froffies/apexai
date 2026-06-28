@@ -443,11 +443,13 @@ describe("non_graph_drink_mention exemptions", () => {
     assert.notEqual(session.legacyGateClause, "")
   })
 
-  test("known gap: mixed food and measured drink start still stays legacy", () => {
+  test("mixed food and measured drink starts now stay graph-native", () => {
     const session = buildMealContext([], "i had eggs and 500ml water", emptyMealSession())
 
     assert.ok(session)
-    assert.equal(session.processingMode, "legacy")
+    assertGraphNativeSession(session)
+    assert.equal(session.processingMode, "graph_native")
+    assert.equal(session.legacyGateClause, "")
   })
 })
 
@@ -549,6 +551,60 @@ test("stale active legacy meal sessions let fresh simple measured meals start cl
     session.items.map((item) => item.base_name),
     ["milk"],
   )
+})
+
+test("graph-native meal session keeps simple food drink starts with three clauses out of legacy fallback", () => {
+  const session = buildMealContext([], "i had egg and toast and tea today", emptyMealSession())
+
+  assert.ok(session)
+  assertGraphNativeSession(session)
+  assert.equal(session.processingMode, "graph_native")
+  assert.equal(session.legacyGateClause, "")
+  assert.deepEqual(
+    session.items.filter((item) => !item.attached_to).map((item) => item.base_name).sort(),
+    ["egg", "tea", "toast"],
+  )
+  assert.equal(session.clarifyQuestion, "How many eggs did you have?")
+})
+
+test("assistant history does not force a fresh simple food drink turn back to legacy", () => {
+  const session = buildMealContext([
+    user("i had 2 eggs"),
+    assistant("Logged 2 eggs."),
+  ], "i had eggs and 500ml water", emptyMealSession())
+
+  assert.ok(session)
+  assertGraphNativeSession(session)
+  assert.equal(session.processingMode, "graph_native")
+  assert.equal(session.legacyGateClause, "")
+  assert.deepEqual(
+    session.items.filter((item) => !item.attached_to).map((item) => item.base_name).sort(),
+    ["egg", "water"],
+  )
+  assert.equal(session.summary, "eggs, plus 500ml water")
+})
+
+test("stale active legacy meal sessions let fresh simple mixed food drink starts reroute graph-native", () => {
+  const session = buildMealStateFromConversation([], "i had egg and pie and milk today", activeLegacyMealSession())
+
+  assert.ok(session)
+  assertGraphNativeSession(session)
+  assert.equal(session.processingMode, "graph_native")
+  assert.equal(session.legacyGateClause, "")
+  assert.deepEqual(
+    session.items.filter((item) => !item.attached_to).map((item) => item.base_name).sort(),
+    ["egg", "milk", "pie"],
+  )
+})
+
+test("suppressed simple food drink turns stay out of legacy fallback", () => {
+  const session = buildMealContext([], "i had chicken and latte today, don't log that", emptyMealSession())
+
+  assert.ok(session)
+  assert.equal(session.suppressed, true)
+  assert.equal(session.processingMode, "idle")
+  assert.equal(session.legacyGateClause, "")
+  assert.equal(session.fallbackReason, "")
 })
 
 test("graph-native meal session keeps simple daypart groups out of legacy fallback", () => {
@@ -1451,7 +1507,7 @@ test("meal session keeps separate counted foods in the same turn instead of inhe
 
   assert.ok(session)
   assert.equal(session.readyToLog, true)
-  assert.equal(session.summary, "3 beers, plus 1 burger")
+  assert.match(session.summary, /^3 beers, plus 1(?: serve)? burger$/i)
   assert.equal(session.items.filter((item) => !item.attached_to).length, 2)
   assert.doesNotMatch(session.summary, /\bburger beer\b|\bbeer burger\b|\b1l\b/i)
 })

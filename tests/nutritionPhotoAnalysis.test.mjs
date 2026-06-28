@@ -430,6 +430,41 @@ test("buildFoodPhotoEstimate can auto-fill broader plated dish profiles like pok
   assert.match(String(messyPlatterEstimate.clarification_question || ""), /sauces|shared-plate portions|review/i)
 })
 
+test("buildFoodPhotoEstimate can auto-fill newer cafe dish profiles like avo toast and rice paper rolls", async () => {
+  const avoToastEstimate = await buildFoodPhotoEstimate({
+    summary: "A plate of smashed avo on toast.",
+    items: [],
+    portion: "1 plate",
+    overall_confidence: "high",
+  }, {
+    mealType: "breakfast",
+    lookupFoods: async (term) => searchPhotoReferenceFoods(term),
+  })
+
+  assert.ok(avoToastEstimate.action)
+  assert.equal(avoToastEstimate.can_autofill, true)
+  assert.equal(avoToastEstimate.needs_review, false)
+  assert.equal(avoToastEstimate.breakdown[0]?.source_type, "photo_dish_profile")
+  assert.match(String(avoToastEstimate.breakdown[0]?.matched_food_name || ""), /avocado toast/i)
+  assert.match(String(avoToastEstimate.action?.food_name || ""), /toast/i)
+
+  const ricePaperEstimate = await buildFoodPhotoEstimate({
+    summary: "Fresh spring rolls with herbs.",
+    items: [],
+    portion: "1 plate",
+    overall_confidence: "high",
+  }, {
+    mealType: "lunch",
+    lookupFoods: async (term) => searchPhotoReferenceFoods(term),
+  })
+
+  assert.ok(ricePaperEstimate.action)
+  assert.equal(ricePaperEstimate.can_autofill, true)
+  assert.equal(ricePaperEstimate.needs_review, false)
+  assert.equal(ricePaperEstimate.breakdown[0]?.source_type, "photo_dish_profile")
+  assert.match(String(ricePaperEstimate.action?.food_name || ""), /rice paper rolls/i)
+})
+
 test("buildFoodPhotoEstimate keeps dish confidence when the model omits the item name", async () => {
   const samosaEstimate = await buildFoodPhotoEstimate({
     summary: "Five fried samosas.",

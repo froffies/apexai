@@ -48,6 +48,56 @@ test("findBestFoodMatch widens deterministic matching for common food questions"
   assert.match(String(sandwichMatches[0]?.name || ""), /chicken sandwich/i)
 })
 
+test("findBestFoodMatch covers common AU cafe shorthand and typo-heavy dishes with stronger deterministic matches", () => {
+  const avoToast = findBestFoodMatch("avo toast")
+  assert.ok(avoToast)
+  assert.match(String(avoToast.name || ""), /avocado toast/i)
+  assert.equal(avoToast.calories, 420)
+
+  const steakSanga = findBestFoodMatch("steak sanga")
+  assert.ok(steakSanga)
+  assert.match(String(steakSanga.name || ""), /steak sandwich/i)
+  assert.equal(steakSanga.calories, 620)
+
+  const typoCaesar = findBestFoodMatch("caeser salad")
+  assert.ok(typoCaesar)
+  assert.match(String(typoCaesar.name || ""), /caesar salad/i)
+
+  const caesarWrap = findBestFoodMatch("chicken caesar wrap")
+  assert.ok(caesarWrap)
+  assert.match(String(caesarWrap.name || ""), /caesar wrap/i)
+  assert.equal(caesarWrap.calories, 540)
+
+  const ricePaperRolls = findBestFoodMatch("fresh spring rolls")
+  assert.ok(ricePaperRolls)
+  assert.match(String(ricePaperRolls.name || ""), /rice paper rolls/i)
+  assert.equal(ricePaperRolls.calories, 310)
+
+  const falafelWrap = findBestFoodMatch("falafel wrap")
+  assert.ok(falafelWrap)
+  assert.match(String(falafelWrap.name || ""), /falafel wrap/i)
+  assert.equal(falafelWrap.calories, 560)
+
+  const pestoPasta = findBestFoodMatch("pesto pasta")
+  assert.ok(pestoPasta)
+  assert.match(String(pestoPasta.name || ""), /pesto pasta/i)
+  assert.equal(pestoPasta.calories, 610)
+})
+
+test("searchPhotoReferenceFoods strips photo noise and returns curated dish profiles for common cafe foods", () => {
+  const avoToast = searchPhotoReferenceFoods("photo of avo toast")
+  assert.equal(avoToast.some((food) => food.id === "photo_avocado_toast"), true)
+
+  const steakSanga = searchPhotoReferenceFoods("picture of steak sanga")
+  assert.equal(steakSanga.some((food) => food.id === "photo_steak_sandwich"), true)
+
+  const caesarWrap = searchPhotoReferenceFoods("plate of chicken caesar wrap")
+  assert.equal(caesarWrap.some((food) => food.id === "photo_chicken_caesar_wrap"), true)
+
+  const ricePaperRolls = searchPhotoReferenceFoods("fresh spring rolls")
+  assert.equal(ricePaperRolls.some((food) => food.id === "photo_rice_paper_rolls"), true)
+})
+
 test("findBestFoodMatch does not confuse salad or oats with similarly named products", () => {
   const salad = findBestFoodMatch("salad")
   const oats = findBestFoodMatch("oat")
