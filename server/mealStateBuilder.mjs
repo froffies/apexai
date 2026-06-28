@@ -38,6 +38,7 @@ const GROUPED_COMPLEX_PATTERN = /\b(?:total|rest|remainder|each|same as yesterda
 const TIME_REFERENCE_PATTERN = /\b(?:yesterday|last night|last week|earlier today|this morning|tonight)\b/i
 const META_COMPLAINT_PATTERN = /\b(?:you asked|i gave you|why can(?:'|’)t you understand|why cant you understand|i told you|already said|what do you mean|i just answered|you just asked)\b/i
 const VAGUE_REFERENCE_PATTERN = /^(?:the\s+)?(?:eggs?|tea|coffee|toast|beans?|chicken|rice|butter|oil|salmon|milk|drink|pizza|burger|chips)\b/i
+const SAME_REFERENCE_PATTERN = /\b(?:the same|same as before|as before)\b/i
 const SHARED_EACH_PATTERN = /^(?:about|around|roughly|approx(?:imately)?|bout)?\s*(?<amount>\d+(?:\.\d+)?|half|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty)\s*(?<unit>g|kg|lb|lbs|pound|pounds|ml|l|litre|litres|liter|liters|cup|cups|bowl|bowls|plate|plates|mug|mugs|serve|serves|serving|servings|slice|slices|tbsp|tablespoon|tablespoons|tsp|teaspoon|teaspoons|egg|eggs)\s+each$/i
 const INLINE_CORRECTION_PATTERN = /\b(?:no wait|i meant|make that|change that|update that|sorry)\b/i
 const TRAILING_LOG_DIRECTIVE_PATTERN = /\b(?:(?:can|could)\s+you|please|just)?\s*(?:log|save|track|add)\s+(?:all\s+that|that|it)\b.*$/i
@@ -268,7 +269,7 @@ function isGraphNativeFriendlyDrinkStart(currentMessage = "") {
   if (!MEAL_START_PATTERN.test(normalizedCurrent)) return false
   if (detectQuestionOnlyTurn(normalizedCurrent)) return false
   if (TIME_REFERENCE_PATTERN.test(normalizedCurrent)) return false
-  if (/\b\d+(?:\.\d+)?\s*(?:ml|l|g|kg|oz|lb)\b/i.test(normalizedCurrent)) return false
+  if (SAME_REFERENCE_PATTERN.test(normalizedCurrent)) return false
   if (INLINE_CORRECTION_PATTERN.test(normalizedCurrent) || PACKAGED_UNIT_PATTERN.test(normalizedCurrent)) return false
   if (isWorkoutish(normalizedCurrent)) return false
   if (COMPLEX_PATTERN.test(normalizedCurrent)) return false
@@ -457,6 +458,7 @@ function isGraphNativeSimpleMeasuredFollowUp(conversation = [], currentMessage =
   if (detectQuestionOnlyTurn(normalizedCurrent)) return false
   if (isWorkoutish(normalizedCurrent)) return false
   if (TIME_REFERENCE_PATTERN.test(normalizedCurrent)) return false
+  if (SAME_REFERENCE_PATTERN.test(normalizedCurrent)) return false
   if (CORRECTION_PREFIX.test(normalizedCurrent) || INLINE_CORRECTION_PATTERN.test(normalizedCurrent)) return false
   if (PACKAGED_UNIT_PATTERN.test(normalizedCurrent)) return false
   if (COMPLEX_PATTERN.test(normalizedCurrent)) return false
@@ -586,8 +588,8 @@ function shouldUseLegacy(conversation, currentMessage, existingSession) {
     ["pending_quantities", existingSession?.pendingQuantities?.length],
     ["correction_requested", existingSession?.correctionRequested],
     ["delete_requested", existingSession?.deleteRequested],
-    ["non_graph_assistant_turn_present", !activeGraphSession && conversation.some((entry) => entry.role === "assistant") && !graphNativeFriendlyPersistedFollowUp && !graphNativeSimpleMeasuredFollowUp && !graphNativeClarificationReply],
-    ["non_graph_multi_user_turn", !activeGraphSession && conversation.filter((entry) => entry.role === "user").length > 1 && !graphNativeFriendlyPersistedFollowUp && !graphNativeClarificationReply],
+    ["non_graph_assistant_turn_present", !activeGraphSession && conversation.some((entry) => entry.role === "assistant") && !graphNativeFriendlyPersistedFollowUp && !graphNativeFriendlyDrinkStart && !graphNativeSimpleMeasuredFollowUp && !graphNativeClarificationReply],
+    ["non_graph_multi_user_turn", !activeGraphSession && conversation.filter((entry) => entry.role === "user").length > 1 && !graphNativeFriendlyPersistedFollowUp && !graphNativeFriendlyDrinkStart && !graphNativeClarificationReply],
     ["non_graph_not_meal_start", !activeGraphSession && !MEAL_START_PATTERN.test(cleanText(currentMessage)) && !implicitGraphNativeTurn],
     ["time_reference", TIME_REFERENCE_PATTERN.test(cleanText(currentMessage))],
     ["inline_correction", INLINE_CORRECTION_PATTERN.test(cleanText(currentMessage))],

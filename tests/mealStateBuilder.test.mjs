@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import test from "node:test"
+import test, { describe } from "node:test"
 import { buildMealContext, buildMealStateFromConversation, emptyMealSession } from "../server/mealStateBuilder.mjs"
 
 function user(content) {
@@ -368,6 +368,87 @@ test("graph-native meal session keeps simple measured chicken follow-ups out of 
   assert.equal(session.fallbackReason, "")
   assert.equal(session.readyToLog, true)
   assert.equal(session.summary, "300g chicken breast")
+})
+
+describe("non_graph_drink_mention exemptions", () => {
+  test("measured drink fresh turns stay graph-native", () => {
+    const cases = [
+      ["i had 500ml water", "500ml water"],
+      ["i had 250ml milk", "250ml milk"],
+      ["i had 600ml coffee", "600ml coffee"],
+    ]
+
+    for (const [prompt, summary] of cases) {
+      const session = buildMealContext([], prompt, emptyMealSession())
+      assert.ok(session)
+      assertGraphNativeSession(session)
+      assert.equal(session.processingMode, "graph_native")
+      assert.equal(session.legacyGateClause, "")
+      assert.equal(session.summary, summary)
+    }
+  })
+
+  test("measured drink turns with prior assistant history stay graph-native", () => {
+    const history = [
+      user("i had eggs"),
+      assistant("Got it, logged 2 eggs."),
+    ]
+    const cases = [
+      ["i had 500ml water", "500ml water"],
+      ["i had 300ml juice", "300ml juice"],
+    ]
+
+    for (const [prompt, summary] of cases) {
+      const session = buildMealContext(history, prompt, emptyMealSession())
+      assert.ok(session)
+      assertGraphNativeSession(session)
+      assert.equal(session.processingMode, "graph_native")
+      assert.equal(session.legacyGateClause, "")
+      assert.equal(session.summary, summary)
+    }
+  })
+
+  test("unmeasured drink turns with prior assistant history stay graph-native", () => {
+    const history = [
+      user("i had eggs"),
+      assistant("Got it, logged 2 eggs."),
+    ]
+    const cases = [
+      "i had a coffee",
+      "i had a latte",
+    ]
+
+    for (const prompt of cases) {
+      const session = buildMealContext(history, prompt, emptyMealSession())
+      assert.ok(session)
+      assertGraphNativeSession(session)
+      assert.equal(session.processingMode, "graph_native")
+      assert.equal(session.legacyGateClause, "")
+    }
+  })
+
+  test("time-reference drink turns stay legacy", () => {
+    const session = buildMealContext([], "i had 500ml water and also yesterday i had coffee", emptyMealSession())
+
+    assert.ok(session)
+    assert.equal(session.processingMode, "legacy")
+    assert.equal(session.legacyGateClause, "time_reference")
+  })
+
+  test("vague same-as-before measured drink turns stay legacy", () => {
+    const session = buildMealContext([], "i had 500ml of the same water as before", emptyMealSession())
+
+    assert.ok(session)
+    assert.equal(session.processingMode, "legacy")
+    assert.notEqual(session.legacyGateClause, "")
+  })
+
+  test("known gap: mixed food and measured drink start still stays legacy", () => {
+    const session = buildMealContext([], "i had eggs and 500ml water", emptyMealSession())
+
+    assert.ok(session)
+    assert.equal(session.processingMode, "legacy")
+  })
 })
 
 test("complex daypart meals still stay legacy after assistant history", () => {
