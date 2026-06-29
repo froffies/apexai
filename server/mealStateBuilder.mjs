@@ -353,7 +353,7 @@ function isGraphNativeSimpleFreshMealTurn(currentMessage = "") {
   if (inlineCookingMediumPattern.test(normalizedCurrent)) return false
 
   const clauses = splitGraphClauses(analysisText)
-  if (!clauses.length || clauses.length > 2) return false
+  if (!clauses.length || clauses.length > 3) return false
 
   let simpleClauseCount = 0
   for (const fragment of clauses) {
@@ -2242,3 +2242,4 @@ export function buildMealContext(recentMessages = [], currentMessage = "", exist
     invalidStructure: Boolean(state.invalidStructure),
   }
 }
+
