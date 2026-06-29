@@ -397,6 +397,12 @@ export function buildCoachAuditFlags(entry = {}) {
     .slice(0, -1)
     .reverse()
     .find((message) => message.role === "assistant")
+  const clarificationAsked = Boolean(
+    entry.clarification_asked
+    || mealStateAfter?.clarifyQuestion
+    || workoutStateAfter?.clarifyQuestion
+    || mealStateAfter?.pendingClarification
+  )
   const clarificationTargetMoved = (
     isNumericOnlyReply(entry.user_message)
     && mealStateBefore?.pendingClarification?.type === "quantity"
@@ -407,7 +413,7 @@ export function buildCoachAuditFlags(entry = {}) {
   const priorTargetSatisfied = clarificationTargetSatisfied(mealStateAfter, mealStateBefore?.pendingClarification)
 
   if (
-    entry.clarification_asked
+    clarificationAsked
     && previousAssistantMessage
     && cleanText(previousAssistantMessage.content) === cleanText(assistantReply)
     && !clarificationStateMadeProgress(mealStateBefore, mealStateAfter)
@@ -524,7 +530,7 @@ export function buildCoachAuditFlags(entry = {}) {
     addFlag(flags, "corrupted_state_persisted", "A meal was persisted even though the state or summary looked structurally corrupted.", "error")
   }
 
-  if ((entry.intent === "meal_logging" || entry.intent === "workout_logging") && !entry.clarification_asked && persistedActions.length === 0 && !replyClaimsPersistence(assistantReply)) {
+  if ((entry.intent === "meal_logging" || entry.intent === "workout_logging") && !clarificationAsked && persistedActions.length === 0 && !replyClaimsPersistence(assistantReply)) {
     const mealSuppressed = Boolean(mealStateAfter?.suppressed)
     const workoutSuppressed = Boolean(workoutStateAfter?.suppressed)
     if (!mealSuppressed && !workoutSuppressed) {

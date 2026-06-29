@@ -98,6 +98,43 @@ test("buildCoachAuditFlags does not flag suppressed logging turns as missing act
   assert.equal(flags.some((flag) => flag.code === "no_action_when_expected"), false)
 })
 
+test("buildCoachAuditFlags does not flag no_action_when_expected when workout state progressed into a follow-up clarification", () => {
+  const flags = buildCoachAuditFlags({
+    user_message: "11 reps",
+    assistant_reply: "Nice work on the back squats! How much weight did you use for those 3 sets of 11 reps?",
+    persisted_actions: [],
+    route_type: "ai-assisted",
+    persistence_status: "not_requested",
+    intent: "workout_logging",
+    clarification_asked: false,
+    state_before: {
+      workout_session: {
+        active: true,
+        exercise_name: "Back Squat",
+        sets: 3,
+        reps: 0,
+        clarifyQuestion: "How many reps did you do for Back Squat?",
+      },
+    },
+    state_after: {
+      workout_session: {
+        active: true,
+        exercise_name: "Back Squat",
+        sets: 3,
+        reps: 11,
+        clarifyQuestion: "What weight did you use for Back Squat?",
+      },
+    },
+    conversation_window: [
+      { role: "assistant", content: "How many reps did you do for those 3 sets of back squat?" },
+      { role: "user", content: "11 reps" },
+      { role: "assistant", content: "Nice work on the back squats! How much weight did you use for those 3 sets of 11 reps?" },
+    ],
+  })
+
+  assert.equal(flags.some((flag) => flag.code === "no_action_when_expected"), false)
+})
+
 
 test("buildCoachAuditFlags does not flag pending-client persistence turns as fake saves", () => {
   const flags = buildCoachAuditFlags({
