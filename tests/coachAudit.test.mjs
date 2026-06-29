@@ -135,6 +135,28 @@ test("buildCoachAuditFlags does not flag no_action_when_expected when workout st
   assert.equal(flags.some((flag) => flag.code === "no_action_when_expected"), false)
 })
 
+test("buildCoachAuditFlags does not flag no_action_when_expected when duplicate prevention marked the meal already logged", () => {
+  const flags = buildCoachAuditFlags({
+    user_message: "i had 4 pie",
+    assistant_reply: "It looks like you already logged 4 pies today. If you'd like to make any changes, just let me know!",
+    persisted_actions: [],
+    route_type: "ai-assisted",
+    persistence_status: "already_logged",
+    intent: "meal_logging",
+    clarification_asked: false,
+    state_after: {
+      meal_session: {
+        wantsLogging: true,
+        summary: "4 pies",
+        alreadyLogged: true,
+        persisted: true,
+      },
+    },
+  })
+
+  assert.equal(flags.some((flag) => flag.code === "no_action_when_expected"), false)
+})
+
 
 test("buildCoachAuditFlags does not flag pending-client persistence turns as fake saves", () => {
   const flags = buildCoachAuditFlags({

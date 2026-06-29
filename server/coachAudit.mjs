@@ -533,7 +533,12 @@ export function buildCoachAuditFlags(entry = {}) {
   if ((entry.intent === "meal_logging" || entry.intent === "workout_logging") && !clarificationAsked && persistedActions.length === 0 && !replyClaimsPersistence(assistantReply)) {
     const mealSuppressed = Boolean(mealStateAfter?.suppressed)
     const workoutSuppressed = Boolean(workoutStateAfter?.suppressed)
-    if (!mealSuppressed && !workoutSuppressed) {
+    const alreadyLogged = Boolean(
+      mealStateAfter?.alreadyLogged
+      || workoutStateAfter?.alreadyLogged
+      || String(entry.persistence_status || "") === "already_logged"
+    )
+    if (!mealSuppressed && !workoutSuppressed && !alreadyLogged) {
       addFlag(flags, "no_action_when_expected", "A likely logging turn did not clarify or persist anything.", "warn")
     }
   }
