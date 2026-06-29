@@ -370,6 +370,29 @@ test("graph-native meal session keeps simple measured chicken follow-ups out of 
   assert.equal(session.summary, "300g chicken breast")
 })
 
+test("graph-native meal session keeps simple fresh food follow-ups out of legacy after assistant history", () => {
+  const history = [
+    user("i had 2 eggs"),
+    assistant("Logged 2 eggs."),
+  ]
+  const cases = [
+    ["i had pasta", "pasta"],
+    ["i had chicken breast", "chicken breast"],
+    ["had yoghurt", "yoghurt"],
+  ]
+
+  for (const [prompt, summary] of cases) {
+    const session = buildMealContext(history, prompt, emptyMealSession())
+    assert.ok(session)
+    assertGraphNativeSession(session)
+    assert.equal(session.processingMode, "graph_native")
+    assert.equal(session.fallbackReason, "")
+    assert.equal(session.legacyGateClause, "")
+    assert.equal(session.readyToLog, false)
+    assert.equal(session.summary, summary)
+  }
+})
+
 describe("non_graph_drink_mention exemptions", () => {
   test("measured drink fresh turns stay graph-native", () => {
     const cases = [
@@ -451,6 +474,39 @@ describe("non_graph_drink_mention exemptions", () => {
     assert.equal(session.processingMode, "graph_native")
     assert.equal(session.legacyGateClause, "")
   })
+})
+
+test("simple multi-clause meal starts stay graph-native", () => {
+  const cases = [
+    ["i had 2 eggs and 200g rice", "2 eggs, plus 200g rice"],
+    ["i had 2 eggs and toast", "2 eggs, plus 1 serve toast"],
+  ]
+
+  for (const [prompt, summary] of cases) {
+    const session = buildMealContext([], prompt, emptyMealSession())
+    assert.ok(session)
+    assertGraphNativeSession(session)
+    assert.equal(session.processingMode, "graph_native")
+    assert.equal(session.fallbackReason, "")
+    assert.equal(session.legacyGateClause, "")
+    assert.equal(session.readyToLog, true)
+    assert.equal(session.summary, summary)
+  }
+})
+
+test("simple multi-clause meal follow-ups stay graph-native after assistant history", () => {
+  const session = buildMealContext([
+    user("i had 2 eggs"),
+    assistant("Logged 2 eggs."),
+  ], "i had 2 eggs and 200g rice", emptyMealSession())
+
+  assert.ok(session)
+  assertGraphNativeSession(session)
+  assert.equal(session.processingMode, "graph_native")
+  assert.equal(session.fallbackReason, "")
+  assert.equal(session.legacyGateClause, "")
+  assert.equal(session.readyToLog, true)
+  assert.equal(session.summary, "2 eggs, plus 200g rice")
 })
 
 test("complex daypart meals still stay legacy after assistant history", () => {
