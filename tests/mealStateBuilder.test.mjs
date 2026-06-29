@@ -684,6 +684,67 @@ test("suppressed sessions keep a later explicit meal suppressed until logging is
   assert.equal(session.items.length, 0)
 })
 
+describe("normalizeConversation mid-clarification protection", () => {
+  test("history-only clarification rebuilds keep prior user context for measured and additive replies", () => {
+    const measuredTurn = buildMealStateFromConversation([
+      user("i had salad"),
+      assistant("How much salad did you have?"),
+    ], "1 bowl", null)
+
+    assert.ok(measuredTurn)
+    assert.equal(measuredTurn.processingMode, "graph_native")
+    assert.deepEqual(
+      measuredTurn.thread_messages.filter((entry) => entry.role === "user").map((entry) => entry.content),
+      ["i had salad", "1 bowl"],
+    )
+    assert.equal(measuredTurn.pendingClarification?.targetReference, "salad")
+
+    const additiveTurn = buildMealStateFromConversation([
+      user("i had salad"),
+      assistant("How much salad did you have?"),
+      user("1 bowl"),
+      assistant("Anything with it?"),
+    ], "with cheese", null)
+
+    assert.ok(additiveTurn)
+    assert.equal(additiveTurn.readyToLog, true)
+    assert.equal(additiveTurn.summary, "1 bowl salad with cheese")
+    assert.ok(
+      (Array.isArray(additiveTurn.thread_messages) ? additiveTurn.thread_messages : additiveTurn.threadTurns)
+        .filter((entry) => entry.role === "user")
+        .map((entry) => entry.content)
+        .includes("1 bowl"),
+    )
+    assert.ok(
+      additiveTurn.items.some((item) => (
+        (item.base_name === "cheese" && item.attached_to === "salad")
+        || (item.baseName === "cheese" && item.attachedTo === "salad")
+      )),
+    )
+  })
+
+  test("suppressed meal rebuilds stay suppressed after a later explicit meal disclosure", () => {
+    const suppressedSession = {
+      ...emptyMealSession(),
+      suppressed: true,
+      suppressionReply: "Okay, I won't save that.",
+      processingMode: "idle",
+      thread_messages: [user("don't log that")],
+    }
+    const session = buildMealStateFromConversation([
+      user("don't log that"),
+      assistant("Alright, I won't log that. If you need to track anything else, just let me know!"),
+    ], "i had chips", suppressedSession)
+
+    assert.ok(session)
+    assert.equal(session.suppressed, true)
+    assert.equal(session.readyToLog, false)
+    assert.equal(session.clarifyQuestion, "")
+    assert.equal(session.summary, "")
+    assert.equal(session.items.length, 0)
+  })
+})
+
 test("graph-native meal session keeps simple daypart groups out of legacy fallback", () => {
   const session = buildMealContext([], "breakfast was 2 eggs, lunch was 200g salad", emptyMealSession())
 

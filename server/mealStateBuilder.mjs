@@ -240,9 +240,16 @@ function normalizeConversation(recentMessages = [], currentMessage = "", existin
     return [...safeArray(existingSession.thread_messages, 18), { role: "user", content: String(currentMessage || "") }]
   }
   const history = pruneTrailingNutritionQuestionHistory(recentMessages, currentMessage, existingSession)
+  const hasPriorUserTurns = history.some((entry) => entry?.role === "user")
+  const currentLooksFreshStart = MEAL_START_PATTERN.test(cleanText(currentMessage))
+  const lastAssistantText = cleanText([...history].reverse().find((entry) => entry?.role === "assistant")?.content || "")
+  const lastAssistantLooksLikeClarification = Boolean(lastAssistantText) && (
+    /\bhow\s+(?:much|many)\b|\bwhat\s+(?:type|kind|size|quantity)\b|\bdid\s+you\s+(?:have|eat|drink|use)\b|\banything\s+(?:with|else)\b/i.test(lastAssistantText)
+  )
   const shouldKeepAssistantContextOnly = (
     !existingSession?.persisted
     && !existingSession?.suppressed
+    && !(hasPriorUserTurns && !currentLooksFreshStart && lastAssistantLooksLikeClarification)
     && (
       isGraphNativeSimpleMixedFoodDrinkStart(currentMessage)
       || isGraphNativeSimpleFreshMealTurn(currentMessage)
