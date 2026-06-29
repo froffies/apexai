@@ -242,6 +242,7 @@ function normalizeConversation(recentMessages = [], currentMessage = "", existin
   const history = pruneTrailingNutritionQuestionHistory(recentMessages, currentMessage, existingSession)
   const shouldKeepAssistantContextOnly = (
     !existingSession?.persisted
+    && !existingSession?.suppressed
     && (
       isGraphNativeSimpleMixedFoodDrinkStart(currentMessage)
       || isGraphNativeSimpleFreshMealTurn(currentMessage)

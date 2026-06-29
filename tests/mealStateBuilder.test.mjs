@@ -663,6 +663,27 @@ test("suppressed simple food drink turns stay out of legacy fallback", () => {
   assert.equal(session.fallbackReason, "")
 })
 
+test("suppressed sessions keep a later explicit meal suppressed until logging is resumed", () => {
+  const suppressedSession = {
+    ...emptyMealSession(),
+    suppressed: true,
+    suppressionReply: "Okay, I won't save that.",
+    processingMode: "idle",
+    thread_messages: [user("don't log that")],
+  }
+  const session = buildMealContext([
+    user("don't log that"),
+    assistant("Alright, I won't log that. If you need to track anything else, just let me know!"),
+  ], "i had chips", suppressedSession)
+
+  assert.ok(session)
+  assert.equal(session.suppressed, true)
+  assert.equal(session.readyToLog, false)
+  assert.equal(session.clarifyQuestion, "")
+  assert.equal(session.summary, "")
+  assert.equal(session.items.length, 0)
+})
+
 test("graph-native meal session keeps simple daypart groups out of legacy fallback", () => {
   const session = buildMealContext([], "breakfast was 2 eggs, lunch was 200g salad", emptyMealSession())
 
