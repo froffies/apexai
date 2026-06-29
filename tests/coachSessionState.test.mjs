@@ -1974,6 +1974,32 @@ test("coach session state suppresses active meal logging when the user says not 
   assert.equal(mealSession.mealConversation, false)
 })
 
+test("coach session state keeps suppressed meal threads suppressed across a later fresh meal disclosure", () => {
+  const firstTurn = buildCoachSessionState({
+    recentMessages: [],
+    currentMessage: "don't log that",
+    mealSession: emptyMealSessionState(),
+    workoutSession: emptyWorkoutSessionState(),
+  })
+
+  const nextTurn = buildCoachSessionState({
+    recentMessages: [
+      user("don't log that"),
+      assistant("Okay, I won't save that."),
+    ],
+    currentMessage: "i had chips",
+    mealSession: firstTurn.mealSession,
+    workoutSession: emptyWorkoutSessionState(),
+  })
+
+  assert.ok(nextTurn.mealSession)
+  assert.equal(nextTurn.mealSession.suppressed, true)
+  assert.equal(nextTurn.mealSession.readyToLog, false)
+  assert.equal(nextTurn.mealSession.summary, "")
+  assert.equal(nextTurn.mealSession.clarifyQuestion, "")
+  assert.equal(nextTurn.mealSession.mealConversation, false)
+})
+
 test("coach session state can repeat the most recent saved meal deterministically", () => {
   const next = buildCoachSessionState({
     recentMessages: [],

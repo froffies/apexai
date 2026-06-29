@@ -1194,6 +1194,7 @@ function buildMealSessionState(recentMessages = [], currentMessage = "", existin
   const prior = normalizeMealSession(existingSession)
   const rawPriorReadyToLog = Boolean(existingSession?.readyToLog)
   const normalizedCurrent = cleanText(currentMessage)
+  const explicitMealDisclosure = /^(?:please\s+)?(?:(?:i\s+)?(?:had|ate|drank))\b/i.test(normalizedCurrent)
   const normalizedMealMessage = normalizeSplitPreparationFollowUp(
     normalizeTrailingMealQuantityMessage(normalizeInlineMealCorrectionMessage(currentMessage))
   )
@@ -1225,6 +1226,14 @@ function buildMealSessionState(recentMessages = [], currentMessage = "", existin
   if (!prior.active && !prior.persisted && NUTRITION_QUESTION_PATTERN.test(cleanText(currentMessage))) return null
   if (!prior.active && !prior.persisted && VAGUE_REFERENCE_PATTERN.test(cleanText(currentMessage))) return null
   if (!prior.active && !prior.persisted && VAGUE_TIME_REF_PATTERN.test(cleanText(currentMessage)) && !isExplicitMealStart(currentMessage)) return null
+  if (prior.suppressed && !prior.active && !prior.persisted && explicitMealDisclosure) {
+    return {
+      ...emptyMealSessionState(),
+      suppressed: true,
+      suppressionReply: String(prior.suppressionReply || "Okay, I won't save that."),
+      thread_messages: buildThreadMessages(recentMessages, currentMessage),
+    }
+  }
   // Frustrated messages like "why did you save that" should route to general/correction
   // handling when there is no active session. When a session IS persisted, let the
   // delete/correction path handle it instead.
