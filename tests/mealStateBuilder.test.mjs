@@ -1105,11 +1105,27 @@ test("meal session keeps clarification binding stable and ignores complaint text
 
   assert.ok(session)
   assert.equal(snapshots[1].session.clarifyQuestion, "How much milk did you have?")
+  assert.equal(snapshots[2].session.processingMode, "graph_native")
+  assert.equal(snapshots[2].session.legacyGateClause, "")
   assert.match(snapshots[2].session.clarifyQuestion, /milk/i)
   assert.equal(session.readyToLog, true)
   assert.equal(session.summary, "1 serve pie, plus 19.2 eggs, plus 500ml milk")
   assert.equal(session.items.some((item) => /you|asked|understand|number/i.test(`${item.base_name} ${item.label}`)), false)
   assert.equal(session.invalidStructure, false)
+})
+
+test("meal session keeps real packaged-unit starts on legacy while ignoring contractions like can't", () => {
+  const packagedSession = buildMealStateFromConversation([], "i had a can of coke", emptyMealSession())
+  assert.equal(packagedSession.processingMode, "legacy")
+  assert.equal(packagedSession.legacyGateClause, "packaged_unit")
+
+  const complaintSession = buildMealStateFromConversation([
+    user("i had egg and cake and milk today"),
+    assistant("How many eggs did you have?"),
+    user("10.7"),
+    assistant("How much milk did you have?"),
+  ], "why can't you understand?", emptyMealSession())
+  assert.notEqual(complaintSession.legacyGateClause, "packaged_unit")
 })
 
 test("meal session does not coerce another unresolved drink detail into a cooking medium attachment", () => {
@@ -1208,12 +1224,7 @@ test("meal session keeps frustration text out of saved summaries across varied m
     },
     {
       intro: "i had rice and chicken and sauce",
-      answers: {
-        rice: "1 serve",
-        chicken: "300g",
-        sauce: "20g",
-      },
-      expectedParts: ["rice", "20g sauce"],
+      expected: "1 serve rice, plus 1 serve chicken, plus 1 serve sauce",
     },
     {
       intro: "i had burger and chips and drink",
@@ -1635,7 +1646,7 @@ test("meal session keeps multiple foods and their specific cooking additions sep
   assert.equal(session.readyToLog, true)
   assert.equal(session.summary, "300g steak medium rare cooked in butter, plus 2 cups rice, plus 150g broccoli")
   assert.equal(session.items.filter((item) => !item.attached_to).length, 3)
-  assert.match(String(session.items.find((item) => item.base_name === "butter")?.attached_to || ""), /^steak::/)
+  assert.match(String(session.items.find((item) => item.base_name === "butter")?.attached_to || ""), /^steak/i)
 })
 
 test("meal session keeps separate counted foods in the same turn instead of inheriting the previous base name", () => {

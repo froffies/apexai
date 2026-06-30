@@ -42,7 +42,7 @@ const SAME_REFERENCE_PATTERN = /\b(?:the same|same as before|as before)\b/i
 const SHARED_EACH_PATTERN = /^(?:about|around|roughly|approx(?:imately)?|bout)?\s*(?<amount>\d+(?:\.\d+)?|half|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty)\s*(?<unit>g|kg|lb|lbs|pound|pounds|ml|l|litre|litres|liter|liters|cup|cups|bowl|bowls|plate|plates|mug|mugs|serve|serves|serving|servings|slice|slices|tbsp|tablespoon|tablespoons|tsp|teaspoon|teaspoons|egg|eggs)\s+each$/i
 const INLINE_CORRECTION_PATTERN = /\b(?:no wait|i meant|make that|change that|update that|sorry)\b/i
 const TRAILING_LOG_DIRECTIVE_PATTERN = /\b(?:(?:can|could)\s+you|please|just)?\s*(?:log|save|track|add)\s+(?:all\s+that|that|it)\b.*$/i
-const PACKAGED_UNIT_PATTERN = /\b(?:tin|tins|can|cans|block|blocks|bunch|bunches)\b/i
+const PACKAGED_UNIT_PATTERN = /\b(?:tin|tins|block|blocks|bunch|bunches)\b|\bcans?\b(?!['’])/i
 const WORKOUT_ONLY_FOLLOW_UP_PATTERN = /^(?:i\s+did\s+\d+(?:\.\d+)?(?:\s+total)?|\d+(?:\.\d+)?\s*(?:reps?|sets?|kg|km|mi|miles?|min|mins|minutes)(?:\s*,\s*\d+(?:\.\d+)?\s*(?:reps?|sets?|kg|km|mi|miles?|min|mins|minutes))*)$/i
 const FUTURE_MEAL_INTENT_PATTERN = /\b(?:(?:i\s*(?:am|['’]m)?\s*)?(?:going\s+to|gonna)\s+(?:have|eat|drink)|(?:i(?:['’]ll)?|i\s+will|will)\s+(?:have|eat|drink))\b/i
 const MEAL_TYPES = ["breakfast", "lunch", "dinner", "snack"]
@@ -1087,6 +1087,28 @@ function variantsCompatible(existingItem = {}, nextItem = {}) {
   return true
 }
 
+function isSafeRootElaboration(existingItem = {}, nextItem = {}) {
+  const existingBase = cleanText(existingItem.base_name || "")
+  const nextBase = cleanText(nextItem.base_name || "")
+  if (!existingBase || !nextBase || existingBase === nextBase) return false
+  if (existingItem.attached_to || nextItem.attached_to) return false
+  if (String(existingItem.category || "") !== String(nextItem.category || "")) return false
+  if (normalizeMealType(existingItem.meal_type || "") !== normalizeMealType(nextItem.meal_type || "")) return false
+  if (!containsWord(nextBase, existingBase) || containsWord(existingBase, nextBase)) return false
+  const existingIsPlaceholder = (
+    !existingItem.quantity
+    && safeArray(existingItem.preparation, 8).length === 0
+    && safeArray(existingItem.exclusions, 8).length === 0
+  )
+  const nextAddsDetail = Boolean(
+    nextItem.quantity
+    || safeArray(nextItem.preparation, 8).length > 0
+    || safeArray(nextItem.exclusions, 8).length > 0
+    || nextBase.length > existingBase.length
+  )
+  return existingIsPlaceholder && nextAddsDetail
+}
+
 function shouldUseCountStyleName(item = {}, quantity = null) {
   const base = singularize(item.base_name || item.label || "")
   if (COUNT_REQUIRED.has(base)) return true
@@ -1358,12 +1380,18 @@ function mergeRoot(state, nextItem) {
   const pendingTarget = state.pendingClarification?.targetReference ? findRootByReference(state, state.pendingClarification.targetReference) : null
   const sameBase = state.items.find((item) => (
     !item.attached_to
-    && singularize(item.base_name) === singularize(nextItem.base_name)
+    && (
+      singularize(item.base_name) === singularize(nextItem.base_name)
+      || isSafeRootElaboration(item, nextItem)
+    )
     && normalizeMealType(item.meal_type || "") === normalizeMealType(nextItem.meal_type || "")
     && variantsCompatible(item, nextItem)
   )) || null
   const target = pendingTarget
-    && singularize(pendingTarget.base_name) === singularize(nextItem.base_name)
+    && (
+      singularize(pendingTarget.base_name) === singularize(nextItem.base_name)
+      || isSafeRootElaboration(pendingTarget, nextItem)
+    )
     && variantsCompatible(pendingTarget, nextItem)
     ? pendingTarget
     : sameBase
@@ -1389,6 +1417,13 @@ function mergeRoot(state, nextItem) {
     target.label = nextItem.label
   }
   if (target.base_name === "coffee" && nextItem.base_name !== "coffee") {
+    target.base_name = nextItem.base_name
+    target.label = nextItem.label
+  }
+  if (
+    cleanText(nextItem.base_name).length > cleanText(target.base_name).length
+    && containsWord(nextItem.base_name, target.base_name)
+  ) {
     target.base_name = nextItem.base_name
     target.label = nextItem.label
   }
@@ -2242,4 +2277,3 @@ export function buildMealContext(recentMessages = [], currentMessage = "", exist
     invalidStructure: Boolean(state.invalidStructure),
   }
 }
-
