@@ -440,12 +440,17 @@ export function normalizeCoachResponse(value, context = {}) {
       .map((action) => String(action?.meal_type || "").trim().toLowerCase())
       .filter(Boolean)
   )
+  const explicitMealActionsWithoutType = resolvedExplicitActions.filter(
+    (action) => isMealPersistenceAction(action) && !String(action?.meal_type || "").trim()
+  )
   const missingCanonicalMealActions = explicitMealTypes.size
     ? canonicalMealPersistenceActions.filter((action) => {
         const mealType = String(action?.meal_type || "").trim().toLowerCase()
         return mealType && !explicitMealTypes.has(mealType)
       })
-    : []
+    : explicitMealActionsWithoutType.length && canonicalMealPersistenceActions.length > 1
+      ? canonicalMealPersistenceActions.slice(1)
+      : []
   const resolvedActionsWithRecovery = [
     ...resolvedExplicitActions,
     ...missingCanonicalMealActions,
