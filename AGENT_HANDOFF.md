@@ -1,208 +1,293 @@
 # ApexAI — Agent Handoff
 
-**Last updated:** 2026-06-23
-**Current HEAD:** see `git log --oneline -1`
-**Live frontend:** https://apexai-bay.vercel.app/
-**Live backend:** https://apexai-coach.onrender.com
-**Health endpoint:** https://apexai-coach.onrender.com/health
+**Last updated:** 2026-06-30  
+**Current HEAD:** `9b92f8c`  
+**Live frontend:** [https://apexai-bay.vercel.app/](https://apexai-bay.vercel.app/)  
+**Live backend:** [https://apexai-coach.onrender.com](https://apexai-coach.onrender.com)  
+**Health endpoint:** [https://apexai-coach.onrender.com/health](https://apexai-coach.onrender.com/health)
 
 ---
 
 ## What this app is
 
-ApexAI is an AI-first nutrition and fitness coaching app. Users talk to a conversational coach that logs meals, workouts, and answers nutrition questions. The architecture is:
+ApexAI is an AI-first nutrition and fitness coaching app.
 
-- **Frontend:** React/Vite, deployed on Vercel
-- **Backend coach server:** Node.js/Express (`server/openaiCoachServer.mjs`), deployed on Render, calls GPT-4o
-- **Database:** Supabase (auth, meal/workout logs, audit records)
-- **Nutrition data:** AU/NZ curated catalogue (`src/lib/nutritionDatabase.js`) + OpenFoodFacts fallback
+Users can:
 
----
+- chat naturally about meals, workouts, goals, plans, and general coaching questions
+- log meals and workouts through the coach
+- ask nutrition questions without logging
+- scan barcodes and analyze food photos
+- create workout and meal plans
 
-## Architecture: how a coach turn works
+Core stack:
 
-```
-User message
-  └─► buildCoachSessionState()       [coachSessionState.mjs]
-        builds meal + workout session from conversation history
-        uses buildTurnIntentGraph() to classify multi-clause turns
-        WORKOUT_PLAN_DIRECTIVE_PATTERN detects planning phrases before
-        parseWorkoutMessage runs, routing them to domain:general (AI)
-        rather than domain:workout (exercise extraction)
-  └─► shouldUseLegacy()              [mealStateBuilder.mjs]
-        gates whether graph-native or legacy parser handles the meal state
-        records legacyGateClause on the session for telemetry
-        isGraphNativeFreshStartOnLegacySession exempts clear fresh-topic
-        turns from active legacy sessions
-  └─► buildDeterministicMealActions() / buildDeterministicWorkoutActions()
-                                     [coachLoggingRules.mjs]
-        tries to persist without AI if state is clear enough
-  └─► GPT-4o (if needed)            [openaiCoachServer.mjs handleCoach]
-        AI-first: AI is the primary responder
-        deterministic layer provides candidate actions for AI to confirm
-        recalled_messages from coachConversationMemory.js injected here
-        for long-gap follow-up continuity
-  └─► normalizeCoachResponse()       [normalizeCoachResponse.mjs]
-        validates and sanitises AI output
-        strips disallowed actions (e.g. update_targets on nutrition questions)
-        recovers safe persistence when AI claims to save but omits action
-        recovers missing multi-meal actions when AI undercounts
-  └─► persistCoachAuditRecord()      [coachAudit.mjs]
-        records every turn for monitoring and QA
-```
+- **Frontend:** React + Vite on Vercel
+- **Backend:** Node/Express coach server on Render
+- **Auth + data:** Supabase
+- **Nutrition data:** curated AU/NZ catalogue + barcode/OpenFoodFacts + controlled estimate fallbacks
 
 ---
 
-## Server file map
+## Coach Architecture
+
+Live request flow:
+
+1. User message hits `server/openaiCoachServer.mjs`
+2. `server/coachSessionState.mjs` builds meal/workout candidate state from recent conversation
+3. `server/mealStateBuilder.mjs` parses meal state graph-natively first, with legacy fallback only when the gate says the graph path is unsafe
+4. `server/coachLoggingRules.mjs` derives validated deterministic actions and persistence hints
+5. OpenAI produces the conversational reply plus structured actions when AI is needed
+6. `server/normalizeCoachResponse.mjs` canonicalizes, strips invented persistence, and safely recovers omitted actions when backend proof exists
+7. `server/coachAudit.mjs` records the turn for live QA and telemetry review
+
+The system is **AI-first, not AI-only**:
+
+- AI leads the conversation
+- deterministic logic protects persistence integrity
+- fallback logic exists for upstream AI failures and unsafe parser states
+
+---
+
+## Current Backend Roles
+
+- `server/openaiCoachServer.mjs`  
+  HTTP server, route handlers, OpenAI integration, nutrition/photo/barcode endpoints, prompt construction.
+
+- `server/coachSessionState.mjs`  
+  Builds meal and workout candidate state, mixed-turn intent graph, workout parsing, follow-up continuity.
+
+- `server/mealStateBuilder.mjs`  
+  Graph-native meal parser and the `shouldUseLegacy()` gate. Records `legacyGateClause` on fallback sessions.
+
+- `server/mealStateBuilderLegacy.mjs`  
+  Active fallback parser for complex multi-clause meal inputs. Still intentional and load-bearing.
+
+- `server/coachLoggingRules.mjs`  
+  Deterministic action shaping, meal/workout persistence validation, nutrition-answer helpers, persistence-language guards.
+
+- `server/normalizeCoachResponse.mjs`  
+  AI output validation, action canonicalization, clarify/persist recovery, invented persistence stripping.
+
+- `server/coachAudit.mjs`  
+  Audit persistence, flag generation, telemetry summaries, legacy-gate reporting.
+
+- `server/nutritionPhotoAnalysis.mjs`  
+  Photo-analysis normalization, AU/NZ dish matching, reviewed photo estimate generation.
+
+- `server/utils.mjs`  
+  Canonical server-side shared helpers. Do not duplicate these utilities elsewhere in `server/`.
+
+---
+
+## File Map
 
 | File | Purpose | Lines |
 |------|---------|-------|
-| `server/openaiCoachServer.mjs` | HTTP server, all route handlers, OpenAI calls, nutrition search | ~2,680 |
-| `server/mealStateBuilder.mjs` | Graph-native meal parser, `shouldUseLegacy()` gate | ~1,900 |
-| `server/mealStateBuilderLegacy.mjs` | Legacy deterministic meal parser — still active fallback, do not delete | ~3,155 |
-| `server/coachSessionState.mjs` | Session state builder, turn intent graph, workout parsing | ~2,300 |
-| `server/coachLoggingRules.mjs` | Deterministic action builders, persistence helpers, food matching | ~1,200 |
-| `server/normalizeCoachResponse.mjs` | AI output validation and sanitisation | ~730 |
-| `server/coachAudit.mjs` | Audit record persistence and summarisation | ~880 |
-| `server/nutritionPhotoAnalysis.mjs` | Photo nutrition estimate pipeline | ~1,160 |
-| `server/utils.mjs` | Shared low-level utilities: `cleanText`, `safeArray`, `safeNumber`, `roundMacro`, `titleCase`, `escapeRegex` | ~50 |
-| `src/lib/coachConversationMemory.js` | Recalled coach chat context for long-gap follow-ups | ~200 |
-| `server/archive/legacy-coach/` | Fully archived old system — do not import from here | — |
+| `server/openaiCoachServer.mjs` | Live coach server, prompts, API routes | 2682 |
+| `server/mealStateBuilder.mjs` | Graph-native meal parser + legacy gate | 2279 |
+| `server/mealStateBuilderLegacy.mjs` | Legacy fallback meal parser | 3155 |
+| `server/coachSessionState.mjs` | Session builder, mixed-turn routing, workout parsing | 2423 |
+| `server/coachLoggingRules.mjs` | Deterministic persistence/action logic | 1216 |
+| `server/normalizeCoachResponse.mjs` | AI response sanitization and recovery | 793 |
+| `server/coachAudit.mjs` | Audit storage and telemetry summary logic | 884 |
+| `server/nutritionPhotoAnalysis.mjs` | Photo identification and macro estimation | 1202 |
+| `server/utils.mjs` | Shared utility helpers | 50 |
+| `src/lib/coachConversationMemory.js` | Older-message recall for long-gap follow-ups | 212 |
 
-**Rule:** all shared utility functions live in `server/utils.mjs`. Do not re-define `cleanText`, `safeArray`, `safeNumber`, `roundMacro`, `titleCase`, or `escapeRegex` in any other server file. Import them. (`src/lib/` files are frontend and cannot import from `server/` — their local `cleanText` copies are intentional.)
+Archived pre-cutover code lives under:
+
+- `server/archive/legacy-coach/`
+
+Do not import from the archive path into live code.
 
 ---
 
-## Key architectural decisions (do not reverse without understanding why)
+## Current Design Rules
 
-### AI-first, not regex-first
-The AI is the first responder. The deterministic layer computes candidate actions and session state, but the AI decides what to say and confirm. `normalizeCoachResponse.mjs` validates AI output rather than replacing it.
+### AI-first response path
 
-### Workout plan directives route to AI, not the workout session builder
-`WORKOUT_PLAN_DIRECTIVE_PATTERN` in `coachSessionState.mjs` catches phrases like "build me a workout", "give me a leg day", "design a gym session" before `parseWorkoutMessage` runs. These route to `domain: general` so the AI handles them as planning requests and returns `create_workout_plan`. `WORKOUT_PLAN_FOLLOWUP_PATTERN` catches follow-up continuations like "start today's workout". Do not remove these patterns — without them, planning phrases are extracted as exercise names and the coach asks "How many reps did you do for Build Me A Workout?"
+The AI is the primary responder. The deterministic layer proposes safe candidates and protects persistence. Do not silently revert this to parser-first routing.
 
 ### `shouldUseLegacy()` is intentional
-The legacy parser (`mealStateBuilderLegacy.mjs`) is still the fallback for complex multi-clause inputs. The `shouldUseLegacy()` function records which clause triggered the fallback as `legacyGateClause` on the session. `isGraphNativeFreshStartOnLegacySession` exempts clear fresh single-clause meal starts from `active_non_graph_session` even when a legacy session is active. Check `npm run report:telemetry` for current fallback rate before removing any clause.
 
-### `wantsLogging === true` (not `!== false`)
-`buildSingleDeterministicMealAction` in `coachLoggingRules.mjs` requires `mealSession.wantsLogging === true`. Do not change it back to `!== false` — that caused auto-persist on sessions with no explicit logging intent.
+`mealStateBuilderLegacy.mjs` is still the real fallback for complex meal turns. The graph-native parser owns simple/common flows first; the legacy parser still handles harder continuity and clause-heavy structures.
 
-### `update_targets` is blocked on nutrition questions
-`normalizeCoachResponse.mjs` strips any `update_targets` action when the user message is a nutrition question with a quantity. Do not remove `isNutritionQuestionWithQuantity()`.
+Every legacy fallback now records:
 
-### Multi-meal recovery
-`normalizeCoachResponse.mjs` backfills missing `log_meal` actions by `meal_type` when the AI returns fewer actions than the canonical layer computed. This handles GPT-4o combining "breakfast was X, lunch was Y" into a single action.
+- `processingMode: "legacy"`
+- `fallbackReason: "legacy_gate"`
+- `legacyGateClause`
 
-### Recalled coach context
-`src/lib/coachConversationMemory.js` supplies older relevant messages to the AI when the user references past conversations ("what did you say earlier", "carry on from before"). These arrive in `recalledMessages` in the request body and are merged into `contextualRecentMessages` before the AI call. `buildRecalledCoachReply` handles the offline fallback.
+### Persist only on explicit logging intent
 
-### Negation guard
-`buildMealStateFromConversation` in `mealStateBuilder.mjs` short-circuits to `baseSession()` (→ AI, no clarification) when the input matches negation/fasting patterns ("i ate nothing today", "not hungry", "skipped breakfast") and doesn't look like food. Do not remove this guard.
+`coachLoggingRules.mjs` requires `mealSession.wantsLogging === true` for ordinary meal persistence. Do not change that back to permissive defaults.
 
-### `genericExerciseOnly` requires a known exercise word
-`parseWorkoutMessage` in `coachSessionState.mjs` requires the extracted exercise name to contain a word from the workout lexicon. Without this, "i'm not hungry" was parsed as exercise "'M Not Hungry" and the coach asked for reps.
+### Nutrition questions must not mutate targets
 
----
+`normalizeCoachResponse.mjs` strips `update_targets` when the user is really asking a nutrition question with quantity.
 
-## Conversational routing: what goes where
+### Canonical multi-meal recovery is live
 
-| User says | Expected routing |
-|-----------|-----------------|
-| "build me a workout" | AI → `create_workout_plan` |
-| "give me a leg day workout" | AI → `create_workout_plan` |
-| "i did 20 pushups" | Workout session → deterministic or AI |
-| "i had 2 eggs" | Meal session → deterministic log |
-| "just had 100g almonds" | Meal session → deterministic log |
-| "i had a coffee" | Meal session → graph-native (bare drink) |
-| "i'm not hungry" | AI only (no session) |
-| "i ate nothing today" | AI only (no session) |
-| "i trained chest today" | Workout session → AI asks "what exercise?" |
-| "how many calories in 100g chicken" | AI answer only, no `update_targets` |
-| "what did you say earlier" | AI → answer from `recalled_messages` |
-| "hey / thanks / how are you" | AI only (no session) |
-| "breakfast was X, lunch was Y" | Legacy parser → two `log_meal` actions |
+When AI under-returns meal actions for multi-meal turns, `normalizeCoachResponse.mjs` can backfill missing canonical `log_meal` actions by `meal_type`.
+
+### Conversation memory is live
+
+`src/lib/coachConversationMemory.js` is part of the live coach path. It lets the AI answer “what did you say earlier?” and similar long-gap follow-ups with recalled context.
+
+### Shared server utilities are centralized
+
+`cleanText`, `safeArray`, `safeNumber`, `roundMacro`, `titleCase`, and `escapeRegex` belong in `server/utils.mjs`. Do not re-copy them across server files.
 
 ---
 
-## Test surface
+## Important Fixes Already Shipped
+
+The current live state already includes these major fixes:
+
+- bare drinks can stay graph-native instead of falling through `non_graph_drink_mention`
+- simple measured fresh-topic turns after assistant history can stay graph-native
+- stale active legacy sessions can yield to a clearly fresh simple measured meal start
+- suppressed meal state is preserved across later follow-ups
+- mid-clarification conversation normalization keeps the right context
+- deterministic fake-save audit false positives were reduced
+- explicit multi-meal action recovery is live in `normalizeCoachResponse.mjs`
+- workout plan directives route to AI planning instead of fake exercise logging
+- nutrition questions with quantities no longer trigger `update_targets`
+
+Fixes shipped in **this** pass (`9b92f8c`):
+
+- `PACKAGED_UNIT_PATTERN` no longer false-matches contractions like `can't`
+- real packaged starts such as `i had a can of coke` still stay legacy
+- detailed follow-up turns like `300g steak medium rare cooked in butter` now safely merge into the original unresolved root item instead of duplicating it
+
+---
+
+## Current Validation Surface
+
+Use these as the real validation commands:
 
 ```bash
-npm test                   # 361 unit tests — must always be green before pushing
-npm run lint               # ESLint — must be clean
-npm run typecheck          # tsc — must be clean
-npm run build              # Vite build — must succeed
-npm run test:coach-chaos   # Adversarial load: 300 meal / 150 workout / 100 mixed
-npm run test:coach-soak    # Multi-turn conversation regression: 10/10 clean streak required
-npm run test:nutrition-smoke  # Live nutrition API smoke test
-npm run test:live-verify   # Playwright against live Vercel + Render deployment
-npx playwright test        # Full E2E suite (83 tests, requires Supabase creds in env)
-npm run report:telemetry   # Live production monitoring report
+npm test
+npm run lint
+npm run typecheck
+npm run build
+npm run test:coach-chaos
+npm run test:coach-soak
+npm run test:nutrition-smoke
+npm run test:live-verify
+npx playwright test
+npm run report:telemetry
 ```
 
----
+Current verified local baseline on `9b92f8c`:
 
-## Monitoring thresholds (check after every deploy)
+- `npm test`: `405/405` passing
+- `npm run lint`: passing
+- `npm run typecheck`: passing
+- `npm run build`: passing
+- `npm run test:coach-chaos`: passing
+  - meal: `300`
+  - workout: `150`
+  - mixed: `100`
 
-From `npm run report:telemetry`:
+Current verified live baseline on `9b92f8c`:
 
-| Metric | Threshold | Action if breached |
-|--------|-----------|-------------------|
-| `legacy_fallback_rate` | < 30% | Check `by_legacy_gate_clause` breakdown; tackle highest-frequency clause |
-| `nutrition_low_confidence_search_rate` | < 60% | Expand AU/NZ curated catalogue |
-| `coach_failure_rate` | < 5% | Check Render logs for OpenAI errors |
-| `telemetry_error_rate` | 0% | Check Supabase connectivity |
-
-Last known telemetry sample (commit `b8962c9`):
-- `legacy_fallback_rate: 30.4%` — just over threshold
-- `by_legacy_gate_clause: active_non_graph_session 17, non_graph_drink_mention 8, non_graph_multi_quantity_signal 4`
-- Subsequent commits (`7971b4e`, `c45de46`, `73a84b9`) address `non_graph_drink_mention` and routing issues — fresh telemetry needed after Codex's next soak run to see current state.
+- `test:coach-soak`: `35/35` conversations, `0` failures before clean streak
+- Render `/health` reports live commit `9b92f8c`
 
 ---
 
-## Deployment
+## Current Telemetry Baseline
 
-- **Push to `main`** triggers auto-deploy on both Render (backend) and Vercel (frontend)
-- Render cold starts take ~30s — `npm run test:nutrition-smoke` handles this with retry logic
-- Confirm live commit at `/health` endpoint before running `npm run test:live-verify`
-- Two AI agents (Claude + Codex) may push to main concurrently — always `git pull --rebase` before pushing
+Fresh deployment sample for `9b92f8c`:
 
----
+- `fresh_audit_records: 67`
+- `coach_failure_rate: 0%`
+- `legacy_fallback_rate: 5.4%`
+- `low_confidence_macro_rate: 23.9%`
+- `telemetry_error_rate: 0%`
+- `photo_review_rate: 0%`
 
-## Known gaps (not bugs, conscious trade-offs)
+Fresh `by_legacy_gate_clause`:
 
-- `i had 1 rice` does not auto-save — "rice" requires a quantity clarification by design
-- `i had coffee with milk` asks "how much coffee?" — correct, modifier drinks without explicit quantity need AI to estimate based on type
-- Macro coverage for obscure foods still falls through to `estimated_internal_profile`
-- Photo analysis on messy/shared plates still flags for human review (~2-3% of photo turns)
-- `mealStateBuilderLegacy.mjs` is 3,155 lines — reduce it by improving `mealStateBuilder.mjs` and narrowing the `shouldUseLegacy()` gate clause by clause, guided by telemetry
-- `active_non_graph_session` is still the dominant legacy gate clause — fresh telemetry after `73a84b9` needed to determine if the `isGraphNativeFreshStartOnLegacySession` exemption is working
+- `non_graph_not_meal_start: 1`
+- `non_graph_multi_quantity_signal: 1`
 
----
+Fresh processing modes:
 
-## Workflow for this project
+- `graph_native: 35`
+- `legacy: 2`
+- `idle: 8`
 
-This project uses a two-AI workflow:
-- **Claude** (this sandbox, PAT authenticated): audits code, writes precise fix specs, applies fixes directly, pushes to main
-- **Codex** (local WSL agent): runs live soak/telemetry tests, applies fixes Claude can't (live infra), validates, pushes
+Fresh fallback reasons:
 
-Claude clones fresh from GitHub each session, re-runs the real test suite independently, reads actual diffs before trusting reports. Both agents push to `main` — always rebase on conflicts.
+- `legacy_gate: 2`
 
-PAT authentication: if needed, configure via `git remote set-url origin https://<PAT>@github.com/froffies/apexai.git`. Rotate after use.
+This is the current real baseline. Do not use the older `82.4%` or `30.4%` fallback-rate numbers anymore.
 
 ---
 
-## Recent commit history (last significant changes)
+## Monitoring Thresholds
 
-| Commit | What changed |
-|--------|-------------|
-| `73a84b9` | `WORKOUT_PLAN_DIRECTIVE_PATTERN` expanded for modifier variants ("give me a leg day") |
-| `281eaf6` | Codex: recalled coach fallback + workout planning intent fixes |
-| `d0b4e69`–`8f07f17` | Codex: `coachConversationMemory.js` — recalled chat context for long-gap follow-ups |
-| `c45de46` | Meal negation guard, fake workout session fixes, `just had` prefix, `genericExerciseOnly` |
-| `9d0ea83` | Workout plan directives no longer parsed as exercise names |
-| `7971b4e` | Bare unquantified drinks now graph-native (non_graph_drink_mention fix) |
-| `b8962c9` | Weighted workout readiness requires weight before readying |
-| `b471b20` | Multi-meal recovery: backfills missing log_meal actions by meal_type |
-| `d35e256` | Shared utilities consolidated into `server/utils.mjs`, section headers, handoff doc |
-| `29ef440` | `update_targets` blocked on nutrition questions with quantities |
-| `d549dae` | Finalised: audit vulnerabilities patched, `tmp/` gitignored |
+Thresholds enforced by `scripts/coach-monitor-report.mjs`:
+
+- `legacy_fallback_rate < 30%`
+- `nutrition_low_confidence_search_rate < 60%`
+- `coach_failure_rate < 5%`
+- `telemetry_error_rate < 10%`
+
+After every live deploy:
+
+1. confirm Render `/health` shows the new SHA
+2. run `npm run test:coach-soak`
+3. run `MONITOR_COMMIT_SHA=<sha> npm run report:telemetry`
+
+---
+
+## Deployment Notes
+
+- pushing to `main` deploys backend and frontend automatically
+- Render can cold start; expect delay before live verification
+- always confirm the deployed SHA at `/health` before running live verification
+- `tmp/` is intentionally gitignored for soak/live artifacts
+
+---
+
+## Known Gaps
+
+These are the real remaining gaps after the current pass:
+
+1. The coach is still AI-first, not AI-only.  
+   Deterministic validation and fallback rails are intentional.
+
+2. `mealStateBuilderLegacy.mjs` is still active for complex meal turns.  
+   This is by design until telemetry-backed gate reductions replace those cases safely.
+
+3. Macro coverage is strongest for trusted catalogue/barcode/photo-dish matches.  
+   Obscure foods and harder free-text foods can still fall back to lower-confidence estimates.
+
+4. Photo analysis is good for simple and curated dishes but still needs review for messy/shared/ambiguous plates.
+
+5. The current legacy gate sample is small.  
+   `non_graph_not_meal_start` and `non_graph_multi_quantity_signal` are the next observed clauses, but they need more real traffic before changing gates again.
+
+---
+
+## Practical Workflow
+
+- `git pull --rebase` before making changes
+- validate locally before every push
+- only trust telemetry after the new SHA is live on Render
+- when changing routing or parser behavior, always rerun:
+  - `npm test`
+  - `npm run test:coach-chaos`
+  - live soak
+  - telemetry report
+
+If another agent picks this up cold, the current source of truth is:
+
+- local + live SHA: `9b92f8c`
+- local tests: `405/405`
+- fresh live `legacy_fallback_rate`: `5.4%`
+- fresh top legacy clauses: `non_graph_not_meal_start`, `non_graph_multi_quantity_signal`
