@@ -368,3 +368,28 @@ test("findBestFoodMatch handles ambiguous AU/NZ slang, typos, partial names, and
     }
   }
 })
+
+test("findBestFoodMatch upgrades real low-confidence live miss phrases onto AU derived references", () => {
+  const burger = findBestFoodMatch("1 burger")
+  assert.ok(burger)
+  assert.match(String(burger.name || ""), /burger/i)
+  assert.equal(burger.source_type, "curated_au_catalogue")
+  assert.equal(burger.macro_confidence, "high")
+
+  const bowlBurger = findBestFoodMatch("1 bowl burger")
+  assert.ok(bowlBurger)
+  assert.match(String(bowlBurger.name || ""), /burger/i)
+  assert.equal(bowlBurger.source_type, "curated_au_catalogue")
+
+  const wine = findBestFoodMatch("250ml wine")
+  assert.ok(wine)
+  assert.match(String(wine.name || ""), /wine/i)
+  assert.equal(wine.source_type, "curated_au_catalogue")
+  assert.equal(wine.macro_confidence, "high")
+
+  const cakes = findBestFoodMatch("5 cakes")
+  assert.ok(cakes)
+  assert.match(String(cakes.name || ""), /cake/i)
+  assert.equal(cakes.source_type, "curated_au_catalogue")
+  assert.equal(cakes.macro_confidence, "high")
+})

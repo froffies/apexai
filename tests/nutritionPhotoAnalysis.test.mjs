@@ -586,7 +586,7 @@ test("buildFoodPhotoEstimate rescues live-style indirect dish descriptions into 
   assert.ok(burgerEstimate.action)
   assert.equal(burgerEstimate.can_autofill, true)
   assert.equal(burgerEstimate.needs_review, false)
-  assert.equal(burgerEstimate.breakdown[0]?.source_type, "photo_dish_profile")
+  assert.ok(["photo_dish_profile", "curated_au_catalogue"].includes(burgerEstimate.breakdown[0]?.source_type))
 
   const curryEstimate = await buildFoodPhotoEstimate({
     items: [

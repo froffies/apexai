@@ -216,6 +216,32 @@ test("coach logging rules build a deterministic meal action from the actual coac
   assert.ok(action)
   assert.equal(action.type, "log_meal")
   assert.equal(action.food_name, "1 burger")
+  assert.equal(action.nutrition_source_type, "curated_au_catalogue")
+  assert.equal(action.macro_confidence, "high")
+})
+
+test("coach logging rules scale bare numeric count meals against named single-serve references", () => {
+  const state = buildCoachSessionState({
+    recentMessages: [],
+    currentMessage: "i had 5 cakes",
+    mealSession: emptyMealSessionState(),
+    workoutSession: emptyWorkoutSessionState(),
+    recentMeals: [],
+  })
+  const action = buildDeterministicMealAction({
+    mealSession: state.mealSession,
+    explicitActions: [],
+    prompt: "i had 5 cakes",
+  })
+
+  assert.equal(state.mealSession.readyToLog, true)
+  assert.equal(state.mealSession.wantsLogging, true)
+  assert.ok(action)
+  assert.equal(action.type, "log_meal")
+  assert.equal(action.food_name, "5 cakes")
+  assert.equal(action.nutrition_source_type, "curated_au_catalogue")
+  assert.equal(action.macro_confidence, "high")
+  assert.equal(action.calories, 1600)
 })
 
 test("coach logging rules persistence reply detection ignores negative historical mentions", () => {

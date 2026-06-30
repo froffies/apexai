@@ -4,13 +4,13 @@ import { cleanText, safeArray, safeNumber, titleCase, roundMacro as _roundMacro,
 
 export { safeArray, safeNumber, titleCase }
 
-const COUNT_UNITS = new Set(["egg", "slice", "cup", "tin", "can", "block", "bunch", "serve", "bowl", "plate", "mug", "tbsp", "tsp"])
+const COUNT_UNITS = new Set(["egg", "slice", "cup", "tin", "can", "block", "bunch", "serve", "bowl", "plate", "mug", "tbsp", "tsp", "burger", "cake"])
 const MASS_UNITS = new Map([["g", 1], ["kg", 1000], ["oz", 28.3495], ["lb", 453.592]])
 const VOLUME_UNITS = new Map([["ml", 1], ["l", 1000]])
 const VERIFIED_NUTRITION_SOURCE_TYPES = new Set(["curated_au_catalogue", "nz_curated_catalogue", "barcode_label", "open_food_facts_label"])
 const TRAILING_LOG_COMMAND_PATTERN = /\s+\b(?:(?:can|could)\s+you|please|just)?\s*(?:log|save|track|add)\s+(?:all\s+that|that|it)\b.*$/i
 
-const PORTION_PATTERN = /(?<amount>\d+(?:\.\d+)?)\s*(?:large|medium|small|fresh|squeezed|salted|unsalted|wholemeal|wholegrain|rye)?\s*(?<unit>kg|g|oz|lb|lbs|pounds?|ml|l|tbsp|tablespoons?|tsp|teaspoons?|cups?|slices?|tins?|cans?|blocks?|bunch(?:es)?|serves?|servings?|bowls?|plates?|mugs?|eggs?)\b/i
+const PORTION_PATTERN = /(?<amount>\d+(?:\.\d+)?)\s*(?:large|medium|small|fresh|squeezed|salted|unsalted|wholemeal|wholegrain|rye)?\s*(?<unit>kg|g|oz|lb|lbs|pounds?|ml|l|tbsp|tablespoons?|tsp|teaspoons?|cups?|slices?|tins?|cans?|blocks?|bunch(?:es)?|serves?|servings?|bowls?|plates?|mugs?|eggs?|burgers?|cakes?)\b/i
 
 // ─── Math & Unit Utilities ───────────────────────────────────────────────────
 
@@ -36,6 +36,8 @@ function normalizeUnit(unit) {
   if (text === "plates") return "plate"
   if (text === "mugs") return "mug"
   if (text === "eggs") return "egg"
+  if (text === "burgers") return "burger"
+  if (text === "cakes") return "cake"
   return text
 }
 
@@ -102,6 +104,15 @@ function canTrustCandidatePortion(itemQuantity, servingQuantity, candidate = nul
   if (String(candidate?.source_type || "").trim() === "photo_dish_profile") return true
   const compatible = compatiblePortionGroups(itemQuantity, servingQuantity)
   return compatible !== false
+}
+
+function inferCountQuantityFromServing(rawQuantity, servingQuantity) {
+  const amount = Number(rawQuantity?.amount)
+  const unit = normalizeUnit(rawQuantity?.unit)
+  if (!Number.isFinite(amount) || amount <= 0 || unit) return null
+  if (!servingQuantity?.unit || !Number.isFinite(servingQuantity.amount) || servingQuantity.amount !== 1) return null
+  if (!COUNT_UNITS.has(servingQuantity.unit)) return null
+  return { amount, unit: servingQuantity.unit }
 }
 
 function baseNameMatches(candidate, baseName) {
@@ -317,24 +328,27 @@ function estimateItemMacroDetails(item, candidateFoodMatches = {}) {
 
   if (candidate) {
     const servingQuantity = parsePortion(candidate.quantity || "")
-    if (canTrustCandidatePortion(itemQuantity, servingQuantity, candidate)) {
-      const ratio = itemQuantity ? scaleFromPortions(itemQuantity, servingQuantity) : 1
+    const resolvedItemQuantity = itemQuantity || inferCountQuantityFromServing(item.quantity, servingQuantity)
+    if (canTrustCandidatePortion(resolvedItemQuantity, servingQuantity, candidate)) {
+      const ratio = resolvedItemQuantity && servingQuantity ? scaleFromPortions(resolvedItemQuantity, servingQuantity) : 1
       return {
         macros: scaleNutrition(candidate, ratio || 1),
         source: String(candidate.source || "").trim() || "Matched nutrition reference",
         source_type: String(candidate.source_type || "reference").trim() || "reference",
         matched_food_name: String(candidate.name || "").trim() || String(item.label || item.baseName || "").trim(),
         estimated: isEstimatedNutritionSourceType(candidate.source_type),
+        resolved_quantity: Boolean(resolvedItemQuantity),
       }
     }
-    if (itemQuantity && fallbackServingQuantity && compatiblePortionGroups(itemQuantity, fallbackServingQuantity) === true) {
-      const ratio = scaleFromPortions(itemQuantity, fallbackServingQuantity)
+    if (resolvedItemQuantity && fallbackServingQuantity && compatiblePortionGroups(resolvedItemQuantity, fallbackServingQuantity) === true) {
+      const ratio = scaleFromPortions(resolvedItemQuantity, fallbackServingQuantity)
       return {
         macros: scaleNutrition(fallback.macros, ratio || 1),
         source: String(candidate.source || "").trim() || "Matched nutrition reference",
         source_type: String(candidate.source_type || "reference").trim() || "reference",
         matched_food_name: String(candidate.name || "").trim() || String(item.label || item.baseName || "").trim(),
         estimated: isEstimatedNutritionSourceType(candidate.source_type),
+        resolved_quantity: true,
       }
     }
   }
@@ -342,21 +356,23 @@ function estimateItemMacroDetails(item, candidateFoodMatches = {}) {
   const broadMatch = findBestFoodMatch(String(item.baseName || item.label || "").trim())
   if (broadMatch && baseNameMatches(broadMatch, item.baseName || item.label) > 0) {
     const broadServingQuantity = parsePortion(broadMatch.quantity || "")
+    const resolvedItemQuantity = itemQuantity || inferCountQuantityFromServing(item.quantity, broadServingQuantity)
     const baseWordCount = String(item.baseName || item.label || "").trim().split(/\s+/).filter(Boolean).length
     const broadMatchUsesNamedServe = !broadServingQuantity
     const broadMatchCategory = String(broadMatch.category || "").trim().toLowerCase()
-    const allowBroadMatchWithoutItemQuantity = Boolean(itemQuantity)
+    const allowBroadMatchWithoutItemQuantity = Boolean(resolvedItemQuantity)
       || broadMatchUsesNamedServe
       || baseWordCount >= 2
       || broadMatchCategory === "mixed meal"
-    if (allowBroadMatchWithoutItemQuantity && canTrustCandidatePortion(itemQuantity, broadServingQuantity, broadMatch)) {
-      const ratio = itemQuantity && broadServingQuantity ? scaleFromPortions(itemQuantity, broadServingQuantity) : 1
+    if (allowBroadMatchWithoutItemQuantity && canTrustCandidatePortion(resolvedItemQuantity, broadServingQuantity, broadMatch)) {
+      const ratio = resolvedItemQuantity && broadServingQuantity ? scaleFromPortions(resolvedItemQuantity, broadServingQuantity) : 1
       return {
         macros: scaleNutrition(broadMatch, ratio || 1),
         source: String(broadMatch.source || "").trim() || "Deterministic nutrition estimate",
         source_type: String(broadMatch.source_type || "estimated_internal_profile").trim() || "estimated_internal_profile",
         matched_food_name: String(broadMatch.name || "").trim() || String(item.label || item.baseName || "").trim(),
         estimated: isEstimatedNutritionSourceType(broadMatch.source_type),
+        resolved_quantity: Boolean(resolvedItemQuantity),
       }
     }
   }
@@ -368,6 +384,7 @@ function estimateItemMacroDetails(item, candidateFoodMatches = {}) {
     source_type: "estimated_internal_profile",
     matched_food_name: String(item.label || item.baseName || "").trim() || "Estimated food",
     estimated: true,
+    resolved_quantity: Boolean(itemQuantity),
   }
 }
 
@@ -415,7 +432,7 @@ export function estimateMealFromSession(mealSession, candidateFoodMatches = {}) 
 
   const breakdown = items.map((item) => {
     const details = estimateItemMacroDetails(item, candidateFoodMatches)
-    const assumedServing = !normalizeItemQuantity(item.quantity)
+    const assumedServing = !details.resolved_quantity
     return {
       name: String(item.label || item.baseName || "").trim() || "Item",
       quantity: typeof item.quantity === "string"

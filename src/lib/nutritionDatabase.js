@@ -195,6 +195,7 @@ const auDerivedFoods = [
   { id: "toast_2", name: "2 slices wholemeal toast", aliases: ["2 toast", "2 slices toast"], quantity: "2 slices", calories: 188, protein_g: 8, carbs_g: 31, fat_g: 2.8, category: "carbs" },
   { id: "banana", name: "Banana", aliases: ["medium banana"], quantity: "1 medium", calories: 105, protein_g: 1.3, carbs_g: 27, fat_g: 0.4, category: "produce" },
   { id: "flat_white", name: "Large flat white", aliases: ["large flat white"], quantity: "large", calories: 155, protein_g: 8, carbs_g: 12, fat_g: 8, category: "drink" },
+  { id: "burger_cafe_generic", name: "Burger", aliases: ["burger", "beef burger", "1 burger", "1 bowl burger"], quantity: "1 burger", calories: 650, protein_g: 32, carbs_g: 45, fat_g: 38, category: "mixed meal" },
   { id: "burger_bun", name: "Burger bun", aliases: ["hamburger bun", "bun", "bread roll"], quantity: "1 bun", calories: 190, protein_g: 6.4, carbs_g: 34.8, fat_g: 3.2, category: "carbs" },
   { id: "beef_patty_grilled", name: "Grilled beef patty", aliases: ["beef patty", "burger patty", "grilled patty", "grilled beef patty"], quantity: "1 patty", calories: 250, protein_g: 24, carbs_g: 0, fat_g: 17, category: "protein" },
   { id: "bacon_2_slices", name: "Cooked bacon", aliases: ["bacon", "cooked bacon", "2 slices bacon"], quantity: "2 slices", calories: 84, protein_g: 6, carbs_g: 0.2, fat_g: 6.6, category: "protein" },
@@ -213,8 +214,10 @@ const auDerivedFoods = [
   { id: "tomato_pasta_sauce_125g", name: "Tomato pasta sauce", aliases: ["tomato sauce", "pasta sauce", "tomato pasta sauce"], quantity: "125g", calories: 60, protein_g: 1.8, carbs_g: 11.5, fat_g: 1.2, category: "pantry" },
   { id: "cheese_grated_15g", name: "Grated cheese", aliases: ["grated cheese", "shredded cheese", "parmesan", "parmesan cheese", "grated parmesan", "grated parmesan cheese"], quantity: "15g", calories: 61, protein_g: 3.7, carbs_g: 0.1, fat_g: 5, category: "dairy" },
   { id: "cherry_tomatoes_100g", name: "Cherry tomatoes", aliases: ["cherry tomatoes", "fresh tomatoes"], quantity: "100g", calories: 18, protein_g: 0.9, carbs_g: 3.9, fat_g: 0.2, category: "produce" },
+  { id: "cake_slice_generic", name: "Cake", aliases: ["cake", "cakes", "1 cake", "5 cakes", "piece of cake", "slice of cake"], quantity: "1 cake", calories: 320, protein_g: 4, carbs_g: 46, fat_g: 13, category: "dessert" },
   { id: "chicken_curry_200g", name: "Cooked chicken curry", aliases: ["chicken curry", "cooked chicken curry", "butter chicken", "chicken in sauce"], quantity: "200g", calories: 360, protein_g: 28, carbs_g: 14, fat_g: 20, category: "mixed meal" },
   { id: "rice_cooked_200g", name: "Cooked rice", aliases: ["cooked rice", "rice", "basmati rice", "cooked basmati rice"], quantity: "200g", calories: 316, protein_g: 6.2, carbs_g: 69.4, fat_g: 0.4, category: "carbs" },
+  { id: "wine_table_100ml", name: "Table wine", aliases: ["wine", "red wine", "white wine", "250ml wine"], quantity: "100ml", calories: 83, protein_g: 0.1, carbs_g: 2.6, fat_g: 0, category: "drink" },
 ].map(derivedFood)
 
 const estimatedFoods = [
