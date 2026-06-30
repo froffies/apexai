@@ -581,10 +581,22 @@ export default function IngredientMealFinder() {
                         <p className="mt-1 text-sm text-emerald-700">{sourceTypeLabel(food)} - {food.source}</p>
                       </button>
                       <div className="flex gap-2">
-                        <button type="button" onClick={() => toggleFavoriteFood(food)} className={`flex min-h-11 min-w-11 items-center justify-center rounded-lg border ${favorite ? "border-rose-200 bg-rose-50 text-rose-600" : "border-slate-200 bg-white text-slate-400"}`}>
+                        <button
+                          type="button"
+                          aria-label={favorite ? `Remove ${food.name} from favourite foods` : `Add ${food.name} to favourite foods`}
+                          title={favorite ? `Remove ${food.name} from favourite foods` : `Add ${food.name} to favourite foods`}
+                          onClick={() => toggleFavoriteFood(food)}
+                          className={`flex min-h-11 min-w-11 items-center justify-center rounded-lg border ${favorite ? "border-rose-200 bg-rose-50 text-rose-600" : "border-slate-200 bg-white text-slate-400"}`}
+                        >
                           <Heart size={16} className={favorite ? "fill-current" : ""} />
                         </button>
-                        <button type="button" onClick={() => addBuilderFood(food)} className="flex min-h-11 min-w-11 items-center justify-center rounded-lg bg-indigo-600 text-white">
+                        <button
+                          type="button"
+                          aria-label={`Add ${food.name} to meal preview`}
+                          title={`Add ${food.name} to meal preview`}
+                          onClick={() => addBuilderFood(food)}
+                          className="flex min-h-11 min-w-11 items-center justify-center rounded-lg bg-indigo-600 text-white"
+                        >
                           <Plus size={16} />
                         </button>
                       </div>
