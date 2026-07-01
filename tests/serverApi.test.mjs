@@ -180,9 +180,10 @@ test("local API server exposes health, local nutrition, telemetry, and sanitized
   })
   const barramundiResults = await barramundiResponse.json()
   assert.equal(barramundiResponse.status, 200)
-  assert.match(String(barramundiResults.results[0]?.name || ""), /barramundi fillet/i)
-  assert.equal(barramundiResults.results[0]?.source_type, "estimated_internal_profile")
-  assert.match(String(barramundiResults.results[0]?.source || ""), /deterministic food-class estimate/i)
+  assert.match(String(barramundiResults.results[0]?.name || ""), /barramundi/i)
+  assert.match(String(barramundiResults.results[0]?.name || ""), /fillet/i)
+  assert.equal(barramundiResults.results[0]?.source_type, "curated_au_catalogue")
+  assert.match(String(barramundiResults.results[0]?.source || ""), /Australian Food Composition Database|FSANZ/i)
 
   const parmiResponse = await fetch(`http://127.0.0.1:${port}/api/nutrition/search`, {
     method: "POST",
@@ -195,8 +196,8 @@ test("local API server exposes health, local nutrition, telemetry, and sanitized
   const parmiResults = await parmiResponse.json()
   assert.equal(parmiResponse.status, 200)
   assert.match(String(parmiResults.results[0]?.name || ""), /parmi/i)
-  assert.equal(parmiResults.results[0]?.source_type, "estimated_internal_profile")
-  assert.ok(Number(parmiResults.results[0]?.calories || 0) >= 900)
+  assert.equal(parmiResults.results[0]?.source_type, "curated_au_catalogue")
+  assert.equal(Number(parmiResults.results[0]?.calories || 0), 760)
 
   const potatoScallopsResponse = await fetch(`http://127.0.0.1:${port}/api/nutrition/search`, {
     method: "POST",
@@ -1636,9 +1637,10 @@ test("coach food macro questions fall back to deterministic food answers when Op
   const barramundiCoach = await barramundiCoachResponse.json()
   assert.equal(barramundiCoachResponse.status, 200)
   assert.equal(barramundiCoach.actions?.length || 0, 0)
-  assert.match(barramundiCoach.reply, /barramundi fillet/i)
-  assert.match(barramundiCoach.reply, /128 kcal/i)
-  assert.match(barramundiCoach.reply, /deterministic fallback estimate/i)
+  assert.match(barramundiCoach.reply, /barramundi/i)
+  assert.match(barramundiCoach.reply, /fillet/i)
+  assert.match(barramundiCoach.reply, /93 kcal/i)
+  assert.match(barramundiCoach.reply, /verified from curated au reference/i)
 })
 
 test("deterministic coach can combine a clarified meal and a remembered workout from the same mixed thread", async (t) => {

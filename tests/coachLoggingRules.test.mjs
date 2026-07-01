@@ -926,17 +926,18 @@ test("coach logging rules can answer direct food macro questions without persist
   assert.doesNotMatch(reply, /\b(saved|logged|tracked)\b/i)
 })
 
-test("coach logging rules fall back to a deterministic food-class estimate for arbitrary food questions", () => {
+test("coach logging rules answer barramundi macro questions from the curated AU reference", () => {
   const reply = buildDeterministicFoodMacroReply({
     message: "whats the macros for barramundi fillet?",
   })
 
-  assert.match(reply, /barramundi fillet/i)
-  assert.match(reply, /128 kcal/i)
-  assert.match(reply, /24g protein/i)
+  assert.match(reply, /barramundi/i)
+  assert.match(reply, /fillet/i)
+  assert.match(reply, /93 kcal/i)
+  assert.match(reply, /20g protein/i)
   assert.match(reply, /0g carbs/i)
-  assert.match(reply, /3g fat/i)
-  assert.match(reply, /deterministic fallback estimate/i)
+  assert.match(reply, /2g fat/i)
+  assert.match(reply, /verified from curated au reference/i)
   assert.doesNotMatch(reply, /\b(saved|logged|tracked)\b/i)
 })
 

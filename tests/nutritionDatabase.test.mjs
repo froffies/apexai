@@ -166,7 +166,7 @@ test("findBestFoodMatch covers broader common mixed dishes and drinks with deter
   const parmi = findBestFoodMatch("parmi")
   assert.ok(parmi)
   assert.match(String(parmi.name || ""), /parmi|parma|parmigiana/i)
-  assert.equal(parmi.calories, 1050)
+  assert.equal(parmi.calories, 760)
 
   const baconEggRoll = findBestFoodMatch("bacon and egg roll")
   assert.ok(baconEggRoll)
@@ -234,16 +234,17 @@ test("findBestFoodMatch covers broader common mixed dishes and drinks with deter
   assert.equal(pavlova.calories, 320)
 })
 
-test("findBestFoodMatch falls back to a deterministic food-class estimate for unknown foods", () => {
+test("findBestFoodMatch uses a curated AU reference for barramundi fillet", () => {
   const barramundi = findBestFoodMatch("barramundi fillet")
   assert.ok(barramundi)
-  assert.match(String(barramundi.name || ""), /barramundi fillet/i)
-  assert.equal(barramundi.source_type, "estimated_internal_profile")
-  assert.equal(barramundi.source, "ApexAI deterministic food-class estimate")
-  assert.equal(barramundi.calories, 128)
-  assert.equal(barramundi.protein_g, 24)
+  assert.match(String(barramundi.name || ""), /barramundi/i)
+  assert.match(String(barramundi.name || ""), /fillet/i)
+  assert.equal(barramundi.source_type, "curated_au_catalogue")
+  assert.match(String(barramundi.source || ""), /Australian Food Composition Database|FSANZ/i)
+  assert.equal(barramundi.calories, 93)
+  assert.equal(barramundi.protein_g, 20.1)
   assert.equal(barramundi.carbs_g, 0)
-  assert.equal(barramundi.fat_g, 3)
+  assert.equal(barramundi.fat_g, 1.5)
 })
 
 test("findBestFoodMatch fixes long-tail AU/NZ meals and branded products that previously mis-scored or returned nothing", () => {
