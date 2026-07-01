@@ -1190,6 +1190,51 @@ test("normalizeCoachResponse strict AI-first recovers a fresh meal save when the
   assert.equal(payload.reply, "Got it. I've logged your chicken.")
 })
 
+test("normalizeCoachResponse strict AI-first recovers a ready meal save when the AI repeats a stale quantity question", () => {
+  const payload = normalizeCoachResponse({
+    reply: "How much rice was in that bowl? I need the quantity to log it accurately.",
+    actions: [],
+    warnings: [],
+  }, {
+    prompt: "1 bowl",
+    preferAIFirst: true,
+    strictAIFirst: true,
+    mealContext: {
+      readyToLog: true,
+      alreadyLogged: false,
+      suppressed: false,
+      answerOnly: false,
+      clarifyQuestion: "",
+      pendingClarification: null,
+      persistedMealId: "",
+      correctionRequested: false,
+      deleteRequested: false,
+      summary: "1 bowl rice",
+      wantsLogging: true,
+    },
+    canonicalPersistenceActions: [{
+      type: "log_meal",
+      meal_type: "snack",
+      food_name: "1 bowl rice",
+      quantity: "1 meal",
+      calories: 180,
+      protein_g: 12,
+      carbs_g: 18,
+      fat_g: 6,
+      estimated: true,
+      nutrition_source: "Estimated from AI-identified foods and internal AU/NZ nutrition fallbacks (standard serving assumed where quantity was missing)",
+      nutrition_source_type: "estimated_internal_profile",
+      macro_confidence: "low",
+    }],
+  })
+
+  assert.equal(payload.actions.length, 1)
+  assert.equal(payload.actions[0].type, "log_meal")
+  assert.equal(payload.actions[0].food_name, "1 bowl rice")
+  assert.match(payload.reply, /1 bowl rice/i)
+  assert.doesNotMatch(payload.reply, /how much rice was in that bowl/i)
+})
+
 test("normalizeCoachResponse recovers missing lunch action when AI only returned breakfast", () => {
   const payload = normalizeCoachResponse({
     reply: "Logged your breakfast and lunch.",

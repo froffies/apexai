@@ -586,7 +586,7 @@ export function normalizeCoachResponse(value, context = {}) {
     preferAIFirst
     && strictAIFirst
     && originalReply
-    && replyClaimsPersistence(originalReply)
+    && (replyClaimsPersistence(originalReply) || replyLooksQuestionLike)
     && !actions.some(isMealPersistenceAction)
     && !hasValidatedMealPersistence
     && canonicalMealPersistenceActions.length
