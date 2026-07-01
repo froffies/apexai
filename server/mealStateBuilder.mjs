@@ -314,7 +314,7 @@ function isGraphNativeSimpleMixedFoodDrinkStart(currentMessage = "") {
   if (/\b(?:with|without|cooked in|fried in|no sugar|no milk)\b/i.test(normalizedCurrent)) return false
 
   const clauses = splitGraphClauses(analysisText)
-  if (clauses.length < 2 || clauses.length > 3) return false
+  if (clauses.length < 2 || clauses.length > 4) return false
 
   let drinkClauses = 0
   let foodClauses = 0
@@ -353,7 +353,7 @@ function isGraphNativeSimpleFreshMealTurn(currentMessage = "") {
   if (inlineCookingMediumPattern.test(normalizedCurrent)) return false
 
   const clauses = splitGraphClauses(analysisText)
-  if (!clauses.length || clauses.length > 3) return false
+  if (!clauses.length || clauses.length > 4) return false
 
   let simpleClauseCount = 0
   for (const fragment of clauses) {
@@ -726,7 +726,7 @@ function shouldUseLegacy(conversation, currentMessage, existingSession) {
     ["non_graph_complex_pattern", !activeGraphSession && COMPLEX_PATTERN.test(joined) && !graphNativeFriendlyDaypartTurn],
     ["non_graph_multi_assistant_meal_turn", !activeGraphSession && assistantMealTurns > 1],
     ["non_graph_multi_clause", !activeGraphSession && currentClauses.length > 1 && !simpleFoodDrinkStart && !graphNativeFriendlyFreshTurn && !graphNativeFriendlyDaypartTurn && !graphNativeAdditiveFreshTurn && !graphNativeSimpleMixedFoodDrinkStart && !graphNativeSimpleFreshMealTurn],
-    ["non_graph_many_clauses", !activeGraphSession && currentClauses.length > 3],
+    ["non_graph_many_clauses", !activeGraphSession && currentClauses.length > 3 && !graphNativeSimpleMixedFoodDrinkStart && !graphNativeSimpleFreshMealTurn],
     ["graph_session_that_were", activeGraphSession && /\bthat were\b|\bwere just\b/.test(normalizedCurrent)],
     ["graph_session_n_of_the_were", activeGraphSession && /\b\d+\s+of the\b.*\bwere\b/i.test(normalizedCurrent)],
     ["graph_session_rest_were", activeGraphSession && /\b(?:the\s+)?rest\b.*\b(?:were|was)\b/i.test(normalizedCurrent)],

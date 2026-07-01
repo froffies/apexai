@@ -2167,13 +2167,32 @@ test("3-clause measured meal with prior assistant turn stays graph-native", () =
   assert.strictEqual(session?.legacyGateClause ?? "", "", "should not hit any legacy gate clause")
 })
 
-test("4-clause measured meal still goes legacy (over clause limit)", () => {
-  const session = buildMealContext([], "i had 2 eggs, 1 toast, 200g chicken and 300ml milk", null)
-  // 4 clauses is over the safe limit, legacy is acceptable here
-  assert.ok(session?.processingMode === "legacy" || session?.processingMode === "graph_native", "should handle without crash")
-})
-
 test("3-clause meal with time reference still goes legacy", () => {
   const session = buildMealContext([], "i had 2 eggs, 1 toast and 300ml milk yesterday", null)
   assert.notStrictEqual(session?.processingMode, "graph_native", "time reference should still force legacy")
+})
+
+test("4-clause measured meal stays graph-native", () => {
+  const session = buildMealContext([], "i had 2 eggs, 1 toast, 200g chicken and 300ml milk", null)
+  assert.strictEqual(session?.processingMode, "graph_native", "4-clause measured meal should stay graph_native")
+  assert.strictEqual(session?.legacyGateClause ?? "", "", "should not hit any legacy gate clause")
+  assert.match(session?.summary || "", /2 eggs/i)
+  assert.match(session?.summary || "", /1 toast/i)
+  assert.match(session?.summary || "", /200g chicken/i)
+  assert.match(session?.summary || "", /300ml milk/i)
+})
+
+test("4-clause mixed food and drink start after assistant turn stays graph-native", () => {
+  const history = [
+    { role: "user", content: "how many calories in an apple?" },
+    { role: "assistant", content: "An apple is about 80 calories." },
+  ]
+  const session = buildMealContext(history, "i had 2 eggs, 1 toast, 200g chicken and 300ml milk", null)
+  assert.strictEqual(session?.processingMode, "graph_native", "4-clause fresh meal after assistant turn should stay graph_native")
+  assert.strictEqual(session?.legacyGateClause ?? "", "", "should not hit any legacy gate clause")
+})
+
+test("5-clause measured meal still goes legacy", () => {
+  const session = buildMealContext([], "i had 2 eggs, 1 toast, 200g chicken, 300ml milk and 1 coffee", null)
+  assert.notStrictEqual(session?.processingMode, "graph_native", "5-clause meal should still force legacy")
 })
