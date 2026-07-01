@@ -363,7 +363,6 @@ function isGraphNativeSimpleFreshMealTurn(currentMessage = "") {
     if (TIME_REFERENCE_PATTERN.test(normalizedFragment) || SAME_REFERENCE_PATTERN.test(normalizedFragment)) return false
     if (/\b(?:with|without|cooked in|fried in|no sugar|no milk)\b/i.test(normalizedFragment)) return false
     if (inlineCookingMediumPattern.test(normalizedFragment)) return false
-    if (stripMealTypePhrase(fragment).explicitMealType) return false
 
     const quantity = extractQuantity(fragment) || extractEmbeddedQuantity(fragment)
     const baseName = canonicalBaseName(baseNameFromText(fragment))
@@ -501,6 +500,23 @@ function isGraphNativeImplicitMeasuredTurn(conversation = [], currentMessage = "
   if (COMPLEX_PATTERN.test(normalizedCurrent)) return false
   if (splitGraphClauses(currentMessage).length !== 1) return false
   return isSimpleMeasuredMealFragment(currentMessage)
+}
+
+function isGraphNativeBareImplicitFoodTurn(conversation = [], currentMessage = "", existingSession = null) {
+  const normalizedCurrent = cleanText(currentMessage)
+  if (existingSession?.active || existingSession?.persisted) return false
+  if (safeArray(conversation, 4).length > 1) return false
+  if (MEAL_START_PATTERN.test(normalizedCurrent)) return false
+  if (detectQuestionOnlyTurn(normalizedCurrent)) return false
+  if (TIME_REFERENCE_PATTERN.test(normalizedCurrent)) return false
+  if (CORRECTION_PREFIX.test(normalizedCurrent) || INLINE_CORRECTION_PATTERN.test(normalizedCurrent)) return false
+  if (PACKAGED_UNIT_PATTERN.test(normalizedCurrent)) return false
+  if (isWorkoutish(normalizedCurrent)) return false
+  if (COMPLEX_PATTERN.test(normalizedCurrent)) return false
+  if (SAME_REFERENCE_PATTERN.test(normalizedCurrent)) return false
+  if (/\b(?:that|it|this|same|rest|the)\b/i.test(normalizedCurrent)) return false
+  if (splitGraphClauses(currentMessage).length !== 1) return false
+  return looksFoodish(normalizedCurrent) || mentionsDrink(normalizedCurrent) || isSimpleMeasuredMealFragment(currentMessage)
 }
 
 function isGraphNativeFriendlyDaypartTurn(conversation = [], currentMessage = "", existingSession = null) {
@@ -697,7 +713,7 @@ function shouldUseLegacy(conversation, currentMessage, existingSession) {
     ["delete_requested", existingSession?.deleteRequested],
     ["non_graph_assistant_turn_present", !activeGraphSession && conversation.some((entry) => entry.role === "assistant") && !graphNativeFriendlyPersistedFollowUp && !graphNativeFriendlyDrinkStart && !graphNativeSimpleMeasuredFollowUp && !graphNativeSimpleMixedFoodDrinkStart && !graphNativeFreshMealAfterAssistantTurn && !graphNativeClarificationReply],
     ["non_graph_multi_user_turn", !activeGraphSession && conversation.filter((entry) => entry.role === "user").length > 1 && !graphNativeFriendlyPersistedFollowUp && !graphNativeFriendlyDrinkStart && !graphNativeSimpleMixedFoodDrinkStart && !graphNativeFreshMealAfterAssistantTurn && !graphNativeClarificationReply],
-    ["non_graph_not_meal_start", !activeGraphSession && !MEAL_START_PATTERN.test(cleanText(currentMessage)) && !implicitGraphNativeTurn],
+    ["non_graph_not_meal_start", !activeGraphSession && !MEAL_START_PATTERN.test(cleanText(currentMessage)) && !implicitGraphNativeTurn && !isGraphNativeBareImplicitFoodTurn(conversation, currentMessage, existingSession)],
     ["time_reference", TIME_REFERENCE_PATTERN.test(cleanText(currentMessage))],
     ["inline_correction", INLINE_CORRECTION_PATTERN.test(cleanText(currentMessage))],
     ["packaged_unit", PACKAGED_UNIT_PATTERN.test(cleanText(currentMessage))],
